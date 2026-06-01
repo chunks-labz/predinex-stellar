@@ -12,7 +12,7 @@ Only these `NEXT_PUBLIC_*` keys are allowed in client source:
 - `NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER`
 - `NEXT_PUBLIC_NETWORK`
 - `NEXT_PUBLIC_SOROBAN_CONTRACT_ID`
-- `NEXT_PUBLIC_STACKS_API_URL`
+- `NEXT_PUBLIC_SOROBAN_RPC_URL`
 - `NEXT_PUBLIC_TOKEN_NAME`
 - `NEXT_PUBLIC_TOKEN_SYMBOL`
 - `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
@@ -40,4 +40,3 @@ Examples:
 - `app/lib/env-boundary.ts` is the single allowlist for client env usage.
 - `tests/lib/env-boundary.test.ts` scans `app/` and `lib/` source and fails if a non-allowlisted key is accessed through `process.env`.
 - The test suite also includes a controlled negative test to verify server-only key exposure is rejected.
-

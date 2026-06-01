@@ -3,8 +3,6 @@
  * Provides helper functions for contract interactions
  */
 
-import { uintCV, principalCV, stringAsciiCV } from "@stacks/transactions";
-
 /**
  * Convert STX amount to microSTX (multiply by 1,000,000)
  * @param stxAmount Amount in STX
