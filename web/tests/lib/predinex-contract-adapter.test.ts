@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as StacksConnect from '@stacks/connect';
+import type { Finished } from '@stacks/connect';
+import { PostConditionMode } from '@stacks/transactions';
 import * as AppKitTx from '../../lib/appkit-transactions';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
-
-vi.mock('@stacks/connect', () => ({
-  openContractCall: vi.fn(() => Promise.resolve()),
-}));
 
 vi.mock('../../lib/appkit-transactions', () => ({
   callContract: vi.fn(() => Promise.resolve()),
@@ -32,17 +29,44 @@ describe('predinexContract adapter', () => {
     vi.clearAllMocks();
   });
 
-  it('placeBet forwards to openContractCall with place-bet and pool args', async () => {
+  it('placeBet forwards to callContract with place-bet and Deny mode', async () => {
     await predinexContract.placeBet({
       poolId: 3,
       outcome: 1,
       amountMicroStx: 2_000_000,
     });
-    expect(StacksConnect.openContractCall).toHaveBeenCalledWith(
+    expect(AppKitTx.callContract).toHaveBeenCalledWith(
       expect.objectContaining({
         contractAddress: 'ST1TEST',
         contractName: 'predinex-pool',
         functionName: 'place-bet',
+        network: 'testnet',
+        postConditionMode: PostConditionMode.Deny,
+      })
+    );
+  });
+
+  it('placeBet forwards custom postConditions to the shared helper', async () => {
+    const postConditions = [
+      {
+        type: 'stx-postcondition' as const,
+        address: 'ST1TEST',
+        condition: 'lte' as const,
+        amount: '2000000',
+      },
+    ];
+
+    await predinexContract.placeBet({
+      poolId: 3,
+      outcome: 1,
+      amountMicroStx: 2_000_000,
+      postConditions,
+    });
+
+    expect(AppKitTx.callContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        postConditions,
+        postConditionMode: PostConditionMode.Deny,
       })
     );
   });
@@ -53,6 +77,7 @@ describe('predinexContract adapter', () => {
       expect.objectContaining({
         functionName: 'claim-winnings',
         network: 'testnet',
+        postConditionMode: PostConditionMode.Deny,
       })
     );
   });
@@ -73,14 +98,16 @@ describe('predinexContract adapter', () => {
       durationSeconds: 86400,
     };
 
-    it('J1: createMarket calls openContractCall with create-pool function', async () => {
+    it('J1: createMarket calls callContract with create-pool function', async () => {
       await predinexContract.createMarket(validMarketParams);
 
-      expect(StacksConnect.openContractCall).toHaveBeenCalledWith(
+      expect(AppKitTx.callContract).toHaveBeenCalledWith(
         expect.objectContaining({
           contractAddress: 'ST1TEST',
           contractName: 'predinex-pool',
           functionName: 'create-pool',
+          network: 'testnet',
+          postConditionMode: PostConditionMode.Deny,
         })
       );
     });
@@ -88,8 +115,11 @@ describe('predinexContract adapter', () => {
     it('J2: createMarket passes correct function arguments', async () => {
       await predinexContract.createMarket(validMarketParams);
 
-      const mockCall = vi.mocked(StacksConnect.openContractCall);
-      const callArgs = mockCall.mock.calls[0][0] as { functionArgs: unknown[] };
+      const mockCall = vi.mocked(AppKitTx.callContract);
+      const callArgs = mockCall.mock.calls[0][0] as {
+        functionArgs: unknown[];
+        functionName: string;
+      };
       expect(callArgs.functionArgs).toHaveLength(5);
       expect(callArgs.functionName).toBe('create-pool');
     });
@@ -101,8 +131,7 @@ describe('predinexContract adapter', () => {
         onCancel,
       });
 
-      const mockCall = vi.mocked(StacksConnect.openContractCall);
-      mockCall.mock.calls[0][0];
+      const mockCall = vi.mocked(AppKitTx.callContract);
       const callArgs = mockCall.mock.calls[0][0] as { onCancel?: () => void };
       expect(callArgs.onCancel).toBe(onCancel);
     });
@@ -114,13 +143,13 @@ describe('predinexContract adapter', () => {
         onFinish,
       });
 
-      const mockCall = vi.mocked(StacksConnect.openContractCall);
-      const callArgs = mockCall.mock.calls[0][0] as { onFinish?: () => void };
+      const mockCall = vi.mocked(AppKitTx.callContract);
+      const callArgs = mockCall.mock.calls[0][0] as { onFinish?: Finished };
       expect(callArgs.onFinish).toBe(onFinish);
     });
 
     it('J5: rejects when wallet signature is rejected by user', async () => {
-      vi.mocked(StacksConnect.openContractCall).mockRejectedValueOnce(
+      vi.mocked(AppKitTx.callContract).mockRejectedValueOnce(
         new Error('User cancelled')
       );
 
@@ -130,7 +159,7 @@ describe('predinexContract adapter', () => {
     });
 
     it('J6: handles contract validation errors gracefully', async () => {
-      vi.mocked(StacksConnect.openContractCall).mockRejectedValueOnce(
+      vi.mocked(AppKitTx.callContract).mockRejectedValueOnce(
         new Error('Contract error: Duration below minimum')
       );
 

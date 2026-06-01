@@ -1,7 +1,7 @@
 import { openContractCall } from '@stacks/connect';
 import type { Finished } from '@stacks/connect';
 import { STACKS_MAINNET, STACKS_TESTNET } from '@stacks/network';
-import { PostConditionMode, ClarityValue } from '@stacks/transactions';
+import { PostConditionMode, type ClarityValue, type PostCondition } from '@stacks/transactions';
 
 export async function callContract(params: {
   contractAddress: string;
@@ -9,6 +9,8 @@ export async function callContract(params: {
   functionName: string;
   functionArgs: ClarityValue[];
   network?: 'mainnet' | 'testnet';
+  postConditions?: PostCondition[];
+  postConditionMode?: PostConditionMode;
   onFinish?: Finished;
   onCancel?: () => void;
 }) {
@@ -20,7 +22,8 @@ export async function callContract(params: {
     contractName: params.contractName,
     functionName: params.functionName,
     functionArgs: params.functionArgs,
-    postConditionMode: PostConditionMode.Allow,
+    postConditionMode: params.postConditionMode ?? PostConditionMode.Deny,
+    ...(params.postConditions?.length ? { postConditions: params.postConditions } : {}),
     onFinish: params.onFinish,
     onCancel: params.onCancel,
   });
