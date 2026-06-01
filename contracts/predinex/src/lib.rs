@@ -2080,6 +2080,12 @@ impl PredinexContract {
     pub fn get_scheduled_pools(env: Env, start_id: u32, count: u32) -> Vec<ScheduledPool> {
         let mut scheduled = Vec::new(&env);
         let max_id = Self::get_pool_count(env.clone());
+
+        // Early return if start_id is beyond the pool count to prevent overflow
+        if start_id >= max_id {
+            return scheduled;
+        }
+
         let effective_count = if count > 100 { 100 } else { count };
         for i in 0..effective_count {
             let pool_id = start_id + i;
@@ -4375,6 +4381,11 @@ impl PredinexContract {
         let mut pools = Vec::new(&env);
         let max_id = Self::get_pool_count(env.clone());
 
+        // Early return if start_id is beyond the pool count to prevent overflow
+        if start_id >= max_id {
+            return pools;
+        }
+
         let effective_count = if count > 100 { 100 } else { count };
 
         for i in 0..effective_count {
@@ -4772,6 +4783,12 @@ impl PredinexContract {
     ) -> Vec<UserPoolPosition> {
         let mut result = Vec::new(&env);
         let max_id = Self::get_pool_count(env.clone());
+
+        // Early return if start_id is beyond the pool count to prevent overflow
+        if start_id >= max_id {
+            return result;
+        }
+
         let effective_count = if count > 100 { 100 } else { count };
 
         for i in 0..effective_count {
