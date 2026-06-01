@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme/ThemeProvider";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -45,7 +46,9 @@ export default function RootLayout({
           dark:bg-slate-950 dark:text-slate-100
         `}
       >
-        <ThemeProvider>{children}</ThemeProvider>
+        <ErrorBoundary>
+          <ThemeProvider>{children}</ThemeProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );
