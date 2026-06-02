@@ -37,8 +37,22 @@ export interface StellarCaipNetwork {
   };
 }
 
-export const WALLETCONNECT_PROJECT_ID =
-  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'cbb72cc85764d1cd3b664790089a8fab';
+function requireWalletConnectProjectId(): string {
+  const raw = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+  const value = typeof raw === 'string' ? raw.trim() : '';
+
+  if (!value) {
+    throw new Error(
+      'Missing required environment variable: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID. '
+        + 'Set it in your environment (e.g. .env.local) before starting/building the web app.'
+    );
+  }
+
+  return value;
+}
+
+export const WALLETCONNECT_PROJECT_ID = requireWalletConnectProjectId();
+
 
 export const stellarNetworks: Record<StellarNetworkKey, StellarCaipNetwork> = {
   mainnet: {
