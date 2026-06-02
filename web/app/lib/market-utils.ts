@@ -28,12 +28,12 @@ export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number
  * @returns Object with oddsA and oddsB (defaulting to 50/50 for empty pools)
  */
 export function calculateOdds(totalA: bigint, totalB: bigint): { oddsA: number; oddsB: number } {
-  const total = Number(totalA + totalB);
-  if (total === 0) return { oddsA: 50, oddsB: 50 };
+  const total = totalA + totalB;
+  if (total === BigInt(0)) return { oddsA: 50, oddsB: 50 };
 
   return {
-    oddsA: Math.round((Number(totalA) / total) * 100),
-    oddsB: Math.round((Number(totalB) / total) * 100)
+    oddsA: Math.round((Number(totalA) / Number(total)) * 100),
+    oddsB: Math.round((Number(totalB) / Number(total)) * 100)
   };
 }
 

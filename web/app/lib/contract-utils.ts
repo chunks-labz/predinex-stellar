@@ -3,15 +3,13 @@
  * Provides helper functions for contract interactions
  */
 
-import { uintCV, principalCV, stringAsciiCV } from "@stacks/transactions";
-
 /**
  * Convert STX amount to microSTX (multiply by 1,000,000)
  * @param stxAmount Amount in STX
  * @returns Amount in microSTX
  */
-export function stxToMicroStx(stxAmount: number): number {
-  return Math.floor(stxAmount * 1_000_000);
+export function stxToMicroStx(stxAmount: bigint): bigint {
+  return stxAmount * BigInt(1_000_000);
 }
 
 /**
@@ -19,8 +17,8 @@ export function stxToMicroStx(stxAmount: number): number {
  * @param microStxAmount Amount in microSTX
  * @returns Amount in STX
  */
-export function microStxToStx(microStxAmount: number): number {
-  return microStxAmount / 1_000_000;
+export function microStxToStx(microStxAmount: bigint): number {
+  return Number(microStxAmount) / 1_000_000;
 }
 
 /**
@@ -28,7 +26,7 @@ export function microStxToStx(microStxAmount: number): number {
  * @param microStxAmount Amount in microSTX
  * @returns Formatted string
  */
-export function formatStxAmount(microStxAmount: number): string {
+export function formatStxAmount(microStxAmount: bigint): string {
   const stxAmount = microStxToStx(microStxAmount);
   return stxAmount.toLocaleString('en-US', {
     minimumFractionDigits: 2,

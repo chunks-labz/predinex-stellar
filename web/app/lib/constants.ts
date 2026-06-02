@@ -11,8 +11,8 @@ export type NetworkName = 'mainnet' | 'testnet';
 export const DEFAULT_NETWORK: NetworkName =
     (process.env.NEXT_PUBLIC_NETWORK as NetworkName) || 'testnet';
 
-export const STACKS_API_BASE_URL: string =
-    process.env.NEXT_PUBLIC_STACKS_API_URL || 'https://api.testnet.hiro.so';
+export const SOROBAN_RPC_URL: string =
+    process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 
 export const CONTRACT_ADDRESS: string =
     process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || 'SP2WWKKF25SED3K5P6ETY7MDDNBQH50GPSP8EJM8N';
@@ -25,18 +25,18 @@ export const CONTRACT_NAME: string =
 export const MAX_POOL_DURATION_SECONDS = 1_000_000;
 
 export interface NetworkConfig {
-    apiUrl: string;
+    rpcUrl: string;
     explorerUrl: string;
 }
 
 export const NETWORK_CONFIG: Record<NetworkName, NetworkConfig> = {
     mainnet: {
-        apiUrl: 'https://api.hiro.so',
-        explorerUrl: 'https://explorer.hiro.so',
+        rpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
+        explorerUrl: 'https://stellar.expert/explorer/public',
     },
     testnet: {
-        apiUrl: 'https://api.testnet.hiro.so',
-        explorerUrl: 'https://explorer.hiro.so/?chain=testnet',
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        explorerUrl: 'https://stellar.expert/explorer/testnet',
     },
 };
 
@@ -74,4 +74,3 @@ export const ANIMATION_DURATION = {
   base: 'duration-300',
   slow: 'duration-500',
 } as const;
-

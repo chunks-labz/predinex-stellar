@@ -1,22 +1,21 @@
 export const APP_NAME = "Predinex";
 export const REWARDS_VERSION = "v1.0";
 
-export const CONTRACT_ADDRESS = "SP2W_EJMBN";
-export const CONTRACT_NAME = "predinex-pool-1771470759824";
+export const SOROBAN_CONTRACT_ID = "C0000000000000000000000000000000000000000000000000000000";
 
 export const DEFAULT_NETWORK = 'mainnet';
 
-export const STACKS_API_BASE_URL = 'https://api.mainnet.hiro.so';
+export const SOROBAN_RPC_BASE_URL = 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc';
 
 export const NETWORK_CONFIG = {
   mainnet: {
-    stacksApiUrl: 'https://api.mainnet.hiro.so',
-    explorerUrl: 'https://stellar.expert/explorer/mainnet/tx',
+    sorobanRpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
+    explorerUrl: 'https://stellar.expert/explorer/public',
     network: 'mainnet',
   },
   testnet: {
-    stacksApiUrl: 'https://api.testnet.hiro.so',
-    explorerUrl: 'https://stellar.expert/explorer/testnet/tx',
+    sorobanRpcUrl: 'https://soroban-testnet.stellar.org',
+    explorerUrl: 'https://stellar.expert/explorer/testnet',
     network: 'testnet',
   },
 } as const;

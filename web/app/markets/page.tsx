@@ -10,6 +10,7 @@ import Pagination from "../components/Pagination";
 import { marketFiltersToParams, parseMarketFiltersFromParams } from "../lib/market-filtering";
 import type { MarketFilters } from "../lib/market-types";
 import { useMarketDiscovery } from "../lib/hooks/useMarketDiscovery";
+import { useFilterPresets } from "../lib/hooks/useFilterPresets";
 import RouteErrorBoundary from "../../components/RouteErrorBoundary";
 import CompareBadge from "../components/CompareBadge";
 
@@ -47,6 +48,7 @@ function MarketsContent() {
     setMaxVolume,
     setTimeRange,
     setSortBy,
+    setFilters,
     resetFilters,
     setPage,
     retry,
@@ -57,6 +59,8 @@ function MarketsContent() {
     externalFiltersKey: queryKey,
     onFiltersChange: syncFiltersToUrl,
   });
+
+  const { presets, savePreset, deletePreset, canSave, maxPresets } = useFilterPresets();
 
   // Calculate filter counts for display
   const filterCounts = useMemo(() => {
@@ -111,6 +115,12 @@ function MarketsContent() {
             onSortChange={setSortBy}
             onReset={resetFilters}
             hasActiveFilters={hasActiveFilters}
+            presets={presets}
+            canSavePreset={canSave}
+            maxPresets={maxPresets}
+            onApplyPreset={setFilters}
+            onSavePreset={savePreset}
+            onDeletePreset={deletePreset}
           />
         </div>
 

@@ -10,26 +10,26 @@ export const WALLETCONNECT_CONFIG = {
   // App metadata for wallet display
   metadata: {
     name: 'Predinex',
-    description: 'Decentralized Prediction Market on Stacks',
+    description: 'Decentralized Prediction Market on Stellar',
     url: process.env.NEXT_PUBLIC_APP_URL || 'https://predinex.app',
     icons: ['https://predinex.app/logo.png'],
   },
 
-  // Supported Stacks networks
+  // Supported Stellar/Soroban networks
   networks: {
     mainnet: {
-      chainId: 'stacks:mainnet',
-      name: 'Stacks Mainnet',
-      rpcUrl: 'https://api.mainnet.hiro.so',
-      explorerUrl: 'https://explorer.hiro.so',
-      coreApiUrl: 'https://api.mainnet.hiro.so',
+      chainId: 'stellar:mainnet',
+      name: 'Stellar Mainnet',
+      rpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
+      explorerUrl: 'https://stellar.expert/explorer/public',
+      coreApiUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
     },
     testnet: {
-      chainId: 'stacks:testnet', 
-      name: 'Stacks Testnet',
-      rpcUrl: 'https://api.testnet.hiro.so',
-      explorerUrl: 'https://explorer.hiro.so?chain=testnet',
-      coreApiUrl: 'https://api.testnet.hiro.so',
+      chainId: 'stellar:testnet',
+      name: 'Stellar Testnet',
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      explorerUrl: 'https://stellar.expert/explorer/testnet',
+      coreApiUrl: 'https://soroban-testnet.stellar.org',
     },
   },
 

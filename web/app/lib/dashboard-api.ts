@@ -16,6 +16,7 @@ import {
   calculateBetProfitLoss
 } from "./dashboard-utils";
 import { getRuntimeConfig } from "./runtime-config";
+import { getCurrentBlockHeight } from "./market-utils";
 
 function getStacksNetwork(): StacksNetwork {
   const cfg = getRuntimeConfig();
@@ -47,11 +48,9 @@ export async function getUserBets(userAddress: string): Promise<UserBet[]> {
         const betData = cvToValue(result, true);
         if (betData && (betData['amount-a'] > 0 || betData['amount-b'] > 0)) {
           // User has bets in this pool
-          const amountA = Number(betData['amount-a'] || 0);
-          const amountB = Number(betData['amount-b'] || 0);
-          const totalBet = Number(betData['total-bet'] || 0);
+          const amountA = BigInt(betData['amount-a'] || 0);
+          const amountB = BigInt(betData['amount-b'] || 0);
           
-          // Determine which outcome was chosen and create bet records
           if (amountA > 0) {
             const bet = await createUserBet(pool, userAddress, 'A', amountA);
             if (bet) userBets.push(bet);
@@ -81,10 +80,10 @@ async function createUserBet(
   pool: PoolData,
   userAddress: string,
   outcome: 'A' | 'B',
-  betAmount: number
+  betAmount: bigint
 ): Promise<UserBet | null> {
   try {
-    const currentBlockHeight = 150000; // Mock current block height
+    const currentBlockHeight = getCurrentBlockHeight();
     
     // Determine market status
     let status: 'active' | 'won' | 'lost' | 'expired' = 'active';
@@ -97,9 +96,9 @@ async function createUserBet(
       
       if (status === 'won') {
         claimableAmount = calculateActualWinnings(
-          betAmount,
-          Number(pool.totalA),
-          Number(pool.totalB),
+          BigInt(betAmount),
+          pool.totalA,
+          pool.totalB,
           outcome,
           winningOutcome
         );
@@ -114,16 +113,16 @@ async function createUserBet(
     
     const potentialWinnings = status === 'active' 
       ? calculatePotentialWinnings(
-          betAmount,
-          Number(pool.totalA),
-          Number(pool.totalB),
+          BigInt(betAmount),
+          pool.totalA,
+          pool.totalB,
           outcome
         )
       : 0;
     
     const currentOdds = calculateCurrentOdds(
-      Number(pool.totalA),
-      Number(pool.totalB),
+      pool.totalA,
+      pool.totalB,
       outcome
     );
     
@@ -162,8 +161,10 @@ async function checkIfClaimed(poolId: number, userAddress: string): Promise<bool
       network,
     });
     
-    // Mock implementation - in real app, would check claims map
-    return false;
+    // After claiming, the contract removes the bet record; absence means claimed
+    const betData = cvToValue(result, true);
+    const hasBet = betData && (betData['amount-a'] > 0 || betData['amount-b'] > 0);
+    return !hasBet;
   } catch (error) {
     return false;
   }
@@ -172,11 +173,11 @@ async function checkIfClaimed(poolId: number, userAddress: string): Promise<bool
 /**
  * Calculate current odds for a specific outcome
  */
-function calculateCurrentOdds(totalA: number, totalB: number, outcome: 'A' | 'B'): number {
-  const total = totalA + totalB;
+function calculateCurrentOdds(totalA: bigint, totalB: bigint, outcome: 'A' | 'B'): number {
+  const total = Number(totalA + totalB);
   if (total === 0) return 50;
-  
-  const outcomeAmount = outcome === 'A' ? totalA : totalB;
+
+  const outcomeAmount = outcome === 'A' ? Number(totalA) : Number(totalB);
   return Math.round((outcomeAmount / total) * 100);
 }
 

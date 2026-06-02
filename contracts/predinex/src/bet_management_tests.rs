@@ -11,8 +11,26 @@
 extern crate std;
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String,
+    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String, Val,
 };
+
+// ── Event helpers ─────────────────────────────────────────────────────────────
+
+fn xdr_topic_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent, i: usize) -> Val {
+    match &event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => {
+            <Val as soroban_sdk::TryFromVal<Env, soroban_sdk::xdr::ScVal>>::try_from_val(env, &v0.topics[i]).unwrap()
+        }
+    }
+}
+
+fn xdr_data_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent) -> Val {
+    match &event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => {
+            <Val as soroban_sdk::TryFromVal<Env, soroban_sdk::xdr::ScVal>>::try_from_val(env, &v0.data).unwrap()
+        }
+    }
+}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -67,13 +85,12 @@ fn make_pool_bm(t: &BmEnv) -> (u32, Address) {
 /// Find the most recent `bet_cancelled` event and decode its payload.
 fn last_bet_cancelled(env: &Env) -> (u32, Address, BetCancelledEvent) {
     let events = env.events().all();
-    for i in (0..events.len()).rev() {
-        let event = events.get(i).unwrap();
-        let topic0: Symbol = soroban_sdk::FromVal::from_val(env, &event.1.get(0).unwrap());
+    for event in events.events().iter().rev() {
+        let topic0: Symbol = soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 0)).unwrap();
         if topic0 == Symbol::new(env, "bet_cancelled") {
-            let pool_id: u32 = soroban_sdk::FromVal::from_val(env, &event.1.get(2).unwrap());
-            let user: Address = soroban_sdk::FromVal::from_val(env, &event.1.get(3).unwrap());
-            let payload: BetCancelledEvent = soroban_sdk::FromVal::from_val(env, &event.2);
+            let pool_id: u32 = soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 2)).unwrap();
+            let user: Address = soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 3)).unwrap();
+            let payload: BetCancelledEvent = soroban_sdk::TryFromVal::try_from_val(env, &xdr_data_val(env, event)).unwrap();
             return (pool_id, user, payload);
         }
     }
@@ -543,13 +560,13 @@ fn e8_duration_extended_event_payload() {
     let new_expiry = t.client.extend_pool_duration(&creator, &pool_id, &900u64);
 
     let events = t.env.events().all();
-    let last = events.last().expect("must emit an event");
-    let topic0: Symbol = soroban_sdk::FromVal::from_val(&t.env, &last.1.get(0).unwrap());
-    let topic_pool: u32 = soroban_sdk::FromVal::from_val(&t.env, &last.1.get(2).unwrap());
+    let last = events.events().last().expect("must emit an event");
+    let topic0: Symbol = soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_topic_val(&t.env, last, 0)).unwrap();
+    let topic_pool: u32 = soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_topic_val(&t.env, last, 2)).unwrap();
     assert_eq!(topic0, Symbol::new(&t.env, "pool_duration_extended"));
     assert_eq!(topic_pool, pool_id);
 
-    let payload: PoolDurationExtendedEvent = soroban_sdk::FromVal::from_val(&t.env, &last.2);
+    let payload: PoolDurationExtendedEvent = soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_data_val(&t.env, last)).unwrap();
     assert_eq!(payload.creator, creator);
     assert_eq!(payload.new_expiry, new_expiry);
 }

@@ -1,10 +1,9 @@
 /**
  * Write-side adapter: Stacks Connect contract calls for the Predinex pool contract.
- * Keeps `openContractCall`, Clarity encoding, and contract identity out of UI components.
+ * Keeps wallet prompt details, Clarity encoding, and contract identity out of UI components.
  */
-import { openContractCall } from '@stacks/connect';
 import type { Finished } from '@stacks/connect';
-import { uintCV, stringAsciiCV } from '@stacks/transactions';
+import { PostConditionMode, uintCV, stringAsciiCV, type PostCondition } from '@stacks/transactions';
 import { getRuntimeConfig } from '../runtime-config';
 import { callContract } from '../../../lib/appkit-transactions';
 import { SorobanTransactionService, TxStage } from '../soroban-transaction-service';
@@ -28,15 +27,21 @@ export const predinexContract = {
     poolId: number;
     outcome: number;
     amountMicroStx: number;
+    postConditions?: PostCondition[];
+    postConditionMode?: PostConditionMode;
     onFinish?: Finished;
     onCancel?: () => void;
   }): Promise<void> {
-    const { contract } = getRuntimeConfig();
-    await openContractCall({
+    const cfg = getRuntimeConfig();
+    const { contract } = cfg;
+    await callContract({
       contractAddress: contract.address,
       contractName: contract.name,
       functionName: 'place-bet',
       functionArgs: [uintCV(params.poolId), uintCV(params.outcome), uintCV(params.amountMicroStx)],
+      network: cfg.network,
+      postConditions: params.postConditions,
+      postConditionMode: params.postConditionMode ?? PostConditionMode.Deny,
       onFinish: params.onFinish,
       onCancel: params.onCancel,
     });
@@ -58,6 +63,7 @@ export const predinexContract = {
       functionName: 'claim-winnings',
       functionArgs: [uintCV(params.poolId)],
       network: cfg.network,
+      postConditionMode: PostConditionMode.Deny,
       onFinish: params.onFinish,
       onCancel: params.onCancel,
     });
@@ -72,11 +78,14 @@ export const predinexContract = {
     outcomeA: string;
     outcomeB: string;
     durationSeconds: number;
+    postConditions?: PostCondition[];
+    postConditionMode?: PostConditionMode;
     onFinish?: Finished;
     onCancel?: () => void;
   }): Promise<void> {
-    const { contract } = getRuntimeConfig();
-    await openContractCall({
+    const cfg = getRuntimeConfig();
+    const { contract } = cfg;
+    await callContract({
       contractAddress: contract.address,
       contractName: contract.name,
       functionName: 'create-pool',
@@ -87,6 +96,9 @@ export const predinexContract = {
         stringAsciiCV(params.outcomeB),
         uintCV(params.durationSeconds),
       ],
+      network: cfg.network,
+      postConditions: params.postConditions,
+      postConditionMode: params.postConditionMode ?? PostConditionMode.Deny,
       onFinish: params.onFinish,
       onCancel: params.onCancel,
     });

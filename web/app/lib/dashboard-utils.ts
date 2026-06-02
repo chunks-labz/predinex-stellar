@@ -54,24 +54,24 @@ export function calculatePortfolio(bets: UserBet[]): UserPortfolio {
  * @returns The estimated profit (total payout minus bet amount)
  */
 export function calculatePotentialWinnings(
-  betAmount: number,
-  totalPoolA: number,
-  totalPoolB: number,
+  betAmount: bigint,
+  totalPoolA: bigint,
+  totalPoolB: bigint,
   chosenOutcome: 'A' | 'B'
 ): number {
-  const totalPool = totalPoolA + totalPoolB;
-  if (totalPool === 0) return betAmount; // No other bets yet
+  const totalPool = Number(totalPoolA + totalPoolB);
+  if (totalPool === 0) return Number(betAmount);
 
-  const winningPool = chosenOutcome === 'A' ? totalPoolA : totalPoolB;
-  const losingPool = chosenOutcome === 'A' ? totalPoolB : totalPoolA;
+  const winningPool = chosenOutcome === 'A' ? Number(totalPoolA) : Number(totalPoolB);
+  const losingPool = chosenOutcome === 'A' ? Number(totalPoolB) : Number(totalPoolA);
 
-  if (winningPool === 0) return totalPool; // Only bet on this outcome
+  if (winningPool === 0) return totalPool;
 
-  // Calculate share of losing pool based on proportion of winning pool
-  const userShare = betAmount / (winningPool + betAmount);
-  const winnings = betAmount + (losingPool * userShare);
+  const b = Number(betAmount);
+  const userShare = b / (winningPool + b);
+  const winnings = b + (losingPool * userShare);
 
-  return Math.max(0, winnings - betAmount); // Potential profit
+  return Math.max(0, winnings - b);
 }
 
 /**
@@ -85,21 +85,21 @@ export function calculatePotentialWinnings(
  * @returns Total STX to be returned (principal + profit) or 0 if lost
  */
 export function calculateActualWinnings(
-  betAmount: number,
-  totalPoolA: number,
-  totalPoolB: number,
+  betAmount: bigint,
+  totalPoolA: bigint,
+  totalPoolB: bigint,
   chosenOutcome: 'A' | 'B',
   winningOutcome: 'A' | 'B'
 ): number {
-  if (chosenOutcome !== winningOutcome) return 0; // Lost bet
+  if (chosenOutcome !== winningOutcome) return 0;
 
-  const totalPool = totalPoolA + totalPoolB;
-  const winningPool = winningOutcome === 'A' ? totalPoolA : totalPoolB;
+  const totalPool = Number(totalPoolA + totalPoolB);
+  const winningPool = winningOutcome === 'A' ? Number(totalPoolA) : Number(totalPoolB);
 
-  if (winningPool === 0) return 0; // Should not happen
+  if (winningPool === 0) return 0;
 
-  // Calculate proportional share of total pool
-  const userShare = betAmount / winningPool;
+  const b = Number(betAmount);
+  const userShare = b / winningPool;
   const totalWinnings = totalPool * userShare;
 
   return Math.max(0, totalWinnings);
