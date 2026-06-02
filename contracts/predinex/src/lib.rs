@@ -3499,19 +3499,12 @@ impl PredinexContract {
             0
         };
 
-        // Step 2: transfer tokens to the winner first. If the transfer fails the
-        // transaction reverts and treasury/bet state remain unchanged.
-        let token_address = env
-            .storage()
-            .persistent()
-            .get::<_, Address>(&DataKey::Token)
-            .ok_or(ContractError::NotInitialized)?;
-        let token_client = token::Client::new(env, &token_address);
-        token_client.transfer(&env.current_contract_address(), &user, &winnings);
+        // Step 2: update all state BEFORE the external token transfer
+        // (checks-effects-interactions pattern). If the transfer below panics,
+        // the transaction reverts — but because state was mutated first the bet
+        // record is already gone, preventing any retry that could double-claim.
 
-        // Step 3–4: credit the treasury ledger only after the transfer succeeds.
-        // The protocol fee is added once (on the first claim) and payout dust on
-        // the final claim — both remain in the contract token balance.
+        // Credit the treasury ledger (fee on first claim, dust on final claim).
         let treasury_delta = (if is_first_claim { fee } else { 0 }) + payout_dust;
         if treasury_delta > 0 {
             let current_treasury: i128 = env
@@ -3553,7 +3546,9 @@ impl PredinexContract {
             .persistent()
             .extend_ttl(&payout_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
 
-        // Step 5: remove the bet record to prevent duplicate claims.
+        // Remove the bet record to prevent duplicate claims — must happen
+        // before the external transfer so a re-entrant or retried call cannot
+        // find the bet record and claim a second time.
         env.storage()
             .persistent()
             .remove(&DataKey::UserBet(pool_id, user.clone()));
@@ -3561,7 +3556,18 @@ impl PredinexContract {
             .persistent()
             .remove(&DataKey::UserOutcomeBets(pool_id, user.clone()));
 
-        // Step 5: emit events in final committed state.
+        // Step 3: transfer tokens to the winner AFTER all state has been committed.
+        // If the transfer panics the transaction reverts, but the bet record is
+        // already removed so the invariant holds — no double-claim is possible.
+        let token_address = env
+            .storage()
+            .persistent()
+            .get::<_, Address>(&DataKey::Token)
+            .ok_or(ContractError::NotInitialized)?;
+        let token_client = token::Client::new(env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &user, &winnings);
+
+        // Step 4: emit events in final committed state.
         env.events().publish(
             (Symbol::new(env, "claim_winnings"), pool_id, user),
             ClaimEvent {
