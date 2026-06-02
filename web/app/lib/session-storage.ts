@@ -1,6 +1,16 @@
 /**
  * Session Storage Service
- * Secure session persistence for wallet connections
+ * Secure session persistence for wallet connections.
+ *
+ * Security model (#501):
+ * - Session data is encrypted at rest using the Web Crypto API (AES-GCM, 256-bit key).
+ * - A per-browser symmetric key is derived via PBKDF2 from a per-session salt and a
+ *   browser-stable "device secret" (a random UUID stored in sessionStorage so it
+ *   survives page reloads but not tab-close). This means the ciphertext stored in
+ *   localStorage cannot be decrypted by a different browser profile or origin.
+ * - On browsers that do not expose window.crypto.subtle (very old or non-HTTPS
+ *   environments), the service falls back to plain JSON storage and logs a warning.
+ *   No fake obfuscation is applied in the fallback path.
  */
 
 import { WalletSession } from './wallet-service';
@@ -11,54 +21,171 @@ export interface StoredSession {
   version: string;
 }
 
+// Serialised envelope written to localStorage.
+interface EncryptedEnvelope {
+  /** base64-encoded AES-GCM ciphertext */
+  ct: string;
+  /** base64-encoded 12-byte IV */
+  iv: string;
+  /** base64-encoded 16-byte PBKDF2 salt */
+  salt: string;
+  /** Schema version so we can migrate in the future */
+  v: 2;
+}
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function toBase64(buf: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+
+function fromBase64(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+/** Returns true when the SubtleCrypto API is available (HTTPS / localhost). */
+function hasCrypto(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.crypto?.subtle?.importKey === 'function'
+  );
+}
+
+/**
+ * Returns (or lazily creates) a stable "device secret" for the current
+ * browsing session. Stored in sessionStorage so it survives page reloads
+ * but is discarded when the tab is closed — limiting the lifetime of any
+ * derived key material.
+ */
+function getDeviceSecret(): string {
+  const KEY = 'predinex_ds';
+  try {
+    let secret = sessionStorage.getItem(KEY);
+    if (!secret) {
+      secret = crypto.randomUUID();
+      sessionStorage.setItem(KEY, secret);
+    }
+    return secret;
+  } catch {
+    // sessionStorage unavailable — use a constant fallback (still better than btoa)
+    return 'predinex-fallback-secret-v1';
+  }
+}
+
+/** Derive an AES-GCM key from the device secret + a random salt via PBKDF2. */
+async function deriveKey(salt: Uint8Array): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const baseKey = await window.crypto.subtle.importKey(
+    'raw',
+    enc.encode(getDeviceSecret()),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+  return window.crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+async function encryptData(plaintext: string): Promise<string> {
+  const enc = new TextEncoder();
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const salt = window.crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKey(salt);
+  const ciphertext = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    enc.encode(plaintext)
+  );
+  const envelope: EncryptedEnvelope = {
+    ct: toBase64(ciphertext),
+    iv: toBase64(iv),
+    salt: toBase64(salt),
+    v: 2,
+  };
+  return JSON.stringify(envelope);
+}
+
+async function decryptData(stored: string): Promise<string> {
+  const envelope: EncryptedEnvelope = JSON.parse(stored);
+  if (envelope.v !== 2) throw new Error('Unknown session envelope version');
+  const iv = fromBase64(envelope.iv);
+  const salt = fromBase64(envelope.salt);
+  const key = await deriveKey(salt);
+  const plaintext = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    fromBase64(envelope.ct)
+  );
+  return new TextDecoder().decode(plaintext);
+}
+
+// ─── service ────────────────────────────────────────────────────────────────
+
 export class SessionStorageService {
   private static readonly STORAGE_KEY = 'predinex_wallet_session';
-  private static readonly STORAGE_VERSION = '1.0.0';
+  private static readonly STORAGE_VERSION = '2.0.0';
   private static readonly SESSION_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
   /**
-   * Store wallet session securely
+   * Store wallet session.
+   * Encrypts with AES-GCM when SubtleCrypto is available;
+   * falls back to plain JSON on non-HTTPS environments (dev / legacy).
    */
-  static storeSession(session: WalletSession): void {
+  static async storeSession(session: WalletSession): Promise<void> {
     try {
-      const storedSession: StoredSession = {
+      const payload: StoredSession = {
         session,
         timestamp: Date.now(),
         version: this.STORAGE_VERSION,
       };
-
-      const encrypted = this.encryptData(JSON.stringify(storedSession));
-      localStorage.setItem(this.STORAGE_KEY, encrypted);
+      const raw = JSON.stringify(payload);
+      const stored = hasCrypto()
+        ? await encryptData(raw)
+        : raw; // plain JSON — no fake obfuscation
+      localStorage.setItem(this.STORAGE_KEY, stored);
     } catch (error) {
-      console.error('Failed to store session:', error);
-      throw new Error('Session storage failed');
+      throw new Error(`Session storage failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   /**
-   * Retrieve wallet session
+   * Retrieve wallet session.
+   * Attempts AES-GCM decryption first; falls back to plain JSON for sessions
+   * written before the v2 upgrade (one-time migration path).
    */
-  static retrieveSession(): WalletSession | null {
+  static async retrieveSession(): Promise<WalletSession | null> {
     try {
       const stored = localStorage.getItem(this.STORAGE_KEY);
       if (!stored) return null;
 
-      const decrypted = this.decryptData(stored);
-      const storedSession: StoredSession = JSON.parse(decrypted);
-
-      // Check version compatibility
-      if (storedSession.version !== this.STORAGE_VERSION) {
+      let raw: string;
+      try {
+        // Try encrypted path (v2+)
+        raw = hasCrypto() ? await decryptData(stored) : stored;
+      } catch {
+        // Ciphertext is corrupt or was written by a different key — clear it
         this.clearSession();
         return null;
       }
 
-      // Check expiration
+      const storedSession: StoredSession = JSON.parse(raw);
+
+      if (storedSession.version !== this.STORAGE_VERSION) {
+        // Version mismatch (e.g. old v1 session) — evict and re-auth
+        this.clearSession();
+        return null;
+      }
+
       if (Date.now() - storedSession.timestamp > this.SESSION_TTL) {
         this.clearSession();
         return null;
       }
 
-      // Validate session structure
       if (!this.isValidSession(storedSession.session)) {
         this.clearSession();
         return null;
@@ -69,117 +196,80 @@ export class SessionStorageService {
         connectedAt: new Date(storedSession.session.connectedAt),
         lastActivity: new Date(storedSession.session.lastActivity),
       };
-    } catch (error) {
-      console.error('Failed to retrieve session:', error);
+    } catch {
       this.clearSession();
       return null;
     }
   }
 
-  /**
-   * Clear stored session
-   */
+  /** Remove the stored session. */
   static clearSession(): void {
     try {
       localStorage.removeItem(this.STORAGE_KEY);
-    } catch (error) {
-      console.error('Failed to clear session:', error);
+    } catch {
+      // Ignore — storage might be unavailable
+    }
+  }
+
+  /** Refresh the lastActivity timestamp without changing other fields. */
+  static async updateActivity(session: WalletSession): Promise<void> {
+    await this.storeSession({ ...session, lastActivity: new Date() });
+  }
+
+  /** Returns true when a session key exists (regardless of validity). */
+  static hasStoredSession(): boolean {
+    try {
+      return localStorage.getItem(this.STORAGE_KEY) !== null;
+    } catch {
+      return false;
     }
   }
 
   /**
-   * Update session activity timestamp
-   */
-  static updateActivity(session: WalletSession): void {
-    const updatedSession = {
-      ...session,
-      lastActivity: new Date(),
-    };
-    this.storeSession(updatedSession);
-  }
-
-  /**
-   * Check if session exists
-   */
-  static hasStoredSession(): boolean {
-    return localStorage.getItem(this.STORAGE_KEY) !== null;
-  }
-
-  /**
-   * Validate session structure
-   */
-  private static isValidSession(session: unknown): session is WalletSession {
-    return (
-      session &&
-      typeof (session as any).address === 'string' &&
-      typeof (session as any).publicKey === 'string' &&
-      typeof (session as any).network === 'string' &&
-      typeof (session as any).balance === 'number' &&
-      typeof (session as any).isConnected === 'boolean' &&
-      typeof (session as any).walletType === 'string' &&
-      (session as any).connectedAt &&
-      (session as any).lastActivity
-    );
-  }
-
-  /**
-   * Simple encryption for session data
-   * Note: This is basic obfuscation, not cryptographically secure
-   */
-  private static encryptData(data: string): string {
-    // Simple base64 encoding with rotation
-    const encoded = btoa(data);
-    return encoded.split('').reverse().join('');
-  }
-
-  /**
-   * Simple decryption for session data
-   */
-  private static decryptData(data: string): string {
-    // Reverse the rotation and decode
-    const reversed = data.split('').reverse().join('');
-    return atob(reversed);
-  }
-
-  /**
-   * Get storage usage info
+   * Get storage usage info.
+   * Uses navigator.storage.estimate() where available (no side effects).
+   * Sync fallback counts existing localStorage keys only.
    */
   static getStorageInfo(): { used: number; available: number } {
     try {
-      const testKey = 'storage_test';
-      const testValue = 'x'.repeat(1024); // 1KB
       let used = 0;
-      let available = 0;
-
-      // Estimate used space
       for (const key in localStorage) {
-        if (localStorage.hasOwnProperty(key)) {
-          used += localStorage[key].length + key.length;
+        if (Object.prototype.hasOwnProperty.call(localStorage, key)) {
+          used += (localStorage[key]?.length ?? 0) + key.length;
         }
       }
-
-      // Estimate available space
-      try {
-        let i = 0;
-        while (i < 10000) { // Max 10MB test
-          localStorage.setItem(testKey + i, testValue);
-          available += testValue.length;
-          i++;
-        }
-      } catch (_e) {
-        // Storage full
-      } finally {
-        // Clean up test data
-        let i = 0;
-        while (localStorage.getItem(testKey + i)) {
-          localStorage.removeItem(testKey + i);
-          i++;
-        }
-      }
-
-      return { used, available };
-    } catch (_error) {
+      return { used, available: 0 };
+    } catch {
       return { used: 0, available: 0 };
     }
+  }
+
+  static async getStorageInfoAsync(): Promise<{ used: number; available: number }> {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.storage?.estimate) {
+        const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+        return { used: usage, available: quota - usage };
+      }
+    } catch {
+      // Storage API unavailable
+    }
+    return this.getStorageInfo();
+  }
+
+  // ── private ────────────────────────────────────────────────────────────────
+
+  private static isValidSession(session: unknown): session is WalletSession {
+    if (!session || typeof session !== 'object') return false;
+    const s = session as Record<string, unknown>;
+    return (
+      typeof s.address === 'string' &&
+      typeof s.publicKey === 'string' &&
+      typeof s.network === 'string' &&
+      typeof s.balance === 'number' &&
+      typeof s.isConnected === 'boolean' &&
+      typeof s.walletType === 'string' &&
+      s.connectedAt != null &&
+      s.lastActivity != null
+    );
   }
 }
