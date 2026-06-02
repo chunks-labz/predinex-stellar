@@ -32,96 +32,95 @@ describe('Currency Formatting', () => {
     });
 
     it('formatTokenAmount uses configurable symbol', () => {
-      expect(formatTokenAmount(1_000_000)).toContain('STX');
+      expect(formatTokenAmount(1_000_000n)).toContain('STX');
     });
 
     it('formatTokenAmountCompact uses configurable symbol', () => {
-      expect(formatTokenAmountCompact(1_000_000)).toContain('STX');
+      expect(formatTokenAmountCompact(1_000_000n)).toContain('STX');
     });
   });
 
   describe('stxToMicroStx', () => {
     it('converts STX to microSTX correctly', () => {
-      expect(stxToMicroStx(1)).toBe(1_000_000);
-      expect(stxToMicroStx(0.5)).toBe(500_000);
-      expect(stxToMicroStx(10)).toBe(10_000_000);
+      expect(stxToMicroStx(1n)).toBe(1_000_000n);
+      expect(stxToMicroStx(10n)).toBe(10_000_000n);
     });
 
-    it('floors decimal microSTX values', () => {
-      expect(stxToMicroStx(0.0000001)).toBe(0);
-      expect(stxToMicroStx(1.0000009)).toBe(1_000_000);
+    it('handles large values without precision loss', () => {
+      expect(stxToMicroStx(9_000_000_000n)).toBe(9_000_000_000_000_000n);
+      expect(stxToMicroStx(100_000_000_000n)).toBe(100_000_000_000_000_000n);
     });
 
     it('handles zero', () => {
-      expect(stxToMicroStx(0)).toBe(0);
+      expect(stxToMicroStx(0n)).toBe(0n);
     });
   });
 
   describe('microStxToStx', () => {
     it('converts microSTX to STX correctly', () => {
-      expect(microStxToStx(1_000_000)).toBe(1);
-      expect(microStxToStx(500_000)).toBe(0.5);
-      expect(microStxToStx(10_000_000)).toBe(10);
+      expect(microStxToStx(1_000_000n)).toBe(1);
+      expect(microStxToStx(500_000n)).toBe(0.5);
+      expect(microStxToStx(10_000_000n)).toBe(10);
     });
 
     it('handles zero', () => {
-      expect(microStxToStx(0)).toBe(0);
+      expect(microStxToStx(0n)).toBe(0);
     });
 
     it('handles small values', () => {
-      expect(microStxToStx(1)).toBe(0.000001);
-      expect(microStxToStx(100)).toBe(0.0001);
+      expect(microStxToStx(1n)).toBe(0.000001);
+      expect(microStxToStx(100n)).toBe(0.0001);
     });
   });
 
   describe('formatStxAmount', () => {
     it('formats microSTX with configurable token suffix', () => {
-      expect(formatStxAmount(1_000_000)).toBe(`1.00 ${TOKEN_SYMBOL}`);
-      expect(formatStxAmount(1_500_000)).toBe(`1.50 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(1_000_000n)).toBe(`1.00 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(1_500_000n)).toBe(`1.50 ${TOKEN_SYMBOL}`);
     });
 
     it('uses locale-aware number formatting', () => {
-      expect(formatStxAmount(1_234_567_890)).toBe(`1,234.56789 ${TOKEN_SYMBOL}`);
-      expect(formatStxAmount(100_000_000)).toBe(`100.00 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(1_234_567_890n)).toBe(`1,234.56789 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(100_000_000n)).toBe(`100.00 ${TOKEN_SYMBOL}`);
     });
 
     it('handles small values with up to 6 decimals', () => {
-      expect(formatStxAmount(1)).toBe(`0.000001 ${TOKEN_SYMBOL}`);
-      expect(formatStxAmount(100)).toBe(`0.0001 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(1n)).toBe(`0.000001 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(100n)).toBe(`0.0001 ${TOKEN_SYMBOL}`);
     });
 
     it('handles zero', () => {
-      expect(formatStxAmount(0)).toBe(`0.00 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmount(0n)).toBe(`0.00 ${TOKEN_SYMBOL}`);
     });
   });
 
   describe('formatStxAmountCompact', () => {
     it('uses M suffix for millions with configurable symbol', () => {
-      expect(formatStxAmountCompact(1_500_000_000_000)).toBe(`1.5M ${TOKEN_SYMBOL}`);
-      expect(formatStxAmountCompact(2_000_000_000_000)).toBe(`2.0M ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(1_500_000_000_000n)).toBe(`1.5M ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(2_000_000_000_000n)).toBe(`2.0M ${TOKEN_SYMBOL}`);
     });
 
     it('uses K suffix for thousands with configurable symbol', () => {
-      expect(formatStxAmountCompact(1_500_000_000)).toBe(`1.5K ${TOKEN_SYMBOL}`);
-      expect(formatStxAmountCompact(999_000_000)).toBe(`999 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(1_500_000_000n)).toBe(`1.5K ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(999_000_000n)).toBe(`999 ${TOKEN_SYMBOL}`);
     });
 
     it('shows full number for values under 1000 tokens', () => {
-      expect(formatStxAmountCompact(500_000_000)).toBe(`500 ${TOKEN_SYMBOL}`);
-      expect(formatStxAmountCompact(1_000_000)).toBe(`1 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(500_000_000n)).toBe(`500 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(1_000_000n)).toBe(`1 ${TOKEN_SYMBOL}`);
     });
 
     it('handles small values with decimals', () => {
-      expect(formatStxAmountCompact(500_000)).toBe(`0.5 ${TOKEN_SYMBOL}`);
-      expect(formatStxAmountCompact(1)).toBe(`0.000001 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(500_000n)).toBe(`0.5 ${TOKEN_SYMBOL}`);
+      expect(formatStxAmountCompact(1n)).toBe(`0.000001 ${TOKEN_SYMBOL}`);
     });
   });
 
   describe('formatMicroStxValue', () => {
     it('returns numeric value with 2 decimals', () => {
-      expect(formatMicroStxValue(1_000_000)).toBe('1.00');
-      expect(formatMicroStxValue(1_500_000)).toBe('1.50');
-      expect(formatMicroStxValue(100_000)).toBe('0.10');
+      expect(formatMicroStxValue(1_000_000n)).toBe('1.00');
+      expect(formatMicroStxValue(1_500_000n)).toBe('1.50');
+      expect(formatMicroStxValue(100_000n)).toBe('0.10');
     });
   });
 });

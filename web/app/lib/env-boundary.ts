@@ -7,7 +7,7 @@ export const CLIENT_SAFE_RUNTIME_ENV_KEYS = [
   'NEXT_PUBLIC_NETWORK',
   'NEXT_PUBLIC_NETWORK_TYPE',
   'NEXT_PUBLIC_SOROBAN_CONTRACT_ID',
-  'NEXT_PUBLIC_STACKS_API_URL',
+  'NEXT_PUBLIC_SOROBAN_RPC_URL',
   'NEXT_PUBLIC_TOKEN_NAME',
   'NEXT_PUBLIC_TOKEN_SYMBOL',
   'NEXT_PUBLIC_VAPID_PUBLIC_KEY',
@@ -36,4 +36,3 @@ export function assertClientEnvAccessIsSafe(keys: Iterable<string>): void {
     );
   }
 }
-

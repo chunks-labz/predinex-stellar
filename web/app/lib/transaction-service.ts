@@ -9,6 +9,7 @@ import {
   AnchorMode,
   PostConditionMode,
   ClarityValue,
+  type PostCondition,
   StacksTransactionWire,
   getAddressFromPrivateKey,
 } from '@stacks/transactions';
@@ -23,6 +24,7 @@ export interface TransactionOptions {
   nonce?: number;
   anchorMode?: AnchorMode;
   postConditionMode?: PostConditionMode;
+  postConditions?: PostCondition[];
 }
 
 /**
@@ -187,7 +189,8 @@ export class TransactionService {
         senderKey,
         network: this.network,
         anchorMode: options.anchorMode || AnchorMode.Any,
-        postConditionMode: options.postConditionMode || PostConditionMode.Allow,
+        postConditionMode: options.postConditionMode ?? PostConditionMode.Deny,
+        ...(options.postConditions?.length ? { postConditions: options.postConditions } : {}),
         fee,
         nonce,
       };

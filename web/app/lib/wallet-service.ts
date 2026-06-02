@@ -5,7 +5,7 @@
 
 import { AppConfig, UserSession, showConnect, FinishedAuthData, UserData } from '@stacks/connect';
 import { STACKS_MAINNET, STACKS_TESTNET, StacksNetwork } from '@stacks/network';
-import { ClarityValue } from '@stacks/transactions';
+import { ClarityValue, type PostCondition, type PostConditionMode } from '@stacks/transactions';
 import { formatDisplayAddress } from './address-display';
 
 export type WalletType = 'hiro' | 'xverse' | 'leather' | 'unknown';
@@ -61,6 +61,10 @@ export interface TransactionPayload {
   functionName: string;
   /** The arguments to be passed to the function */
   functionArgs: ClarityValue[];
+  /** Optional post-conditions to constrain token movement. */
+  postConditions?: PostCondition[];
+  /** Optional post-condition mode. Defaults to Deny in the shared transaction helpers. */
+  postConditionMode?: PostConditionMode;
   /** Optional transaction fee override in micro-STX */
   fee?: number;
   /** Optional nonce override for the transaction */
@@ -213,6 +217,8 @@ export class WalletService {
       const result = await txService.executeTransaction(payload, userData.appPrivateKey, {
         fee: payload.fee,
         nonce: payload.nonce,
+        postConditions: payload.postConditions,
+        postConditionMode: payload.postConditionMode,
       });
 
       return result.txId;

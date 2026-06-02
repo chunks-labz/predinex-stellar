@@ -1,5 +1,7 @@
 # CONTRACT_API.md — Predinex Contract Public Entrypoints
 
+#cool
+
 > **Contract:** `predinex` · **Version:** 0.1.0  
 > **SDK:** Soroban SDK 22 · **Network:** Stellar Testnet / Mainnet  
 > **Source:** `contracts/predinex/src/lib.rs`
