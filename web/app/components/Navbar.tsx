@@ -6,7 +6,7 @@ import { LogOut, Menu, X, Wallet } from "lucide-react";
 import { useWallet } from './WalletAdapterProvider';
 import { ICON_CLASS } from "../lib/constants";
 import { WalletAddressCopyButton } from "../../components/WalletAddressCopyButton";
-import NetworkMismatchWarning from './NetworkMismatchWarning';
+import { NetworkMismatchWarning } from './NetworkMismatchWarning';
 
 export default function Navbar() {
     const { isConnected, address, connect, disconnect } = useWallet();

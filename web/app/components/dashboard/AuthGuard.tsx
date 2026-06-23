@@ -89,7 +89,7 @@ export default function AuthGuard({
   }
 
   // Redirect if user is not authenticated and prompt is disabled
-  if (!userData && !showConnectPrompt) {
+  if (!isConnected && !showConnectPrompt) {
     return null;
   }
 

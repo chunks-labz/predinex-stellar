@@ -3,12 +3,13 @@
 import dynamic from 'next/dynamic';
 import Navbar from '../components/Navbar';
 import AuthGuard from '../components/AuthGuard';
+import { useEffect, useState } from 'react';
 import { useUserActivity } from '../hooks/useUserActivity';
 import { useActiveBets } from '../lib/hooks/useActiveBets';
 import { useWallet } from '../components/WalletAdapterProvider';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
-import EmptyState from '../../components/EmptyState';
-import DisconnectedState from '../../components/DisconnectedState';
+import { EmptyState } from '../../components/EmptyState';
+import { DisconnectedState } from '../../components/DisconnectedState';
 
 function StatsSkeleton() {
   return (
@@ -46,20 +47,67 @@ const ActiveBetsCard = dynamic(() => import('../components/dashboard/ActiveBetsC
   loading: () => <div className="h-48 bg-card/20 animate-pulse rounded-xl border border-border/50" />,
 });
 
-function DashboardContent() {
-  const { address: stxAddress, isConnected } = useWallet();
+function DashboardLoadingState() {
+  return (
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-4 sm:px-6 lg:px-8">
+        <div className="w-full max-w-4xl space-y-6">
+          <div className="h-12 w-72 rounded-full bg-card/20 animate-pulse" />
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+            {[...Array(4)].map((_, index) => (
+              <div
+                key={index}
+                className="h-24 rounded-2xl border border-border/50 bg-card/20 animate-pulse"
+              />
+            ))}
+          </div>
+          <div className="rounded-3xl border border-border/50 bg-card/20 p-8 animate-pulse space-y-4">
+            <div className="h-6 w-40 rounded bg-muted/50" />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="h-72 rounded-2xl bg-muted/30" />
+              <div className="h-72 rounded-2xl bg-muted/30" />
+            </div>
+          </div>
+          <div
+            className="text-center text-sm text-muted-foreground"
+            role="status"
+            aria-label="Loading dashboard"
+            aria-live="polite"
+          >
+            Loading dashboard...
+          </div>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+export function DashboardContent() {
+  const { address: stxAddress, isConnected, isLoading } = useWallet();
+  const [mounted, setMounted] = useState(false);
   
-  if (!isConnected) {
-    return <DisconnectedState />;
-  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMounted(true), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const isHydrating = !mounted || isLoading;
 
   const {
     activities,
     isLoading: activityLoading,
     error: activityError,
     refresh: refreshActivity,
-  } = useUserActivity(stxAddress, 5);
+  } = useUserActivity(stxAddress ?? undefined, 5);
   const { activeBets, isLoading: betsLoading, refresh: refreshBets } = useActiveBets(stxAddress);
+
+  if (isHydrating) {
+    return <DashboardLoadingState />;
+  }
+
+  if (!isConnected) {
+    return <DisconnectedState />;
+  }
 
   return (
     <main className="min-h-screen bg-background">
