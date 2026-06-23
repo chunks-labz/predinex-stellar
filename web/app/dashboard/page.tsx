@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Navbar from '../components/Navbar';
 import AuthGuard from '../components/AuthGuard';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useUserActivity } from '../hooks/useUserActivity';
 import { useActiveBets } from '../lib/hooks/useActiveBets';
 import { useWallet } from '../components/WalletAdapterProvider';
@@ -82,16 +82,8 @@ function DashboardLoadingState() {
   );
 }
 
-function DashboardContent() {
-  const { address: stxAddress, isConnected, isLoading } = useWallet();
-  const [mounted, setMounted] = useState(false);
-  
-  useEffect(() => {
-    const timer = window.setTimeout(() => setMounted(true), 0);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  const isHydrating = !mounted || isLoading;
+function DashboardReadyContent() {
+  const { address: stxAddress, isConnected } = useWallet();
 
   const {
     activities,
@@ -100,10 +92,6 @@ function DashboardContent() {
     refresh: refreshActivity,
   } = useUserActivity(stxAddress ?? undefined, 5);
   const { activeBets, isLoading: betsLoading, refresh: refreshBets } = useActiveBets(stxAddress);
-
-  if (isHydrating) {
-    return <DashboardLoadingState />;
-  }
 
   if (!isConnected) {
     return <DisconnectedState />;
@@ -158,6 +146,20 @@ function DashboardContent() {
       </AuthGuard>
     </main>
   );
+}
+
+export function DashboardContent() {
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+
+  if (!isHydrated) {
+    return <DashboardLoadingState />;
+  }
+
+  return <DashboardReadyContent />;
 }
 
 export default function Dashboard() {

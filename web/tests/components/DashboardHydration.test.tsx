@@ -1,5 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { screen } from '@testing-library/react';
+import { act } from 'react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
 import * as UserDashboardHook from '../../app/hooks/useUserActivity';
 import * as ActiveBetsHook from '../../app/lib/hooks/useActiveBets';
@@ -42,6 +45,7 @@ vi.mock('next/dynamic', () => ({
 
 describe('Dashboard hydration loading state', () => {
   let DashboardContent: typeof import('../../app/dashboard/page').DashboardContent;
+  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,14 +74,35 @@ describe('Dashboard hydration loading state', () => {
     });
   });
 
+  afterEach(() => {
+    consoleErrorSpy?.mockRestore();
+    document.body.innerHTML = '';
+  });
+
   beforeEach(async () => {
     DashboardContent = (await import('../../app/dashboard/page')).DashboardContent;
   });
 
   it('renders a stable loading shell before the dashboard hydrates', () => {
-    render(<DashboardContent />);
+    const html = renderToString(<DashboardContent />);
 
-    expect(screen.getByRole('status', { name: /loading dashboard/i })).toBeInTheDocument();
-    expect(screen.queryByText('Institutional Dashboard')).not.toBeInTheDocument();
+    expect(html).toContain('Loading dashboard...');
+    expect(html).toContain('aria-label="Loading dashboard"');
+    expect(html).not.toContain('Institutional Dashboard');
+  });
+
+  it('hydrates the dashboard loading shell without markup mismatches', async () => {
+    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<DashboardContent />);
+    document.body.appendChild(container);
+
+    await act(async () => {
+      hydrateRoot(container, <DashboardContent />);
+    });
+
+    expect(screen.getByText('Institutional Dashboard')).toBeInTheDocument();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 });
