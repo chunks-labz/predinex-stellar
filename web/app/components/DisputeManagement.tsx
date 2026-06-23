@@ -3,6 +3,8 @@
 import dynamic from 'next/dynamic';
 import { useWallet } from './WalletAdapterProvider';
 import { useDisputeManagement } from '../lib/disputes/useDisputeManagement';
+import { EmptyState } from '../../components/EmptyState';
+import { DisconnectedState } from '../../components/DisconnectedState';
 import { DisputePageHeader } from './disputes/DisputePageHeader';
 import { DisputeTabNav } from './disputes/DisputeTabNav';
 import { ActiveDisputesSection } from './disputes/ActiveDisputesSection';
@@ -29,13 +31,12 @@ const CreateDisputeSection = dynamic(
 
 export default function DisputeManagement() {
   const { address, isConnected } = useWallet();
-  
+  const { disputes, selectedTab, setSelectedTab, isLoading, now, hasUserVoted, getUserVote, handleVote } =
+    useDisputeManagement(address);
+
   if (!isConnected) {
     return <DisconnectedState />;
   }
-
-  const { disputes, selectedTab, setSelectedTab, isLoading, now, hasUserVoted, getUserVote, handleVote } =
-    useDisputeManagement(address);
 
   return (
     <div className="max-w-6xl mx-auto p-6">

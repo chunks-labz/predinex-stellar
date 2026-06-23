@@ -71,11 +71,6 @@ export function WalletStatus() {
       <span className={getStatusColor()}>
         {getStatusText()}
       </span>
-      {health?.timeRemaining && health.status === 'warning' && (
-        <span className="text-muted-foreground">
-          ({Math.floor(health.timeRemaining / (1000 * 60 * 60))}h left)
-        </span>
-      )}
     </div>
   );
 }// Component to display current Stacks connection status

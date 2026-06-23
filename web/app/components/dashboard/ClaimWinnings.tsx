@@ -64,7 +64,7 @@ export default function ClaimWinnings({
       outcome: bet.outcomeName,
       status: claimTx.status,
       error: claimTx.error,
-      timestamp: Date.now(),
+      timestamp: bet.betTimestamp * 1000,
     };
     setReceiptData(receipt);
     setShowReceipt(true);

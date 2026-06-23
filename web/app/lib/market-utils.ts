@@ -210,8 +210,7 @@ export async function fetchCurrentBlockHeightLive(options?: {
     };
   }
 
-  const network = getStacksNetwork();
-  const url = `${network.coreApiUrl}/extended/v1/status`;
+  const url = `${getRuntimeConfig().api.coreApiUrl}/extended/v1/status`;
 
   try {
     const controller =

@@ -10,6 +10,7 @@ import {
   PostConditionMode,
   ClarityValue,
   StacksTransactionWire,
+  type TxBroadcastResult,
 } from '@stacks/transactions';
 import { StacksNetwork } from '@stacks/network';
 import { TransactionPayload } from './wallet-service';

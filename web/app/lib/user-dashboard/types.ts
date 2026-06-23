@@ -15,6 +15,7 @@ export interface DashboardStats {
   winRate: number;
   activeBets: number;
   settledBets: number;
+  lastUpdated: number;
 }
 
 export type DashboardTabId = 'overview' | 'bets' | 'history' | 'incentives';

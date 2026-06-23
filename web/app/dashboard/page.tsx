@@ -82,7 +82,7 @@ function DashboardLoadingState() {
   );
 }
 
-export function DashboardContent() {
+function DashboardContent() {
   const { address: stxAddress, isConnected, isLoading } = useWallet();
   const [mounted, setMounted] = useState(false);
   

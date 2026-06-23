@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useWallet } from './WalletAdapterProvider';
-import { useWalletConnect } from '../lib/hooks/useWalletConnect';
+import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { Loader2, AlertCircle, CheckCircle, TrendingUp, Users } from 'lucide-react';
 import { formatDisplayAddress } from '../lib/address-display';
 import { mockPools, type Pool } from '../lib/fixtures/poolIntegration';
@@ -16,8 +16,6 @@ interface PoolStats {
 
 export default function PoolIntegration() {
   const { isConnected } = useWallet();
-  const { session } = useWalletConnect();
-  const { isConnected } = useAppKitAccount();
   const { isMismatch, expectedNetworkName, switchNetwork } = useNetworkMismatch();
   const [pools, setPools] = useState<Pool[]>([]);
   const [stats, setStats] = useState<PoolStats>({
@@ -193,7 +191,7 @@ export default function PoolIntegration() {
                   </div>
 
                   {/* Action Button */}
-                  {!pool.settled && (isConnected || userData) && (
+                  {!pool.settled && isConnected && (
                     <div className="space-y-2">
                       <button 
                         disabled={isMismatch}

@@ -23,6 +23,7 @@ export const CONTRACT_NAME: string =
 // Maximum pool duration that the frontend allows when creating a new market.
 // This mirrors the contract-side maximum and protects against long-lived pools.
 export const MAX_POOL_DURATION_SECONDS = 1_000_000;
+export const MIN_POOL_DURATION_SECONDS = 300;
 
 export interface NetworkConfig {
     apiUrl: string;

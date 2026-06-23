@@ -163,6 +163,7 @@ export function useIncentives() {
     error,
     calculateBetIncentive,
     addIncentive,
+    setIncentives,
     claimIncentive,
     getPendingIncentives,
     getTotalPendingBonus,

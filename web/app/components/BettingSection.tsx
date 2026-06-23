@@ -3,15 +3,22 @@
 import { useState } from 'react';
 import { useToast } from '../../providers/ToastProvider';
 import { predinexContract } from '../lib/adapters/predinex-contract';
-import { Loader2, Wallet, AlertCircle } from 'lucide-react';
+import { Loader2, Wallet, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from './WalletAdapterProvider';
 import { TruncatedAddress } from '../../components/TruncatedAddress';
+import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
+import { useTxStatus } from '../lib/hooks/useTxStatus';
 import {
     classifyConnectivityIssue,
-    getConnectivityMessage,
 } from '../lib/network-errors';
 import { invalidateOnPlaceBet } from '../lib/cache-invalidation';
+import {
+    MIN_BET_STX,
+    connectivityErrorToast,
+    showToastPayload,
+    toastMessages,
+} from '@/lib/toast-messages';
 
 interface BettingSectionProps {
     pool: Pool;
@@ -21,8 +28,6 @@ interface BettingSectionProps {
 
 export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSectionProps) {
     const { isConnected, address, connect } = useWallet();
-    const { userData, authenticate } = useStacks();
-    const { isConnected, address } = useWalletConnection();
     const { isMismatch, expectedNetworkName, switchNetwork } = useNetworkMismatch();
     const { showToast } = useToast();
     const [betAmount, setBetAmount] = useState("");
@@ -69,6 +74,9 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
                 onFinish: (data) => {
                     window.clearTimeout(slowNetworkTimer);
                     console.log('Bet placed successfully:', data);
+                    if (data?.txId) {
+                        trackTx(data.txId);
+                    }
                     // Invalidate all caches affected by this bet
                     if (address) {
                         invalidateOnPlaceBet({ poolId, userAddress: address });

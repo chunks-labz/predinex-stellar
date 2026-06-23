@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { CheckCircle, XCircle, Clock, ExternalLink, Copy, Check } from 'lucide-react';
-import { formatCurrency } from '../lib/formatting';
+import { formatCurrency } from '../lib/dashboard-utils';
 
 export interface TransactionReceiptData {
   txId: string;

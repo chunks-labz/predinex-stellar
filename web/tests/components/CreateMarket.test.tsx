@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CreateMarket from '../../app/create/page';
+import { useTxStatus } from '../../app/lib/hooks/useTxStatus';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
@@ -152,8 +153,7 @@ describe('CreateMarket page', () => {
         setupWithUser();
         // Make useTxStatus return 'pending' once trackTx is called
         const mockTrackTx = vi.fn();
-        vi.mocked(require('../../app/lib/hooks/useTxStatus').useTxStatus)
-            .mockReturnValue([{ status: 'pending', txId: 'mock-tx-id-123', error: null }, mockTrackTx]);
+        vi.mocked(useTxStatus).mockReturnValue([{ status: 'pending', txId: 'mock-tx-id-123', error: null }, mockTrackTx]);
 
         mockOpenContractCall.mockImplementation(({ onFinish }) => {
             onFinish({ txId: 'mock-tx-id-123' });

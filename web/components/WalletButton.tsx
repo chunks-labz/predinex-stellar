@@ -7,9 +7,12 @@ import { useToast } from '../providers/ToastProvider';
 import { formatDisplayAddress } from '../app/lib/address-display';
 import {
   classifyConnectivityIssue,
-  getConnectivityMessage,
   withTimeout,
 } from '../app/lib/network-errors';
+import {
+  connectivityErrorToast,
+  showToastPayload,
+} from '../lib/toast-messages';
 
 interface WalletButtonProps {
   className?: string;

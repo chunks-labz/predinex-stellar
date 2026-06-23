@@ -25,7 +25,7 @@ export default function MarketListPreloader() {
     if ('requestIdleCallback' in window) {
       (window as any).requestIdleCallback(() => void warmCache(), { timeout: 2000 });
     } else {
-      window.setTimeout(() => void warmCache(), 1000);
+      setTimeout(() => void warmCache(), 1000);
     }
   }, []);
 

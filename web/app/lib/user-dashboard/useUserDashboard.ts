@@ -12,6 +12,7 @@ export function useUserDashboard(isWalletConnected: boolean, sessionConnected: b
     winRate: 0,
     activeBets: 0,
     settledBets: 0,
+    lastUpdated: 0,
   });
   const [bets, setBets] = useState<UserBet[]>([]);
   const [isLoading, setIsLoading] = useState(false);

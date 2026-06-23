@@ -19,7 +19,7 @@ const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
 
 export default function ActivityPage() {
     const { address: stxAddress } = useWallet();
-    const { activities, isLoading, error, refresh } = useUserActivity(stxAddress, 50);
+    const { activities, isLoading, error, refresh } = useUserActivity(stxAddress ?? undefined, 50);
     const [activeFilter, setActiveFilter] = useState<FilterType>('all');
 
     const filteredActivities = activeFilter === 'all'
