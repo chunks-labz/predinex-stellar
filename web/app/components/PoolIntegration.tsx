@@ -2,13 +2,30 @@
 import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('PoolIntegration');
 
-import { useState, useEffect, useCallback } from 'react';
+import { useId, useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
-import { Loader2, AlertCircle, CheckCircle, TrendingUp, Users, RefreshCw } from 'lucide-react';
+import {
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  TrendingUp,
+  Users,
+  RefreshCw,
+  Search,
+  ChevronDown,
+} from 'lucide-react';
 import { formatDisplayAddress } from '../lib/address-display';
 import { getMarkets, type Pool } from '../lib/stacks-api';
+
+/**
+ * Number of pools rendered on initial load and per additional "Load More" click.
+ * Issue: #674 — web pools list pagination.
+ */
+const POOLS_PER_PAGE = 20;
+
+type StatusFilter = 'all' | 'active' | 'settled';
 
 interface PoolStats {
   totalPools: number;
@@ -21,6 +38,7 @@ export default function PoolIntegration() {
   const router = useRouter();
   const { isConnected, connect } = useWallet();
   const { isMismatch, expectedNetworkName } = useNetworkMismatch();
+  const searchInputId = useId();
   const [pools, setPools] = useState<Pool[]>([]);
   const [stats, setStats] = useState<PoolStats>({
     totalPools: 0,
@@ -30,11 +48,13 @@ export default function PoolIntegration() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [displayedCount, setDisplayedCount] = useState(POOLS_PER_PAGE);
 
   // Fetch pools on component mount.
   // fetchPools is stable (useCallback with no changing deps) so the effect
   // runs exactly once and the exhaustive-deps rule is satisfied.
-
 
   // All deps are stable: state setters never change, getMarkets is a module-level import.
   const fetchPools = useCallback(async () => {
@@ -49,6 +69,8 @@ export default function PoolIntegration() {
         activePoolsCount: allPools.filter(p => !p.settled).length,
         settledPoolsCount: allPools.filter(p => p.settled).length,
       });
+      // Reset pagination to first page whenever fresh data is loaded.
+      setDisplayedCount(POOLS_PER_PAGE);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch pools');
       log.error('Error fetching pools:', err);
@@ -60,6 +82,46 @@ export default function PoolIntegration() {
   useEffect(() => {
     fetchPools();
   }, [fetchPools]);
+
+  // Compatibility with search and filter (#674): pagination operates on the
+  // *filtered* list, so when a user narrows results any remaining pages snap
+  // back to the first page of the new view.
+  const filteredPools = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return pools.filter((pool) => {
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'active' && pool.settled) return false;
+        if (statusFilter === 'settled' && !pool.settled) return false;
+      }
+      if (normalizedQuery) {
+        const haystack = `${pool.title} ${pool.description}`.toLowerCase();
+        if (!haystack.includes(normalizedQuery)) return false;
+      }
+      return true;
+    });
+  }, [pools, searchQuery, statusFilter]);
+
+  // Cap `displayedCount` whenever the filter shrinks the dataset so we never
+  // show an empty "Load More" button on a list that's already complete.
+  const effectiveDisplayedCount = Math.min(displayedCount, filteredPools.length);
+  const visiblePools = useMemo(
+    () => filteredPools.slice(0, effectiveDisplayedCount),
+    [filteredPools, effectiveDisplayedCount],
+  );
+  const hasMorePools = effectiveDisplayedCount < filteredPools.length;
+
+  const handleFilterChange = useCallback(
+    (next: { search?: string; status?: StatusFilter }) => {
+      if (next.search !== undefined) setSearchQuery(next.search);
+      if (next.status !== undefined) setStatusFilter(next.status);
+      setDisplayedCount(POOLS_PER_PAGE);
+    },
+    [],
+  );
+
+  const handleLoadMore = useCallback(() => {
+    setDisplayedCount((previous) => previous + POOLS_PER_PAGE);
+  }, []);
 
   const getPoolOdds = (pool: Pool) => {
     const total = pool.totalA + pool.totalB;
@@ -125,6 +187,45 @@ export default function PoolIntegration() {
         </div>
       </div>
 
+      {/* Search & Filter Bar */}
+      <div className="glass p-4 rounded-xl border border-border flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="relative flex-1 max-w-md">
+          <label htmlFor={searchInputId} className="sr-only">
+            Search pools
+          </label>
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" aria-hidden="true" />
+          <input
+            id={searchInputId}
+            type="search"
+            value={searchQuery}
+            onChange={(event) => handleFilterChange({ search: event.target.value })}
+            placeholder="Search pools by title or description…"
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-border bg-background text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+        </div>
+        <div
+          role="group"
+          aria-label="Filter pools by status"
+          className="flex items-center gap-1 p-1 rounded-lg border border-border bg-background/60"
+        >
+          {(['all', 'active', 'settled'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => handleFilterChange({ status: value })}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                statusFilter === value
+                  ? 'bg-primary text-primary-foreground shadow-sm'
+                  : 'text-muted-foreground hover:bg-muted/50'
+              }`}
+              aria-pressed={statusFilter === value}
+            >
+              {value === 'all' ? 'All' : value === 'active' ? 'Active' : 'Settled'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Error Message */}
       {error && (
         <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg flex gap-2">
@@ -143,12 +244,16 @@ export default function PoolIntegration() {
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
             <p className="text-sm text-muted-foreground">Loading pools from blockchain...</p>
           </div>
-        ) : pools.length === 0 ? (
+        ) : filteredPools.length === 0 ? (
           <div className="glass p-8 rounded-xl border border-border text-center">
-            <p className="text-muted-foreground">No pools available yet. Be the first to create one!</p>
+            <p className="text-muted-foreground">
+              {pools.length === 0
+                ? 'No pools available yet. Be the first to create one!'
+                : 'No pools match the current search or filter.'}
+            </p>
           </div>
         ) : (
-          pools.map(pool => {
+          visiblePools.map(pool => {
             const odds = getPoolOdds(pool);
             return (
               <div
@@ -209,7 +314,7 @@ export default function PoolIntegration() {
                   {/* Action Button */}
                   {!pool.settled && (
                     <div className="space-y-2">
-                      <button 
+                      <button
                         onClick={isMismatch ? undefined : (isConnected ? () => {} : connect)}
                         disabled={isMismatch}
                         className="w-full py-2 bg-primary hover:bg-violet-600 text-white font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -244,6 +349,31 @@ export default function PoolIntegration() {
           })
         )}
       </div>
+
+      {/* Load More button — only rendered when more than one page is available,
+          so we never bother small lists with a disabled button. */}
+      {!isLoading && !error && filteredPools.length > POOLS_PER_PAGE && (
+        <div className="flex flex-col items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={handleLoadMore}
+            disabled={!hasMorePools}
+            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl border border-border bg-card hover:bg-muted/50 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label={
+              hasMorePools
+                ? `Load ${Math.min(POOLS_PER_PAGE, filteredPools.length - effectiveDisplayedCount)} more pools`
+                : 'All pools loaded'
+            }
+          >
+            {hasMorePools ? 'Load More' : 'All Pools Loaded'}
+            <ChevronDown className={`w-4 h-4 ${hasMorePools ? '' : 'opacity-30'}`} aria-hidden="true" />
+          </button>
+          <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+            Showing {visiblePools.length} of {filteredPools.length} pool{filteredPools.length === 1 ? '' : 's'}
+            {filteredPools.length !== pools.length && searchQuery && ` (filtered from ${pools.length})`}
+          </p>
+        </div>
+      )}
 
       {/* Refresh Button */}
       <button

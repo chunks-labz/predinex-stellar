@@ -25,29 +25,32 @@ vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
   useNetworkMismatch: vi.fn(),
 }));
 
-const mockPool: StacksApi.Pool = {
-  id: 0,
-  title: 'Test Pool',
-  description: 'Test Description',
-  creator: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM',
-  outcomeA: 'Yes',
-  outcomeB: 'No',
-  totalA: 50000000, // 5 XLM at 10_000_000 stroops per unit
-  totalB: 30000000, // 3 XLM at 10_000_000 stroops per unit
-  settled: false,
-  winningOutcome: undefined,
-  expiry: 1000,
-  status: 'active',
-};
+function buildPool(id: number, overrides: Partial<StacksApi.Pool> = {}): StacksApi.Pool {
+  return {
+    id,
+    title: `Pool ${id}`,
+    description: `Description ${id}`,
+    creator: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM',
+    outcomeA: 'Yes',
+    outcomeB: 'No',
+    totalA: 50000000,
+    totalB: 30000000,
+    settled: false,
+    winningOutcome: undefined,
+    expiry: 1000,
+    status: 'active',
+    ...overrides,
+  };
+}
 
-const settledPool: StacksApi.Pool = {
-  ...mockPool,
-  id: 1,
+const mockPool: StacksApi.Pool = buildPool(0, { title: 'Test Pool', description: 'Test Description' });
+
+const settledPool: StacksApi.Pool = buildPool(1, {
   title: 'Settled Pool',
   settled: true,
   winningOutcome: 0,
   status: 'settled',
-};
+});
 
 const connectedWallet = {
   chain: 'stacks' as const,
@@ -214,7 +217,10 @@ describe('PoolIntegration', () => {
       expect(screen.getByText('Settled Pool')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('Settled')).toBeInTheDocument();
+    // "Settled" appears in both the status filter pill and the pool card badge,
+    // so we assert the badge version using its parent container.
+    const settledBadges = screen.getAllByText('Settled');
+    expect(settledBadges.length).toBeGreaterThan(0);
     expect(screen.getByText('✓ Winner')).toBeInTheDocument();
     expect(screen.getByText(/Pool settled • Outcome: Yes/i)).toBeInTheDocument();
   });
@@ -303,5 +309,212 @@ describe('PoolIntegration', () => {
     // Should show 50/50 odds when no bets placed
     const fiftyPercentElements = screen.getAllByText('50% of pool');
     expect(fiftyPercentElements).toHaveLength(2);
+  });
+
+  // -----------------------------------------------------------------------
+  // Pagination behavior — issue #674 Web: Add pagination to pools list
+  // -----------------------------------------------------------------------
+
+  it('shows only the first page of pools when more than one page is available', async () => {
+    const pools = Array.from({ length: 25 }, (_, index) =>
+      buildPool(index, { title: `Pool ${index}`, description: `Description ${index}` })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(pools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 0')).toBeInTheDocument();
+    });
+
+    // First page exposes 20 pools; pool indices 0..19 should be rendered.
+    expect(screen.getByText('Pool 19')).toBeInTheDocument();
+    // Remaining pools are not yet on screen.
+    expect(screen.queryByText('Pool 20')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pool 24')).not.toBeInTheDocument();
+
+    // The Load More button is enabled and announces the remaining count.
+    const loadMore = screen.getByRole('button', { name: /load 5 more pools/i });
+    expect(loadMore).toBeEnabled();
+  });
+
+  it('appends the next page when Load More is clicked', async () => {
+    const user = userEvent.setup();
+    const pools = Array.from({ length: 25 }, (_, index) =>
+      buildPool(index, { title: `Pool ${index}`, description: `Description ${index}` })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(pools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 0')).toBeInTheDocument();
+    });
+
+    const loadMore = screen.getByRole('button', { name: /load 5 more pools/i });
+    await user.click(loadMore);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 20')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Pool 24')).toBeInTheDocument();
+  });
+
+  it('disables Load More once all pools have been revealed', async () => {
+    const user = userEvent.setup();
+    const pools = Array.from({ length: 21 }, (_, index) =>
+      buildPool(index, { title: `Pool ${index}`, description: `Description ${index}` })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(pools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 0')).toBeInTheDocument();
+    });
+
+    const loadMore = screen.getByRole('button', { name: /load 1 more pool/i });
+    await user.click(loadMore);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 20')).toBeInTheDocument();
+    });
+
+    // After the final click, the button should switch to its disabled state.
+    const allLoaded = screen.getByRole('button', { name: /all pools loaded/i });
+    expect(allLoaded).toBeDisabled();
+  });
+
+  it('does not render a Load More button when all fetched pools already fit on the first page', async () => {
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool, settledPool]);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Pool')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByRole('button', { name: /load.*more pool/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /all pools loaded/i })).not.toBeInTheDocument();
+  });
+
+  it('does not render Load More when filtered pools fit on the first page', async () => {
+    const user = userEvent.setup();
+    const pools = Array.from({ length: 25 }, (_, index) =>
+      buildPool(index, {
+        title: index % 2 === 0 ? `Match ${index}` : `Other ${index}`,
+        description: `Description ${index}`,
+      })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(pools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Match 0')).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByRole('searchbox');
+    await user.type(searchInput, 'Match');
+
+    // Below the threshold of POOLS_PER_PAGE the Load More block is hidden
+    // entirely so we avoid a noisy disabled button on small filtered lists.
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /load.*more pool/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it('narrows pagination when the user applies a status filter', async () => {
+    const user = userEvent.setup();
+    const activePools = Array.from({ length: 30 }, (_, index) =>
+      buildPool(index, { title: `Active ${index}`, description: `Active pool` })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(activePools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Active 0')).toBeInTheDocument();
+    });
+
+    // Filtering by Settled empties the visible list — there are no settled
+    // pools in the dataset, but pagination must coexist with the filter.
+    const settledFilter = screen.getByRole('button', { name: /^Settled$/ });
+    await user.click(settledFilter);
+
+    await waitFor(() => {
+      expect(screen.getByText(/No pools match the current search or filter/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /load.*more pool/i })).not.toBeInTheDocument();
+
+    // Switching back to All restores the first page of the full set.
+    const allFilter = screen.getByRole('button', { name: /^All$/ });
+    await user.click(allFilter);
+
+    await waitFor(() => {
+      expect(screen.getByText('Active 0')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Active 19')).toBeInTheDocument();
+    expect(screen.queryByText('Active 20')).not.toBeInTheDocument();
+  });
+
+  it('filters pools by the text search and resets to the first page of results', async () => {
+    const user = userEvent.setup();
+    const pools = Array.from({ length: 25 }, (_, index) =>
+      buildPool(index, {
+        title: index % 2 === 0 ? `Match ${index}` : `Other ${index}`,
+        description: `Description ${index}`,
+      })
+    );
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue(pools);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Match 0')).toBeInTheDocument();
+    });
+
+    const searchInput = screen.getByRole('searchbox');
+    await user.type(searchInput, 'Match');
+
+    // "Other*" titles are filtered out and the Load More block resets to page 1.
+    await waitFor(() => {
+      expect(screen.queryByText('Other 0')).not.toBeInTheDocument();
+    });
+    expect(screen.queryByRole('button', { name: /load.*more pool/i })).not.toBeInTheDocument();
+  });
+
+  it('resets pagination to the first page when pools are refreshed', async () => {
+    const user = userEvent.setup();
+    const initialPools = Array.from({ length: 25 }, (_, index) =>
+      buildPool(index, { title: `Pool ${index}` })
+    );
+    vi.mocked(StacksApi.getMarkets)
+      .mockResolvedValueOnce(initialPools)
+      .mockResolvedValueOnce([buildPool(99, { title: 'Refreshed Pool' })]);
+
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 0')).toBeInTheDocument();
+    });
+
+    const loadMore = screen.getByRole('button', { name: /load 5 more pools/i });
+    await user.click(loadMore);
+
+    await waitFor(() => {
+      expect(screen.getByText('Pool 20')).toBeInTheDocument();
+    });
+
+    const refreshButton = screen.getByRole('button', { name: /Refresh Pools/i });
+    await user.click(refreshButton);
+
+    await waitFor(() => {
+      expect(screen.getByText('Refreshed Pool')).toBeInTheDocument();
+    });
+    // Refresh should snap back to the first page of the fresh dataset.
+    expect(vi.mocked(StacksApi.getMarkets)).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('Pool 0')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /load.*more pool/i })).not.toBeInTheDocument();
   });
 });
