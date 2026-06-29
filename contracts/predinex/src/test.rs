@@ -798,7 +798,11 @@ fn b5_settle_pool_winning_outcome_0_is_valid() {
     t.client.settle_pool(&t.admin, &pool_id, &0u32);
 
     let pool = t.client.get_pool(&pool_id).expect("pool must exist");
-    assert_eq!(pool.status, PoolStatus::Settled(0), "status must be Settled(0)");
+    assert_eq!(
+        pool.status,
+        PoolStatus::Settled(0),
+        "status must be Settled(0)"
+    );
 }
 
 /// B6: winning_outcome == 1 settles correctly (boundary — highest valid).
@@ -812,7 +816,11 @@ fn b6_settle_pool_winning_outcome_1_is_valid() {
     t.client.settle_pool(&t.admin, &pool_id, &1u32);
 
     let pool = t.client.get_pool(&pool_id).expect("pool must exist");
-    assert_eq!(pool.status, PoolStatus::Settled(1), "status must be Settled(1)");
+    assert_eq!(
+        pool.status,
+        PoolStatus::Settled(1),
+        "status must be Settled(1)"
+    );
 }
 
 // ============================================================================
@@ -1279,7 +1287,9 @@ fn g1_treasury_recipient_can_be_rotated() {
     client.initialize(&token_id.address(), &original_recipient);
 
     // Verify original recipient is set
-    let current = client.get_treasury_recipient().expect("recipient must be set");
+    let current = client
+        .get_treasury_recipient()
+        .expect("recipient must be set");
     assert_eq!(current, original_recipient);
 
     // Rotate to new recipient
@@ -1287,7 +1297,9 @@ fn g1_treasury_recipient_can_be_rotated() {
     client.rotate_treasury_recipient(&original_recipient, &new_recipient);
 
     // Verify new recipient is now set
-    let updated = client.get_treasury_recipient().expect("recipient must be set");
+    let updated = client
+        .get_treasury_recipient()
+        .expect("recipient must be set");
     assert_eq!(updated, new_recipient);
 }
 
@@ -1369,7 +1381,10 @@ fn g3_after_rotation_only_new_recipient_can_withdraw() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.withdraw_treasury(&original_recipient, &treasury_balance);
     }));
-    assert!(result.is_err(), "old recipient should not be able to withdraw");
+    assert!(
+        result.is_err(),
+        "old recipient should not be able to withdraw"
+    );
 
     // New recipient should be able to withdraw
     client.withdraw_treasury(&new_recipient, &treasury_balance);
@@ -1399,7 +1414,9 @@ fn g4_rotation_emits_event_with_old_and_new_addresses() {
 
     // Event verification would be done through event inspection in production
     // For this test, we verify the state change occurred
-    let updated = client.get_treasury_recipient().expect("recipient must be set");
+    let updated = client
+        .get_treasury_recipient()
+        .expect("recipient must be set");
     assert_eq!(updated, new_recipient);
 }
 
@@ -1425,14 +1442,18 @@ fn g5_multiple_rotations_work_correctly() {
     client.rotate_treasury_recipient(&recipient2, &recipient3);
 
     // Verify final recipient is set
-    let final_recipient = client.get_treasury_recipient().expect("recipient must be set");
+    let final_recipient = client
+        .get_treasury_recipient()
+        .expect("recipient must be set");
     assert_eq!(final_recipient, recipient3);
 
     // Verify only final recipient can rotate
     let recipient4 = Address::generate(&env);
     client.rotate_treasury_recipient(&recipient3, &recipient4);
 
-    let updated = client.get_treasury_recipient().expect("recipient must be set");
+    let updated = client
+        .get_treasury_recipient()
+        .expect("recipient must be set");
     assert_eq!(updated, recipient4);
 }
 
