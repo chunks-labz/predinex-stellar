@@ -2,6 +2,7 @@
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Env, String, Symbol, Vec};
 
 mod test;
+mod fuzz_tests;
 
 #[derive(Clone)]
 #[contracttype]
