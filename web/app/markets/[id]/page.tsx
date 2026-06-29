@@ -145,14 +145,37 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
 
 
-    // Loading state
+    // Loading state - skeleton shaped like the resolved pool detail layout
     if (isLoading) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
-                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh]">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
-                    <p className="text-muted-foreground">Loading pool from Soroban...</p>
+                <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6 animate-fade-in" role="status" aria-busy="true">
+                    <span className="sr-only">Loading pool from Soroban…</span>
+                    <div className="glass p-8 rounded-2xl border border-border animate-pulse" aria-hidden="true">
+                        {/* Header */}
+                        <div className="flex justify-between items-center mb-6">
+                            <div className="h-4 w-24 bg-muted/50 rounded" />
+                            <div className="h-6 w-20 bg-muted/50 rounded-full" />
+                        </div>
+                        {/* Title + description */}
+                        <div className="h-8 w-3/4 bg-muted/60 rounded mb-3" />
+                        <div className="h-4 w-full bg-muted/40 rounded mb-2" />
+                        <div className="h-4 w-5/6 bg-muted/40 rounded mb-8" />
+                        {/* Stat cards */}
+                        <div className="grid grid-cols-3 gap-4 mb-8">
+                            {Array.from({ length: 3 }).map((_, i) => (
+                                <div key={i} className="bg-muted/40 p-4 rounded-lg h-24" />
+                            ))}
+                        </div>
+                        {/* Odds bar */}
+                        <div className="mb-8">
+                            <div className="h-3 w-24 bg-muted/40 rounded mb-2" />
+                            <div className="h-4 w-full bg-muted/50 rounded-full" />
+                        </div>
+                        {/* Betting section */}
+                        <div className="h-40 w-full bg-muted/30 rounded-xl" />
+                    </div>
                 </div>
             </main>
         );
@@ -210,7 +233,7 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         <main className="min-h-screen bg-background text-foreground">
             <Navbar />
 
-            <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6">
+            <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6 animate-fade-in">
                 <div className="glass p-8 rounded-2xl border border-border">
                     {/* Header */}
                     <div className="flex justify-between items-start mb-6">

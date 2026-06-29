@@ -48,7 +48,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <DashboardHeader />
-      <DashboardStatsSections stats={stats} />
+      <DashboardStatsSections stats={stats} isLoading={isLoading} />
       <DashboardTabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
       {activeTab === 'overview' && <DashboardOverviewPanel bets={bets} isLoading={isLoading} />}

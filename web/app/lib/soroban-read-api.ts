@@ -12,6 +12,9 @@
  */
 
 import { getRuntimeConfig } from './runtime-config';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('soroban-read-api');
 import type { Pool, UserBetData } from './stacks-api';
 
 // ---------------------------------------------------------------------------

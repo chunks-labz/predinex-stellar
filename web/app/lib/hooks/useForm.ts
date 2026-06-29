@@ -4,6 +4,9 @@
  */
 
 import { useState, useCallback } from 'react';
+import { createScopedLogger } from '@/app/lib/logger';
+
+const log = createScopedLogger('useForm');
 
 interface FormErrors {
   [key: string]: string;

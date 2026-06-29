@@ -2,6 +2,7 @@
 
 import { RefreshCw, AlertCircle, Search } from 'lucide-react';
 import MarketCard from '@/components/MarketCard';
+import MarketCardSkeleton from '@/components/MarketCardSkeleton';
 import { ProcessedMarket } from '@/app/lib/market-types';
 import Link from 'next/link';
 
@@ -24,16 +25,22 @@ export default function MarketGrid({
   searchQuery = '',
   hasFilters = false
 }: MarketGridProps) {
-  // Loading state
+  // Loading state - skeleton grid matching the real market card layout
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-            <p className="text-muted-foreground">Loading markets...</p>
-          </div>
-        </div>
+      <div className="space-y-6 animate-fade-in" role="status" aria-busy="true">
+        <span className="sr-only">Loading markets…</span>
+        <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" aria-hidden="true" />
+        <ul
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 list-none p-0 m-0"
+          aria-hidden="true"
+        >
+          {Array.from({ length: 8 }).map((_, i) => (
+            <li key={i}>
+              <MarketCardSkeleton />
+            </li>
+          ))}
+        </ul>
       </div>
     );
   }

@@ -7,6 +7,9 @@ import { AppConfig, UserSession, showConnect, FinishedAuthData, UserData } from 
 import { STACKS_MAINNET, STACKS_TESTNET, StacksNetwork } from '@stacks/network';
 import { ClarityValue, type PostCondition, type PostConditionMode } from '@stacks/transactions';
 import { formatDisplayAddress } from './address-display';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('wallet-service');
 
 export type WalletType = 'hiro' | 'xverse' | 'leather' | 'unknown';
 export type NetworkType = 'mainnet' | 'testnet';
