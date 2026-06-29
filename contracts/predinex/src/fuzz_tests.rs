@@ -32,31 +32,36 @@ impl Ctx {
         // SAFETY: we own `env` for the full test lifetime; the 'static cast is
         // sound within a single-threaded test.
         let client = unsafe {
-            core::mem::transmute::<
-                PredinexContractClient<'_>,
-                PredinexContractClient<'static>,
-            >(PredinexContractClient::new(&env, &contract_id))
+            core::mem::transmute::<PredinexContractClient<'_>, PredinexContractClient<'static>>(
+                PredinexContractClient::new(&env, &contract_id),
+            )
         };
 
         let token_admin_addr = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin_addr.clone());
 
         let token = unsafe {
-            core::mem::transmute::<token::Client<'_>, token::Client<'static>>(
-                token::Client::new(&env, &token_id.address()),
-            )
+            core::mem::transmute::<token::Client<'_>, token::Client<'static>>(token::Client::new(
+                &env,
+                &token_id.address(),
+            ))
         };
         let token_admin = unsafe {
-            core::mem::transmute::<
-                token::StellarAssetClient<'_>,
-                token::StellarAssetClient<'static>,
-            >(token::StellarAssetClient::new(&env, &token_id.address()))
+            core::mem::transmute::<token::StellarAssetClient<'_>, token::StellarAssetClient<'static>>(
+                token::StellarAssetClient::new(&env, &token_id.address()),
+            )
         };
 
         let treasury = Address::generate(&env);
         client.initialize(&token_id.address(), &treasury);
 
-        Self { env, client, token, token_admin, treasury }
+        Self {
+            env,
+            client,
+            token,
+            token_admin,
+            treasury,
+        }
     }
 
     /// Create a pool and advance ledger so it is ready to expire when needed.
@@ -81,7 +86,9 @@ impl Ctx {
 
     fn expire(&self, pool_id: u32) {
         let pool = self.client.get_pool(&pool_id).unwrap();
-        self.env.ledger().with_mut(|l| l.timestamp = pool.expiry + 1);
+        self.env
+            .ledger()
+            .with_mut(|l| l.timestamp = pool.expiry + 1);
     }
 
     fn settle(&self, pool_id: u32, outcome: u32) {
@@ -99,7 +106,7 @@ fn fuzz_fee_total_never_exceeds_deposit() {
     // Test a matrix of (total_a, total_b) pairs including edge values.
     let cases: &[(i128, i128)] = &[
         (1, 1),
-        (1, 0),       // all on one side
+        (1, 0), // all on one side
         (0, 1),
         (100, 0),
         (0, 100),
@@ -133,7 +140,10 @@ fn fuzz_fee_total_never_exceeds_deposit() {
         // Use the winning side as `a` (outcome 0).
         if a > 0 {
             let winner_share = (a * net) / a; // = net when only one winner
-            assert!(winner_share <= net, "single winner exceeds net for a={a} b={b}");
+            assert!(
+                winner_share <= net,
+                "single winner exceeds net for a={a} b={b}"
+            );
         }
     }
 }
@@ -157,10 +167,7 @@ fn fuzz_sum_of_payouts_le_net_balance() {
         let fee = (total * 2) / 100;
         let net = total - fee;
 
-        let sum_payouts: i128 = bets
-            .iter()
-            .map(|&b| (b * net) / total_a)
-            .sum();
+        let sum_payouts: i128 = bets.iter().map(|&b| (b * net) / total_a).sum();
 
         assert!(
             sum_payouts <= net,
@@ -205,7 +212,10 @@ fn fuzz_single_participant_all_on_one_side() {
     // With only outcome-A bets, total = bet, fee = bet*2/100, net = bet - fee.
     let expected = bet - (bet * 2) / 100;
     assert_eq!(payout, expected);
-    assert!(payout <= bet, "single-participant payout {payout} > deposited {bet}");
+    assert!(
+        payout <= bet,
+        "single-participant payout {payout} > deposited {bet}"
+    );
 }
 
 /// Pool with outcome-B winners: payout invariant holds symmetrically.
@@ -234,9 +244,7 @@ fn fuzz_pool_creation_max_duration() {
     // either succeed (wrapping disabled by overflow-checks=true in release,
     // but tests use debug which traps) or produce a clear panic.
     // We use catch_unwind to assert no silent UB.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ctx.make_pool(u64::MAX)
-    }));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ctx.make_pool(u64::MAX)));
     // Either a pool is created (unlikely due to overflow) or it panics
     // with a known message. The important thing: no silent corruption.
     let _ = result; // outcome is either Ok or Err(panic), both are acceptable
