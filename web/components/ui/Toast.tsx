@@ -12,10 +12,7 @@ interface ToastProps {
 
 /**
  * Toast - Ephemeral notification component
- * @param message The notification message
- * @param type The type of notification (success, error, info, warning)
- * @param duration How long to show the toast in ms
- * @param onClose Callback when toast is closed
+ * #458 a11y: uses role="status"/"alert" and aria-live for screen reader announcements.
  */
 export default function Toast({
     message,
@@ -28,17 +25,17 @@ export default function Toast({
     useEffect(() => {
         const timer = setTimeout(() => {
             setIsVisible(false);
-            setTimeout(onClose, 300); // Wait for fade-out animation
+            setTimeout(onClose, 300);
         }, duration);
 
         return () => clearTimeout(timer);
     }, [duration, onClose]);
 
     const icons = {
-        success: <CheckCircle className="w-5 h-5 text-green-500" />,
-        error: <AlertCircle className="w-5 h-5 text-red-500" />,
-        info: <Info className="w-5 h-5 text-blue-500" />,
-        warning: <AlertTriangle className="w-5 h-5 text-amber-500" />,
+        success: <CheckCircle className="w-5 h-5 text-green-500" aria-hidden="true" />,
+        error: <AlertCircle className="w-5 h-5 text-red-500" aria-hidden="true" />,
+        info: <Info className="w-5 h-5 text-blue-500" aria-hidden="true" />,
+        warning: <AlertTriangle className="w-5 h-5 text-amber-500" aria-hidden="true" />,
     };
 
     const bgClasses = {
@@ -48,8 +45,17 @@ export default function Toast({
         warning: 'bg-amber-500/10 border-amber-500/20',
     };
 
+    // Errors use role="alert" (assertive); others use role="status" (polite)
+    const role = type === 'error' ? 'alert' : 'status';
+    const ariaLive = type === 'error' ? 'assertive' : 'polite';
+
     return (
-        <div className={`fixed bottom-4 right-4 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl border glass shadow-2xl transition-all duration-300 transform ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'} ${bgClasses[type]}`}>
+        <div
+            role={role}
+            aria-live={ariaLive}
+            aria-atomic="true"
+            className={`fixed bottom-4 right-4 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl border glass shadow-2xl transition-all duration-300 transform ${isVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'} ${bgClasses[type]}`}
+        >
             {icons[type]}
             <p className="text-sm font-medium">{message}</p>
             <button
@@ -58,8 +64,9 @@ export default function Toast({
                     setTimeout(onClose, 300);
                 }}
                 className="p-1 hover:bg-white/10 rounded-lg transition-colors"
+                aria-label="Dismiss notification"
             >
-                <X className="w-4 h-4 text-muted-foreground" />
+                <X className="w-4 h-4 text-muted-foreground" aria-hidden="true" />
             </button>
         </div>
     );

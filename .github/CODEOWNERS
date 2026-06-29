@@ -1,0 +1,27 @@
+# CODEOWNERS for Predinex Stellar
+# This file defines ownership for various areas of the repository to route reviews.
+# For more information on CODEOWNERS, see:
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global Fallback
+# Review all changes by default
+*                                   @dimka90
+
+# Contracts Area
+# Core logic, tests, and contract documentation
+/contracts/                         @dimka90 @JamesVictor-O @AlphaTechini
+
+# Web Area
+# Frontend application, UI components, and web-specific docs
+/web/                               @dimka90 @DeborahOlaboye @biokes
+
+# CI/CD & Operations
+# GitHub Actions, scripts, and automation
+/.github/workflows/                 @dimka90
+/scripts/                           @dimka90
+
+# Documentation
+# General documentation and markdown files
+/docs/                              @dimka90 @DeborahOlaboye @biokes
+/*.md                               @dimka90 @DeborahOlaboye @biokes
+/web/docs/                          @dimka90 @DeborahOlaboye @biokes

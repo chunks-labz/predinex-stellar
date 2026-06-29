@@ -1,12 +1,31 @@
+/**
+ * @deprecated This module is deprecated and maintained for backward compatibility only.
+ *
+ * The Stacks/Hiro API integration is being phased out in favor of Soroban-native reads.
+ * For new code, please use:
+ * - `soroban-read-api.ts` for contract reads (getPool, getUserBet, getPoolCount)
+ * - `soroban-event-service.ts` for user activity
+ * - `predinex-read-api.ts` as the canonical adapter interface
+ *
+ * This file will be removed in a future release.
+ */
 import { STACKS_MAINNET, STACKS_TESTNET, StacksNetwork } from "@stacks/network";
 import { fetchCallReadOnlyFunction, cvToValue, uintCV, principalCV, ClarityValue } from "@stacks/transactions";
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('stacks-api');
 import { getRuntimeConfig } from "./runtime-config";
+import { getPoolCountFromSoroban, getPoolsBatchFromSoroban } from "./soroban-read-api";
 
 function getStacksNetwork(): StacksNetwork {
     const cfg = getRuntimeConfig();
     return cfg.network === 'testnet' ? STACKS_TESTNET : STACKS_MAINNET;
 }
 
+/**
+ * Normalized prediction-market pool data shared across Stacks and Soroban read layers.
+ *
+ * @deprecated Prefer {@link Pool} types re-exported from `soroban-read-api.ts` for new Soroban code.
+ */
 export interface Pool {
     id: number;
     title: string;
@@ -16,12 +35,32 @@ export interface Pool {
     outcomeB: string;
     totalA: number;
     totalB: number;
+    /**
+     * Per-pool bet minimum in raw token units (stroops).
+     * When absent (legacy pools / older deployments), the UI falls back to defaults.
+     */
+    minBet?: number;
+    /**
+     * Per-pool bet maximum in raw token units (stroops).
+     * A value of `0` may be treated as "no maximum" by the frontend.
+     */
+    maxBet?: number;
     settled: boolean;
     winningOutcome: number | undefined;
     expiry: number;
     status: 'active' | 'settled' | 'expired';
+    /**
+     * Number of unique participants who have bet in this pool.
+     */
+    participant_count?: number;
 }
 
+/**
+ * Fetches the total number of pools via a Stacks Clarity read-only call to `get-pool-count`.
+ *
+ * @deprecated Use {@link getPoolCountFromSoroban} from `soroban-read-api.ts` instead.
+ * @returns Total pool count, or `0` on RPC or parsing failure.
+ */
 export async function getPoolCount(): Promise<number> {
     try {
         const cfg = getRuntimeConfig();
@@ -29,7 +68,7 @@ export async function getPoolCount(): Promise<number> {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: cfg.contract.address,
             contractName: cfg.contract.name,
-            functionName: 'get-pool-count',
+            functionName: 'get_pool_count',
             functionArgs: [],
             senderAddress: cfg.contract.address,
             network,
@@ -38,11 +77,18 @@ export async function getPoolCount(): Promise<number> {
         const value = cvToValue(result);
         return Number(value);
     } catch (e) {
-        console.error("Failed to fetch pool count", e);
+        log.error("Failed to fetch pool count", e);
         return 0;
     }
 }
 
+/**
+ * Fetches a single pool by ID via a Stacks Clarity read-only call to `get-pool`.
+ *
+ * @deprecated Use {@link soroban-read-api!getPoolFromSoroban} from `soroban-read-api.ts` instead.
+ * @param poolId - Numeric pool identifier (1-based in the Predinex contract).
+ * @returns Normalized pool data, or `null` if the pool does not exist or the read fails.
+ */
 export async function getPool(poolId: number): Promise<Pool | null> {
     try {
         const cfg = getRuntimeConfig();
@@ -50,7 +96,7 @@ export async function getPool(poolId: number): Promise<Pool | null> {
         const result = await fetchCallReadOnlyFunction({
             contractAddress: cfg.contract.address,
             contractName: cfg.contract.name,
-            functionName: 'get-pool',
+            functionName: 'get_pool',
             functionArgs: [uintCV(poolId)],
             senderAddress: cfg.contract.address,
             network,
@@ -76,18 +122,34 @@ export async function getPool(poolId: number): Promise<Pool | null> {
             status: value.settled ? 'settled' : 'active',
         };
     } catch (e) {
-        console.error(`Failed to fetch pool ${poolId}`, e);
+        log.error(`Failed to fetch pool ${poolId}`, e);
         return null;
     }
 }
 
+/**
+ * Lists pools with optional settlement filtering.
+ *
+ * Internally delegates batch reads to Soroban (`getPoolCountFromSoroban`, `getPoolsBatchFromSoroban`)
+ * rather than per-pool Stacks Clarity calls.
+ *
+ * @param filter - Which pools to include: `'active'`, `'settled'`, or `'all'` (default `'all'`).
+ * @returns Array of matching pools; empty when count is unavailable or no pools match.
+ *
+ * @example
+ * ```ts
+ * const openMarkets = await getMarkets('active');
+ * const allMarkets = await getMarkets();
+ * ```
+ */
 export async function getMarkets(filter: 'active' | 'settled' | 'all' = 'all'): Promise<Pool[]> {
-    const count = await getPoolCount();
+    const count = await getPoolCountFromSoroban();
+    if (count === 0) return [];
+
+    const rawPools = await getPoolsBatchFromSoroban(1, count);
     const pools: Pool[] = [];
 
-    // pool IDs start from 0
-    for (let i = 0; i < count; i++) {
-        const pool = await getPool(i);
+    for (const pool of rawPools) {
         if (pool) {
             if (filter === 'active' && pool.settled) continue;
             if (filter === 'settled' && !pool.settled) continue;
@@ -97,16 +159,26 @@ export async function getMarkets(filter: 'active' | 'settled' | 'all' = 'all'): 
     return pools;
 }
 
-/** Alias for getMarkets('active') — used by tests */
+/**
+ * Convenience wrapper around {@link getMarkets} that returns only unsettled pools.
+ *
+ * @returns Active (non-settled) pools, or an empty array on failure.
+ */
 export async function fetchActivePools(): Promise<Pool[]> {
     try {
         return await getMarkets('active');
     } catch (e) {
-        console.error('Failed to fetch active pools', e);
+        log.error('Failed to fetch active pools', e);
         return [];
     }
 }
 
+/**
+ * Fetches aggregate betting volume via a Stacks Clarity read-only call to `get-total-volume`.
+ *
+ * @deprecated No Soroban equivalent is exposed here; prefer contract-specific reads in `soroban-read-api.ts`.
+ * @returns Total volume in raw token units (stroops), or `0` on failure.
+ */
 export async function getTotalVolume(): Promise<number> {
     try {
         const cfg = getRuntimeConfig();
@@ -123,17 +195,31 @@ export async function getTotalVolume(): Promise<number> {
         const value = cvToValue(result);
         return Number(value);
     } catch (e) {
-        console.error("Error fetching total volume:", e);
+        log.error("Error fetching total volume:", e);
         return 0;
     }
 }
 
+/**
+ * A user's stake split across both outcomes for a single pool.
+ */
 export interface UserBetData {
+    /** Amount wagered on outcome A in raw token units (stroops). */
     amountA: number;
+    /** Amount wagered on outcome B in raw token units (stroops). */
     amountB: number;
+    /** Combined stake (`amountA + amountB`) in raw token units (stroops). */
     totalBet: number;
 }
 
+/**
+ * Fetches a user's bet for a pool via a Stacks Clarity read-only call to `get-user-bet`.
+ *
+ * @deprecated Use {@link soroban-read-api!getUserBetFromSoroban} from `soroban-read-api.ts` instead.
+ * @param poolId - Numeric pool identifier.
+ * @param userAddress - Stacks principal address (e.g. `SP...`).
+ * @returns Bet breakdown per outcome, or `null` if the user has no bet or the read fails.
+ */
 export async function getUserBet(poolId: number, userAddress: string): Promise<UserBetData | null> {
     try {
         const cfg = getRuntimeConfig();
@@ -141,7 +227,7 @@ export async function getUserBet(poolId: number, userAddress: string): Promise<U
         const result = await fetchCallReadOnlyFunction({
             contractAddress: cfg.contract.address,
             contractName: cfg.contract.name,
-            functionName: 'get-user-bet',
+            functionName: 'get_user_bet',
             functionArgs: [uintCV(poolId), principalCV(userAddress)],
             senderAddress: cfg.contract.address,
             network,
@@ -163,32 +249,54 @@ export async function getUserBet(poolId: number, userAddress: string): Promise<U
             totalBet: toNumber((value['total-bet'] as { value?: unknown } | undefined)?.value ?? value['total-bet']),
         };
     } catch (e) {
-        console.error(`Failed to fetch user bet for pool ${poolId}`, e);
+        log.error(`Failed to fetch user bet for pool ${poolId}`, e);
         return null;
     }
 }
 
 // --- Activity Feed ---
 
+/**
+ * Parsed on-chain contract event payload attached to a user activity item.
+ */
 export interface ActivityEvent {
+    /** High-level event category derived from contract print events. */
     type: 'bet' | 'pool-creation' | 'settlement' | 'claim';
+    /** Pool ID referenced by the event, when applicable. */
     poolId?: number;
+    /** Human-readable pool title (pool-creation events only). */
     poolTitle?: string;
+    /** Bet or claim amount in raw token units (stroops), when applicable. */
     amount?: number;
+    /** Outcome index (0 = A, 1 = B) for bet events. */
     outcome?: number;
+    /** Winnings claimed in raw token units (stroops), for claim events. */
     winnerAmount?: number;
 }
 
+/**
+ * A single user-facing activity row built from a Stacks transaction.
+ */
 export interface ActivityItem {
+    /** Stacks transaction ID (hex). */
     txId: string;
+    /** UI-oriented activity classification. */
     type: 'bet-placed' | 'winnings-claimed' | 'pool-created' | 'contract-call';
+    /** Clarity function name invoked in the contract call. */
     functionName: string;
+    /** Unix timestamp (seconds) from `burn_block_time`, or current time as fallback. */
     timestamp: number;
+    /** Transaction execution status mapped from Stacks `tx_status`. */
     status: 'success' | 'pending' | 'failed';
+    /** Bet or claim amount in raw token units (stroops), when extractable. */
     amount?: number;
+    /** Pool ID from event data or function arguments. */
     poolId?: number;
+    /** Pool title from event data, when available. */
     poolTitle?: string;
+    /** Full explorer URL for the transaction. */
     explorerUrl: string;
+    /** Richer event payload parsed from contract print events, when present. */
     event?: ActivityEvent;
 }
 
@@ -317,25 +425,40 @@ function extractPoolInfo(args: StacksFunctionArg[]): { amount?: number; poolId?:
 }
 
 /**
- * Injectable configuration for getUserActivity, enabling test isolation.
+ * Injectable configuration for {@link getUserActivity}, enabling test isolation.
+ *
+ * @deprecated User activity is migrating to `soroban-event-service.ts` for Soroban deployments.
  */
 export interface ActivityConfig {
-    /** Base URL for the Stacks API, e.g. https://api.testnet.hiro.so */
+    /** Base URL for the Stacks API, e.g. `https://api.testnet.hiro.so`. */
     apiBaseUrl: string;
-    /** Explorer base URL used to build transaction links */
+    /** Explorer base URL used to build transaction links. */
     explorerUrl: string;
-    /** Contract address used to filter Predinex transactions */
+    /** Contract address used to filter Predinex transactions. */
     contractAddress: string;
 }
 
 /**
- * Fetches recent on-chain activity for a user address by querying the
- * Stacks blockchain API for contract-call transactions targeting the
- * Predinex contract. Uses contract events when available for richer data.
+ * Fetches recent on-chain activity for a user by querying the Hiro Stacks API
+ * for contract-call transactions targeting the Predinex contract.
  *
- * @param userAddress - Stacks principal to query
- * @param limit       - Maximum number of transactions to fetch (default 20)
- * @param config      - Optional injectable config; falls back to module-level constants
+ * Enriches each row with contract print events and function-argument parsing when available.
+ *
+ * @deprecated Use `soroban-event-service.ts` for Soroban-native activity feeds.
+ * @param userAddress - Stacks principal to query.
+ * @param limit - Maximum number of transactions to fetch (default `20`).
+ * @param config - Optional injectable config; falls back to `getRuntimeConfig()` when omitted.
+ * @returns Chronologically mapped activity items; empty array on API or network failure.
+ *
+ * @example
+ * ```ts
+ * const activity = await getUserActivity('SP2J6ZY48GV1EZ5V2V5RB9MP66SW86PYKKQZML1T', 10);
+ * const testActivity = await getUserActivity('SP...', 5, {
+ *   apiBaseUrl: 'https://api.testnet.hiro.so',
+ *   explorerUrl: 'https://explorer.hiro.so',
+ *   contractAddress: 'SP...',
+ * });
+ * ```
  */
 export async function getUserActivity(
     userAddress: string,
@@ -365,7 +488,7 @@ export async function getUserActivity(
         const response = await fetch(url);
 
         if (!response.ok) {
-            console.error(`Stacks API error: ${response.status}`);
+            log.error(`Stacks API error: ${response.status}`);
             return [];
         }
 
@@ -387,9 +510,9 @@ export async function getUserActivity(
             const fnName: string = callInfo?.function_name || 'unknown';
 
             let type: ActivityItem['type'] = 'contract-call';
-            if (fnName === 'place-bet') type = 'bet-placed';
-            else if (fnName === 'claim-winnings') type = 'winnings-claimed';
-            else if (fnName === 'create-pool') type = 'pool-created';
+            if (fnName === 'place_bet') type = 'bet-placed';
+            else if (fnName === 'claim_winnings') type = 'winnings-claimed';
+            else if (fnName === 'create_pool') type = 'pool-created';
 
             let status: ActivityItem['status'] = 'pending';
             if (tx.tx_status === 'success') status = 'success';
@@ -416,7 +539,7 @@ export async function getUserActivity(
             };
         });
     } catch (e) {
-        console.error('Failed to fetch user activity', e);
+        log.error('Failed to fetch user activity', e);
         return [];
     }
 }

@@ -16,6 +16,7 @@ export function calculateDashboardStats(userBets: UserBet[]): DashboardStats {
     winRate: Math.round(winRate),
     activeBets,
     settledBets,
+    lastUpdated: Date.now(),
   };
 }
 

@@ -5,7 +5,8 @@ import { STACKS_MAINNET, STACKS_TESTNET, type StacksNetwork } from "@stacks/netw
 import { UserBet, BetHistory, DashboardData } from "./dashboard-types";
 import { PoolData } from "./market-types";
 import { fetchAllPools, getEnhancedPool } from "./enhanced-stacks-api";
-import { 
+import { getCurrentBlockHeight } from './market-utils';
+import {
   calculatePortfolio, 
   calculatePotentialWinnings, 
   calculateActualWinnings,
@@ -15,6 +16,9 @@ import {
   calculateBetProfitLoss
 } from "./dashboard-utils";
 import { getRuntimeConfig } from "./runtime-config";
+import { createScopedLogger } from "./logger";
+
+const log = createScopedLogger('dashboard-api');
 
 function getStacksNetwork(): StacksNetwork {
   const cfg = getRuntimeConfig();
@@ -37,7 +41,7 @@ export async function getUserBets(userAddress: string): Promise<UserBet[]> {
         const result = await fetchCallReadOnlyFunction({
           contractAddress: cfg.contract.address,
           contractName: cfg.contract.name,
-          functionName: 'get-user-bet',
+          functionName: 'get_user_bet',
           functionArgs: [uintCV(pool.poolId), principalCV(userAddress)],
           senderAddress: cfg.contract.address,
           network,
@@ -46,11 +50,9 @@ export async function getUserBets(userAddress: string): Promise<UserBet[]> {
         const betData = cvToValue(result, true);
         if (betData && (betData['amount-a'] > 0 || betData['amount-b'] > 0)) {
           // User has bets in this pool
-          const amountA = Number(betData['amount-a'] || 0);
-          const amountB = Number(betData['amount-b'] || 0);
-          const totalBet = Number(betData['total-bet'] || 0);
+          const amountA = BigInt(betData['amount-a'] || 0);
+          const amountB = BigInt(betData['amount-b'] || 0);
           
-          // Determine which outcome was chosen and create bet records
           if (amountA > 0) {
             const bet = await createUserBet(pool, userAddress, 'A', amountA);
             if (bet) userBets.push(bet);
@@ -62,13 +64,13 @@ export async function getUserBets(userAddress: string): Promise<UserBet[]> {
           }
         }
       } catch (error) {
-        console.error(`Failed to get user bet for pool ${pool.poolId}:`, error);
+        log.error(`Failed to get user bet for pool ${pool.poolId}`, error);
       }
     }
     
     return userBets;
   } catch (error) {
-    console.error('Failed to get user bets:', error);
+    log.error('Failed to get user bets', error);
     return [];
   }
 }
@@ -80,10 +82,10 @@ async function createUserBet(
   pool: PoolData,
   userAddress: string,
   outcome: 'A' | 'B',
-  betAmount: number
+  betAmount: bigint
 ): Promise<UserBet | null> {
   try {
-    const currentBlockHeight = 150000; // Mock current block height
+    const currentBlockHeight = getCurrentBlockHeight();
     
     // Determine market status
     let status: 'active' | 'won' | 'lost' | 'expired' = 'active';
@@ -96,9 +98,9 @@ async function createUserBet(
       
       if (status === 'won') {
         claimableAmount = calculateActualWinnings(
-          betAmount,
-          Number(pool.totalA),
-          Number(pool.totalB),
+          BigInt(betAmount),
+          pool.totalA,
+          pool.totalB,
           outcome,
           winningOutcome
         );
@@ -113,16 +115,16 @@ async function createUserBet(
     
     const potentialWinnings = status === 'active' 
       ? calculatePotentialWinnings(
-          betAmount,
-          Number(pool.totalA),
-          Number(pool.totalB),
+          BigInt(betAmount),
+          pool.totalA,
+          pool.totalB,
           outcome
         )
       : 0;
     
     const currentOdds = calculateCurrentOdds(
-      Number(pool.totalA),
-      Number(pool.totalB),
+      pool.totalA,
+      pool.totalB,
       outcome
     );
     
@@ -131,7 +133,7 @@ async function createUserBet(
       marketTitle: pool.title,
       outcomeChosen: outcome,
       outcomeName: outcome === 'A' ? pool.outcomeAName : pool.outcomeBName,
-      amountBet: betAmount,
+      amountBet: Number(betAmount),
       betTimestamp: pool.createdAt, // Mock: use pool creation time
       currentOdds,
       potentialWinnings,
@@ -140,7 +142,7 @@ async function createUserBet(
       claimableAmount: claimableAmount > 0 ? claimableAmount : undefined
     };
   } catch (error) {
-    console.error('Failed to create user bet:', error);
+    log.error('Failed to create user bet', error);
     return null;
   }
 }
@@ -161,8 +163,10 @@ async function checkIfClaimed(poolId: number, userAddress: string): Promise<bool
       network,
     });
     
-    // Mock implementation - in real app, would check claims map
-    return false;
+    // After claiming, the contract removes the bet record; absence means claimed
+    const betData = cvToValue(result, true);
+    const hasBet = betData && (betData['amount-a'] > 0 || betData['amount-b'] > 0);
+    return !hasBet;
   } catch (error) {
     return false;
   }
@@ -171,11 +175,11 @@ async function checkIfClaimed(poolId: number, userAddress: string): Promise<bool
 /**
  * Calculate current odds for a specific outcome
  */
-function calculateCurrentOdds(totalA: number, totalB: number, outcome: 'A' | 'B'): number {
-  const total = totalA + totalB;
+function calculateCurrentOdds(totalA: bigint, totalB: bigint, outcome: 'A' | 'B'): number {
+  const total = Number(totalA + totalB);
   if (total === 0) return 50;
-  
-  const outcomeAmount = outcome === 'A' ? totalA : totalB;
+
+  const outcomeAmount = outcome === 'A' ? Number(totalA) : Number(totalB);
   return Math.round((outcomeAmount / total) * 100);
 }
 
@@ -215,7 +219,7 @@ export async function fetchDashboardData(userAddress: string): Promise<Dashboard
       lastUpdated: Date.now()
     };
   } catch (error) {
-    console.error('Failed to fetch dashboard data:', error);
+    log.error('Failed to fetch dashboard data', error);
     throw error;
   }
 }
@@ -226,23 +230,4 @@ export async function fetchDashboardData(userAddress: string): Promise<Dashboard
 export async function getClaimableWinnings(userAddress: string): Promise<UserBet[]> {
   const userBets = await getUserBets(userAddress);
   return userBets.filter(isClaimEligible);
-}
-
-/**
- * Execute claim transaction for a specific pool
- */
-export async function claimWinnings(poolId: number): Promise<{ success: boolean; txId?: string; error?: string }> {
-  try {
-    // This would integrate with the wallet to execute the claim transaction
-    // For now, return a mock success response
-    return {
-      success: true,
-      txId: `mock-tx-${poolId}-${Date.now()}`
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
 }

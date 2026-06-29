@@ -1,8 +1,10 @@
 'use client';
 
-import { BarChart3, TrendingUp, Users, Target, DollarSign, Activity, Calendar, Trophy } from 'lucide-react';
+import { useMemo } from 'react';
+import { TrendingUp, Activity } from 'lucide-react';
 import { PlatformMetrics as PlatformMetricsType } from '../../lib/dashboard-types';
 import { formatCurrency, formatPercentage } from '../../lib/dashboard-utils';
+import { selectPlatformMetricCards, selectMarketDistribution, selectVolumeMetrics } from '../../lib/dashboard-selectors';
 
 interface PlatformMetricsProps {
   metrics: PlatformMetricsType;
@@ -10,6 +12,10 @@ interface PlatformMetricsProps {
 }
 
 export default function PlatformMetrics({ metrics, isLoading = false }: PlatformMetricsProps) {
+  const marketDistribution = useMemo(() => selectMarketDistribution(metrics), [metrics]);
+  const volumeMetrics = useMemo(() => selectVolumeMetrics(metrics), [metrics]);
+  const mainMetrics = useMemo(() => selectPlatformMetricCards(metrics), [metrics]);
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -26,53 +32,6 @@ export default function PlatformMetrics({ metrics, isLoading = false }: Platform
       </div>
     );
   }
-
-  const marketDistribution = [
-    { label: 'Active', value: metrics.activePools, color: 'text-green-500', bgColor: 'bg-green-500/10' },
-    { label: 'Settled', value: metrics.settledPools, color: 'text-blue-500', bgColor: 'bg-blue-500/10' },
-    { label: 'Expired', value: metrics.expiredPools, color: 'text-red-500', bgColor: 'bg-red-500/10' }
-  ];
-
-  const volumeMetrics = [
-    { label: 'Daily', value: metrics.dailyVolume, icon: Calendar },
-    { label: 'Weekly', value: metrics.weeklyVolume, icon: BarChart3 },
-    { label: 'Monthly', value: metrics.monthlyVolume, icon: TrendingUp }
-  ];
-
-  const mainMetrics = [
-    {
-      title: 'Total Markets',
-      value: metrics.totalPools.toString(),
-      subtitle: `${metrics.activePools} currently active`,
-      icon: Target,
-      color: 'text-blue-500',
-      bgColor: 'bg-blue-500/10'
-    },
-    {
-      title: 'Total Volume',
-      value: formatCurrency(metrics.totalVolume),
-      subtitle: `Avg: ${formatCurrency(metrics.averageMarketSize)} per market`,
-      icon: DollarSign,
-      color: 'text-green-500',
-      bgColor: 'bg-green-500/10'
-    },
-    {
-      title: 'Active Users',
-      value: metrics.totalUsers.toString(),
-      subtitle: `${metrics.totalBets} total bets placed`,
-      icon: Users,
-      color: 'text-purple-500',
-      bgColor: 'bg-purple-500/10'
-    },
-    {
-      title: 'Total Winnings',
-      value: formatCurrency(metrics.totalWinnings),
-      subtitle: `${formatPercentage((metrics.totalWinnings / Math.max(metrics.totalVolume, 1)) * 100)} of volume`,
-      icon: Trophy,
-      color: 'text-yellow-500',
-      bgColor: 'bg-yellow-500/10'
-    }
-  ];
 
   return (
     <div className="space-y-6">
@@ -98,7 +57,17 @@ export default function PlatformMetrics({ metrics, isLoading = false }: Platform
               
               <div className="space-y-1">
                 <p className="text-sm font-medium text-muted-foreground">{metric.title}</p>
-                <p className={`text-2xl font-bold ${metric.color}`}>{metric.value}</p>
+                <p className={`text-2xl font-bold ${
+                  metric.tone === 'blue'
+                    ? 'text-blue-500'
+                    : metric.tone === 'green'
+                      ? 'text-green-500'
+                      : metric.tone === 'purple'
+                        ? 'text-purple-500'
+                        : metric.tone === 'yellow'
+                          ? 'text-yellow-500'
+                          : 'text-orange-500'
+                }`}>{metric.value}</p>
                 <p className="text-xs text-muted-foreground">{metric.subtitle}</p>
               </div>
             </div>
@@ -111,21 +80,22 @@ export default function PlatformMetrics({ metrics, isLoading = false }: Platform
         <h4 className="text-lg font-semibold mb-4">Market Distribution</h4>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {marketDistribution.map((item, index) => {
-            const percentage = metrics.totalPools > 0 
-              ? (item.value / metrics.totalPools) * 100 
-              : 0;
             
             return (
               <div key={index} className="text-center">
-                <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full ${item.bgColor} mb-3`}>
-                  <span className={`text-2xl font-bold ${item.color}`}>
+                <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full ${
+                  item.tone === 'green' ? 'bg-green-500/10' : item.tone === 'blue' ? 'bg-blue-500/10' : 'bg-red-500/10'
+                } mb-3`}>
+                  <span className={`text-2xl font-bold ${
+                    item.tone === 'green' ? 'text-green-500' : item.tone === 'blue' ? 'text-blue-500' : 'text-red-500'
+                  }`}>
                     {item.value}
                   </span>
                 </div>
                 <div className="space-y-1">
                   <p className="font-medium">{item.label} Markets</p>
                   <p className="text-sm text-muted-foreground">
-                    {formatPercentage(percentage)} of total
+                    {formatPercentage(item.percentage)} of total
                   </p>
                 </div>
               </div>

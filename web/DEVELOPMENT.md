@@ -24,6 +24,8 @@ This document provides instructions for developers looking to contribute to the 
    NEXT_PUBLIC_NETWORK=testnet
    ```
 
+   Runtime config boundaries are enforced by tests. Before adding a new client-exposed env key, update `app/lib/env-boundary.ts` and `docs/RUNTIME_CONFIG_BOUNDARIES.md`.
+
 3. **Run Development Server**:
    ```bash
    npm run dev
@@ -73,6 +75,7 @@ To run the contract and the web app together locally (deploy to testnet, wire en
 
 When working on features that touch the smart contract interface:
 
+- **API Reference** — See [web/docs/CONTRACT_API.md](./docs/CONTRACT_API.md) for full entrypoint specifications.
 - **Event schemas** — Refer to [docs/CONTRACT_EVENTS.md](./docs/CONTRACT_EVENTS.md) for the canonical event payload definitions. Do not reverse-engineer event structures from the contract source.
 - **Versioning & migrations** — All contract changes (breaking or otherwise) must follow the process in [docs/CONTRACT_VERSIONING.md](./docs/CONTRACT_VERSIONING.md). Breaking interface changes require an explicit major version bump and a migration note before the PR can be merged.
 - **Error boundaries** — Route-level components should be wrapped in `<RouteErrorBoundary routeName="...">` (see `web/components/RouteErrorBoundary.tsx`). Add the wrapper when creating new top-level pages.

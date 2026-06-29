@@ -5,23 +5,49 @@
   --background: #0f172a;
   --card: #1e293b;
   --border: rgba(255, 255, 255, 0.1);
+  --text: #f8fafc;
+  --transition-smooth: 300ms ease-in-out;
+}
+
+html:not(.dark) {
+  --background: #f8fafc;
+  --card: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --text: #0f172a;
 }
 
 body {
-  background: radial-gradient(circle at top right, #1e1b4b, #0f172a);
-  color: #f8fafc;
+  background: var(--background);
+  color: var(--text);
   min-height: 100vh;
+  transition: background-color var(--transition-smooth), color var(--transition-smooth);
+}
+
+html.dark body {
+  background: radial-gradient(circle at top right, #1e1b4b, #0f172a);
 }
 
 /* Rewards Page Specifics */
 .glass-panel {
-  @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl;
-  transition: all 0.3s ease;
+  @apply backdrop-blur-xl rounded-2xl shadow-2xl transition-all;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+}
+
+html:not(.dark) .glass-panel {
+  background-color: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .glass-panel:hover {
-  @apply border-white/20 bg-white/10;
+  border-color: rgba(255, 255, 255, 0.2);
+  background-color: rgba(255, 255, 255, 0.1);
   transform: translateY(-2px);
+}
+
+html:not(.dark) .glass-panel:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 .gradient-text {
@@ -30,5 +56,4 @@ body {
 
 .btn-primary {
   @apply px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-semibold transition-all shadow-lg hover:shadow-indigo-500/25;
-}  --transition-smooth: 200ms ease-in-out;
-  --transition-smooth: 200ms ease-in-out;
+}

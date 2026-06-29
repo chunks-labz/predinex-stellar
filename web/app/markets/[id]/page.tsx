@@ -1,47 +1,97 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('page');
 
-import Navbar from "../../components/Navbar";
-import BettingSection from "../../components/BettingSection";
+import Link from "next/link";
+import Navbar from '@/components/Navbar';
+import BettingSection from '@/components/BettingSection';
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import SettledPoolSummary from "../../components/SettledPoolSummary";
-import { useWallet } from "../../components/WalletAdapterProvider";
-import { useEffect, useState } from "react";
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { useEffect, useState, useCallback } from "react";
+import { useUserActivity } from "../../hooks/useUserActivity";
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
-import { TrendingUp, Users, Clock } from "lucide-react";
+import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
+import { blocksToSeconds } from "../../lib/countdown-utils";
+import CountdownTimer from '@/components/CountdownTimer';
+import DisputeHistoryTimeline from "../../components/DisputeHistoryTimeline";
+import { useDisputeHistory } from "../../lib/hooks/useDisputeHistory";
+import PoolActivityTimeline from "../../components/PoolActivityTimeline";
+import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff } from "lucide-react";
 import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
+import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const poolId = parseInt(id);
 
     const { address: stxAddress } = useWallet();
+    const { activities, refresh: refreshActivity } = useUserActivity(stxAddress ?? undefined, 50);
+    const { isFavorite, toggleFavorite } = usePoolFavorites();
+    const favorite = isFavorite(poolId);
+    const {
+        events: disputeEvents,
+        isLoading: isLoadingDisputes,
+        error: disputeError,
+    } = useDisputeHistory(Number.isNaN(poolId) ? undefined : poolId);
 
     const [pool, setPool] = useState<Pool | null>(null);
+    const [currentBlockHeight, setCurrentBlockHeight] = useState<number | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+    const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
 
     useEffect(() => {
-        predinexReadApi.getPool(poolId).then(data => {
-            setPool(data);
-            setIsLoading(false);
-        });
+        const loadPool = async () => {
+            setIsLoading(true);
+            setError(null);
+            try {
+                const data = await predinexReadApi.getPool(poolId);
+                setPool(data);
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Failed to load pool');
+                log.error(`Failed to load pool ${poolId}:`, e);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        loadPool();
     }, [poolId]);
 
+    // Fetch the chain tip so the expiry block can be rendered as a live countdown.
     useEffect(() => {
-        if (stxAddress && poolId) {
-            predinexReadApi.getUserBet(poolId, stxAddress).then(bet => {
-                setUserBet(bet);
-            }).catch(() => setUserBet(null));
+        let cancelled = false;
+        fetchCurrentBlockHeightLive()
+            .then(({ height }) => {
+                if (!cancelled && height > 0) setCurrentBlockHeight(height);
+            })
+            .catch(() => {
+                /* Non-blocking: fall back to a plain expiry block label. */
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!stxAddress || !poolId) {
+            setUserBet(null);
+            return;
         }
+
+        predinexReadApi.getUserBet(poolId, stxAddress).then(bet => {
+            setUserBet(bet);
+        }).catch(() => setUserBet(null));
     }, [stxAddress, poolId]);
 
-    const refreshPoolData = async () => {
+    const refreshPoolData = useCallback(async () => {
         if (isRefreshing) return;
         setIsRefreshing(true);
+        setError(null);
 
         try {
             const [newPool, newBet] = await Promise.all([
@@ -50,13 +100,21 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
             ]);
 
             if (newPool) setPool(newPool);
-            if (newBet) setUserBet(newBet);
-        } catch (error) {
-            console.error("Failed to refresh pool data:", error);
+            setUserBet(newBet);
+            if (stxAddress) {
+                await refreshActivity();
+            }
+            // Clear error if refresh succeeds
+            setError(null);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : 'Failed to refresh pool data';
+            log.error("Failed to refresh pool data:", err);
+            // Don't overwrite existing pool data on refresh error
+            setError(msg);
         } finally {
             setIsRefreshing(false);
         }
-    };
+    }, [poolId, refreshActivity, stxAddress, isRefreshing]);
 
     const handleBetSuccess = (outcome: number, amountMicroSTX: number) => {
         // Optimistic update
@@ -77,26 +135,69 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         refreshPoolData();
     };
 
-    const userHasWinnings = pool?.settled && userBet &&
+    const hasClaimedWinnings = activities.some(
+        (activity) => activity.type === 'winnings-claimed' && activity.poolId === poolId
+    );
+    const userWonBet = pool?.settled && userBet &&
         ((pool.winningOutcome === 0 && userBet.amountA > 0) ||
             (pool.winningOutcome === 1 && userBet.amountB > 0));
+    const userHasWinnings = !!userWonBet && !hasClaimedWinnings;
 
 
 
+    // Loading state
     if (isLoading) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
-                <div className="pt-32 text-center">Loading pool...</div>
+                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh]">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
+                    <p className="text-muted-foreground">Loading pool from Soroban...</p>
+                </div>
             </main>
         );
     }
 
+    // Error state
+    if (error && !pool) {
+        return (
+            <main className="min-h-screen bg-background text-foreground">
+                <Navbar />
+                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
+                    <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
+                    <h2 className="text-xl font-semibold text-red-500 mb-2">Failed to Load Pool</h2>
+                    <p className="text-muted-foreground text-center max-w-md mb-6">{error}</p>
+                    <button
+                        onClick={refreshPoolData}
+                        disabled={isRefreshing}
+                        className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50"
+                    >
+                        <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+                        {isRefreshing ? 'Retrying...' : 'Try Again'}
+                    </button>
+                </div>
+            </main>
+        );
+    }
+
+    // Missing pool state
     if (!pool) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
-                <div className="pt-32 text-center text-red-500">Pool not found.</div>
+                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
+                    <AlertCircle className="w-12 h-12 text-yellow-500 mb-4" />
+                    <h2 className="text-xl font-semibold mb-2">Pool Not Found</h2>
+                    <p className="text-muted-foreground text-center max-w-md mb-6">
+                        Pool #{poolId} does not exist on the Soroban contract. It may have been removed or the ID may be incorrect.
+                    </p>
+                    <Link
+                        href="/markets"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+                    >
+                        Back to Markets
+                    </Link>
+                </div>
             </main>
         );
     }
@@ -115,7 +216,25 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                     <div className="flex justify-between items-start mb-6">
                         <span className="text-xs font-mono text-muted-foreground">#POOL-{pool.id}</span>
                         <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                aria-label={favorite ? `Unfavorite pool #${poolId}` : `Favorite pool #${poolId}`}
+                                title={favorite ? 'Remove bookmark' : 'Bookmark pool'}
+                                onClick={() => toggleFavorite(poolId)}
+                                className={`p-2 rounded-lg border transition-colors ${
+                                    favorite
+                                        ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400 hover:bg-yellow-400/15'
+                                        : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                                }`}
+                            >
+                                {favorite ? (
+                                    <Star className="w-4 h-4" fill="currentColor" strokeWidth={2} />
+                                ) : (
+                                    <StarOff className="w-4 h-4" />
+                                )}
+                            </button>
                             <ShareButton
+                                url={`${typeof window !== 'undefined' ? window.location.origin : ''}/markets/${id}`}
                                 title={pool.title}
                                 text={`Check out this prediction market: ${pool.title}`}
                             />
@@ -145,21 +264,39 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Clock className="w-5 h-5 mx-auto mb-2 text-yellow-500" />
                             <p className="text-sm text-muted-foreground">Expires</p>
-                            <p className="font-bold">Block {pool.expiry}</p>
+                            {currentBlockHeight !== null ? (
+                                <CountdownTimer
+                                    className="font-bold justify-center"
+                                    secondsRemaining={blocksToSeconds(pool.expiry - currentBlockHeight)}
+                                    settled={pool.settled}
+                                />
+                            ) : (
+                                <p className="font-bold">Block {pool.expiry}</p>
+                            )}
                         </div>
                     </div>
 
                     {/* Odds Display */}
                     <div className="mb-8">
-                        <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
-                        <div className="flex h-4 rounded-full overflow-hidden">
+                        <p className="text-sm text-muted-foreground mb-2" id="odds-bar-label">Current Odds</p>
+                        <div
+                            className="flex h-4 rounded-full overflow-hidden"
+                            role="progressbar"
+                            aria-labelledby="odds-bar-label"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={Number(oddsA)}
+                            aria-valuetext={`${pool.outcomeA}: ${oddsA}%, ${pool.outcomeB}: ${oddsB}%`}
+                        >
                             <div
                                 className="bg-green-500 transition-all"
                                 style={{ width: `${oddsA}%` }}
+                                aria-hidden="true"
                             />
                             <div
                                 className="bg-red-500 transition-all"
                                 style={{ width: `${oddsB}%` }}
+                                aria-hidden="true"
                             />
                         </div>
                         <div className="flex justify-between mt-2 text-sm">
@@ -191,6 +328,11 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                     Winner: {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
                                 </div>
                             )}
+                            {pool.settled && hasClaimedWinnings && (
+                                <div className="mt-2 text-sm text-primary" role="status">
+                                    Winnings already claimed for this market.
+                                </div>
+                            )}
                         </div>
                     )}
 
@@ -201,7 +343,9 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                             <ClaimWinningsButton
                                 poolId={poolId}
                                 isSettled={pool.settled}
-                                userHasWinnings={!!userHasWinnings}
+                                userHasWinnings={userHasWinnings}
+                                userAddress={stxAddress}
+                                onClaimSuccess={refreshPoolData}
                             />
                         </div>
                     ) : (
@@ -219,6 +363,18 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                             />
                         </div>
                     )}
+
+                    <DisputeHistoryTimeline
+                        events={disputeEvents}
+                        isLoading={isLoadingDisputes}
+                        error={disputeError}
+                    />
+
+                    <PoolActivityTimeline
+                        poolId={poolId}
+                        outcomeLabels={[pool.outcomeA, pool.outcomeB]}
+                        maxInitialEvents={100}
+                    />
                 </div>
             </div>
         </main>

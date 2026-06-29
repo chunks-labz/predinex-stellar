@@ -14,6 +14,9 @@ export interface PoolData {
   createdAt: number;
   settledAt: number | null;
   expiry: number;
+  participantCount?: number;
+  assetType?: string;
+  disputed?: boolean;
 }
 
 export interface ProcessedMarket {
@@ -30,12 +33,19 @@ export interface ProcessedMarket {
   createdAt: number;
   settledAt: number | null;
   creator: string;
+  participantCount?: number;
+  assetType?: string;
+  disputed?: boolean;
 }
 
 export interface MarketFilters {
   search: string;
-  status: 'all' | 'active' | 'settled' | 'expired';
-  sortBy: 'volume' | 'newest' | 'ending-soon';
+  status: MarketStatusFilter;
+  asset: string;
+  minVolume: string;
+  maxVolume: string;
+  timeRange: TimeRangeFilter;
+  sortBy: SortOption;
 }
 
 export interface PaginationState {
@@ -46,5 +56,7 @@ export interface PaginationState {
 }
 
 export type MarketStatus = 'active' | 'settled' | 'expired';
-export type SortOption = 'volume' | 'newest' | 'ending-soon';
-export type StatusFilter = 'all' | 'active' | 'settled' | 'expired';
+export type MarketStatusFilter = 'all' | 'open' | 'settled' | 'disputed';
+export type SortOption = 'newest' | 'ending-soon' | 'volume' | 'participants';
+export type TimeRangeFilter = 'all' | 'ending-24h' | 'ending-7d' | 'created-7d' | 'created-30d';
+export type StatusFilter = MarketStatusFilter;

@@ -7,25 +7,19 @@ changelog:
   categories:
     - title: "⛓ Contract"
       labels:
-        - "area: contract"
-    - title: "🌐 Web"
+        - "contract"
+    - title: "🌐 Frontend"
       labels:
-        - "area: web"
+        - "frontend"
     - title: "📖 Docs"
       labels:
-        - "area: docs"
+        - "docs"
     - title: "⚙️ Ops & CI"
       labels:
-        - "area: ops"
-    - title: "🐛 Bug Fixes"
+        - "ops"
+    - title: "⚠️ Breaking Changes"
       labels:
-        - bug
-    - title: "✨ Enhancements"
-      labels:
-        - enhancement
-    - title: "🔒 Security"
-      labels:
-        - security
+        - "breaking"
     - title: "Other Changes"
       labels:
         - "*"

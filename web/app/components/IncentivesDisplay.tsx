@@ -1,10 +1,13 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('IncentivesDisplay');
 
 import { useState, useEffect, useCallback } from 'react';
 import { useIncentives } from '../lib/hooks/useIncentives';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { getStacksCoreApiBaseUrl, predinexReadApi } from '../lib/adapters/predinex-read-api';
 import { calculateTotalIncentive, DEFAULT_INCENTIVE_CONFIG, BetterIncentive } from '../lib/liquidity-incentives';
+import { TOKEN_SYMBOL } from '@/lib/formatting';
 import { Gift, TrendingUp, Award, Zap } from 'lucide-react';
 
 interface IncentivesDisplayProps {
@@ -34,7 +37,7 @@ async function fetchIncentivesFromContract(userAddress: string): Promise<Contrac
     for (const tx of results) {
       if (tx.contract_call?.function_name === 'claim-incentive') {
         const args = tx.contract_call.function_args || [];
-        const poolId = args.find((a: any) => a.name === 'pool-id')?.repr?.replace('u', '') || '0';
+        const poolId = args.find((a: { name: string; repr?: string }) => a.name === 'pool-id')?.repr?.replace('u', '') || '0';
         
         incentives.push({
           poolId: parseInt(poolId),
@@ -50,7 +53,7 @@ async function fetchIncentivesFromContract(userAddress: string): Promise<Contrac
     
     return incentives;
   } catch (error) {
-    console.error('Failed to fetch incentives from contract:', error);
+    log.error('Failed to fetch incentives from contract:', error);
     return [];
   }
 }
@@ -88,7 +91,7 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
       status: 'pending'
     }];
   } catch (error) {
-    console.error('Failed to calculate incentives:', error);
+    log.error('Failed to calculate incentives:', error);
     return [];
   }
 }
@@ -101,13 +104,13 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
   
   useEffect(() => {
     if (!userAddress) return;
+    const address = userAddress;
     
     async function loadIncentives() {
       setIsLoading(true);
       try {
-        const contractIncentives = await fetchIncentivesFromContract(userAddress);
-
-        const pendingIncentives = await calculateRealIncentives(userAddress, poolId || 0);
+        const contractIncentives = await fetchIncentivesFromContract(address);
+        const pendingIncentives = await calculateRealIncentives(address, poolId || 0);
         
         const allIncentives: BetterIncentive[] = [
           ...contractIncentives.map(inc => ({
@@ -126,20 +129,20 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
           setIncentives(allIncentives);
         }
       } catch (error) {
-        console.error('Error loading incentives:', error);
+        log.error('Error loading incentives:', error);
       } finally {
         setIsLoading(false);
       }
     }
     
     loadIncentives();
-  }, [userAddress, poolId]);
+  }, [userAddress, poolId, setIncentives]);
 
   const handleClaim = useCallback(async (incentiveId: number) => {
     try {
       await claimIncentive(incentiveId);
     } catch (error) {
-      console.error('Failed to claim incentive:', error);
+      log.error('Failed to claim incentive:', error);
     }
   }, [claimIncentive]);
 
@@ -193,11 +196,11 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-muted/50 p-4 rounded-lg">
             <p className="text-sm text-muted-foreground">Pending Bonus</p>
-            <p className="text-2xl font-bold text-yellow-400">{totalPending.toFixed(2)} STX</p>
+            <p className="text-2xl font-bold text-yellow-400">{totalPending.toFixed(2)} {TOKEN_SYMBOL}</p>
           </div>
           <div className="bg-muted/50 p-4 rounded-lg">
             <p className="text-sm text-muted-foreground">Claimed Bonus</p>
-            <p className="text-2xl font-bold text-green-400">{totalClaimed.toFixed(2)} STX</p>
+            <p className="text-2xl font-bold text-green-400">{totalClaimed.toFixed(2)} {TOKEN_SYMBOL}</p>
           </div>
         </div>
       </div>
@@ -249,8 +252,8 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">{incentive.bonusAmount.toFixed(2)} STX</p>
-                    <button 
+                    <p className="font-bold">{incentive.bonusAmount.toFixed(2)} {TOKEN_SYMBOL}</p>
+                    <button
                       onClick={() => handleClaim(idx)}
                       className="text-xs px-2 py-1 bg-primary/20 hover:bg-primary/30 rounded mt-1 transition-all"
                     >
@@ -287,7 +290,7 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
                       </p>
                     </div>
                   </div>
-                  <p className="font-bold">{incentive.bonusAmount.toFixed(2)} STX</p>
+                  <p className="font-bold">{incentive.bonusAmount.toFixed(2)} {TOKEN_SYMBOL}</p>
                 </div>
               ))
             )}

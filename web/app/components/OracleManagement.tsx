@@ -8,12 +8,51 @@ import {
   type OracleProvider,
   type OracleSubmission,
 } from '../lib/fixtures/oracleManagement';
+import {
+  isOracleManagementPlaceholderEnabled,
+  ORACLE_MANAGEMENT_PLACEHOLDER_FLAG,
+} from '../lib/feature-flags';
+
+type OracleManagementTab = 'providers' | 'submissions' | 'register';
+
+const ORACLE_MANAGEMENT_TABS: Array<{ key: OracleManagementTab; label: string }> = [
+  { key: 'providers', label: 'Providers' },
+  { key: 'submissions', label: 'Submissions' },
+  { key: 'register', label: 'Register Preview' },
+];
+
+function OracleManagementDisabled() {
+  return (
+    <section
+      aria-label="Oracle management unavailable"
+      className="max-w-4xl mx-auto p-6"
+    >
+      <div className="glass p-6 rounded-xl border border-yellow-500/30 bg-yellow-500/10">
+        <p className="text-sm font-semibold text-yellow-500 mb-2">
+          Oracle management is not enabled
+        </p>
+        <h1 className="text-2xl font-bold mb-3">Oracle management is unavailable</h1>
+        <p className="text-muted-foreground">
+          Live oracle administration is not wired for this build, so fixture-backed oracle
+          actions are hidden from production surfaces.
+        </p>
+      </div>
+    </section>
+  );
+}
 
 export default function OracleManagement() {
+  if (!isOracleManagementPlaceholderEnabled()) {
+    return <OracleManagementDisabled />;
+  }
+
+  return <OracleManagementPreview />;
+}
+
+function OracleManagementPreview() {
   const [oracleProviders, setOracleProviders] = useState<OracleProvider[]>([]);
   const [oracleSubmissions, setOracleSubmissions] = useState<OracleSubmission[]>([]);
-  const [selectedTab, setSelectedTab] = useState<'providers' | 'submissions' | 'register'>('providers');
-  const [isLoading, setIsLoading] = useState(false);
+  const [selectedTab, setSelectedTab] = useState<OracleManagementTab>('providers');
 
   // Load mock data from fixtures
   useEffect(() => {
@@ -152,41 +191,48 @@ export default function OracleManagement() {
 
   const renderRegister = () => (
     <div className="space-y-6">
-      <h3 className="text-xl font-semibold">Register New Oracle Provider</h3>
+      <div>
+        <h3 className="text-xl font-semibold">Register Provider Preview</h3>
+        <p className="mt-1 text-sm text-muted-foreground">
+          This mock form is intentionally disabled until live oracle administration is wired.
+        </p>
+      </div>
       
       <div className="glass p-6 rounded-xl">
         <form className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Oracle Provider Address
-            </label>
-            <input
-              type="text"
-              placeholder="SP1HTBVD3JG9C05J7HBJTHGR0GGW7KX975CN0QKA"
-              className="w-full px-3 py-2 bg-background border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-          
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Supported Data Types
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              {['price', 'volume', 'weather', 'sports', 'temperature', 'market-cap'].map((type) => (
-                <label key={type} className="flex items-center space-x-2">
-                  <input type="checkbox" className="rounded" />
-                  <span className="text-sm">{type}</span>
-                </label>
-              ))}
+          <fieldset disabled aria-label="Oracle registration preview fields" className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Oracle Provider Address
+              </label>
+              <input
+                type="text"
+                placeholder="SP1HTBVD3JG9C05J7HBJTHGR0GGW7KX975CN0QKA"
+                className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-muted-foreground cursor-not-allowed"
+              />
             </div>
-          </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Supported Data Types
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                {['price', 'volume', 'weather', 'sports', 'temperature', 'market-cap'].map((type) => (
+                  <label key={type} className="flex items-center space-x-2 text-muted-foreground">
+                    <input type="checkbox" className="rounded cursor-not-allowed" />
+                    <span className="text-sm">{type}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </fieldset>
           
           <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors disabled:opacity-50"
+            type="button"
+            disabled
+            className="w-full px-4 py-2 bg-muted text-muted-foreground rounded-lg border border-border cursor-not-allowed"
           >
-            {isLoading ? 'Registering...' : 'Register Oracle Provider'}
+            Registration Preview Only
           </button>
         </form>
       </div>
@@ -206,22 +252,31 @@ export default function OracleManagement() {
   return (
     <div className="max-w-6xl mx-auto p-6">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Oracle Management</h1>
+        <div
+          role="status"
+          aria-label="Oracle management placeholder status"
+          className="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3"
+        >
+          <p className="text-sm font-semibold text-yellow-500">
+            Placeholder oracle management preview
+          </p>
+          <p className="text-sm text-muted-foreground">
+            This surface uses fixture data and is not connected to live oracle operations.
+            Enablement is controlled by {ORACLE_MANAGEMENT_PLACEHOLDER_FLAG}.
+          </p>
+        </div>
+        <h1 className="text-3xl font-bold mb-2">Oracle Management Preview</h1>
         <p className="text-muted-foreground">
-          Manage oracle providers and monitor data submissions for automated market resolution
+          Review mock oracle providers and submissions for automated market resolution planning
         </p>
       </div>
 
       {/* Tab Navigation */}
       <div className="flex space-x-1 mb-6 bg-muted p-1 rounded-lg">
-        {[
-          { key: 'providers', label: 'Providers' },
-          { key: 'submissions', label: 'Submissions' },
-          { key: 'register', label: 'Register' }
-        ].map((tab) => (
+        {ORACLE_MANAGEMENT_TABS.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setSelectedTab(tab.key as any)}
+            onClick={() => setSelectedTab(tab.key)}
             className={`flex-1 px-4 py-2 rounded-md transition-colors ${
               selectedTab === tab.key
                 ? 'bg-background text-foreground shadow-sm'

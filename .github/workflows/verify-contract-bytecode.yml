@@ -1,0 +1,289 @@
+name: Contract Bytecode Verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      network:
+        description: 'Target network for verification'
+        required: true
+        default: 'testnet'
+        type: choice
+        options:
+          - testnet
+          - mainnet
+      contract_id:
+        description: 'Contract ID to verify (if not from env)'
+        required: false
+      tag:
+        description: 'Git tag/ref to build from (e.g., v1.0.0)'
+        required: false
+
+  release:
+    types: [published, created]
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  verify-bytecode:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/predinex
+
+      - name: Install Soroban CLI
+        run: |
+          cargo install soroban-cli --features opt
+          soroban version
+
+      - name: Build contract from source
+        working-directory: contracts/predinex
+        run: |
+          cargo build --target wasm32-unknown-unknown --release
+          stellar contract optimize --wasm target/wasm32-unknown-unknown/release/predinex.wasm
+          
+          # Store the path for later
+          echo "SOURCE_WASM_PATH=target/wasm32-unknown-unknown/release/predinex.optimized.wasm" >> $GITHUB_ENV
+          
+          # Compute hash of source-built bytecode
+          SOURCE_HASH=$(sha256sum target/wasm32-unknown-unknown/release/predinex.optimized.wasm | cut -d' ' -f1)
+          echo "SOURCE_HASH=$SOURCE_HASH" >> $GITHUB_ENV
+          echo "Source-built WASM hash: $SOURCE_HASH"
+
+      - name: Determine network and contract ID
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            # Auto-detect network from release tag
+            if [[ "${{ github.event.release.tag_name }}" == *"mainnet"* ]]; then
+              NETWORK="mainnet"
+            else
+              NETWORK="testnet"
+            fi
+          else
+            NETWORK="${{ github.event.inputs.network }}"
+          fi
+          
+          echo "NETWORK=$NETWORK" >> $GITHUB_ENV
+          
+          # Get contract ID from environment or input
+          if [ -n "${{ github.event.inputs.contract_id }}" ]; then
+            CONTRACT_ID="${{ github.event.inputs.contract_id }}"
+          else
+            # Load from environment config based on network
+            if [ "$NETWORK" = "mainnet" ]; then
+              CONTRACT_ID="${{ secrets.MAINNET_CONTRACT_ID }}"
+              RPC_URL="https://soroban-mainnet.stellar.org"
+            else
+              CONTRACT_ID="${{ secrets.TESTNET_CONTRACT_ID }}"
+              RPC_URL="https://soroban-testnet.stellar.org"
+            fi
+          fi
+          
+          if [ -z "$CONTRACT_ID" ]; then
+            echo "ERROR: CONTRACT_ID not set for $NETWORK"
+            exit 1
+          fi
+          
+          echo "CONTRACT_ID=$CONTRACT_ID" >> $GITHUB_ENV
+          echo "RPC_URL=$RPC_URL" >> $GITHUB_ENV
+          echo "Verifying contract $CONTRACT_ID on $NETWORK"
+
+      - name: Fetch on-chain bytecode
+        run: |
+          echo "Fetching bytecode for contract $CONTRACT_ID from $NETWORK..."
+          
+          # Fetch the WASM from the contract
+          soroban contract fetch \
+            --id "${{ env.CONTRACT_ID }}" \
+            --network "${{ env.NETWORK }}" \
+            --out-file /tmp/onchain.wasm
+          
+          if [ ! -f /tmp/onchain.wasm ]; then
+            echo "ERROR: Failed to fetch contract bytecode"
+            exit 1
+          fi
+          
+          # Compute hash of on-chain bytecode
+          ONCHAIN_HASH=$(sha256sum /tmp/onchain.wasm | cut -d' ' -f1)
+          echo "ONCHAIN_HASH=$ONCHAIN_HASH" >> $GITHUB_ENV
+          echo "On-chain WASM hash: $ONCHAIN_HASH"
+          
+          # Store file size for report
+          ONCHAIN_SIZE=$(stat -f%z /tmp/onchain.wasm 2>/dev/null || stat -c%s /tmp/onchain.wasm)
+          SOURCE_SIZE=$(stat -f%z "${{ env.SOURCE_WASM_PATH }}" 2>/dev/null || stat -c%s "${{ env.SOURCE_WASM_PATH }}")
+          
+          echo "ONCHAIN_SIZE=$ONCHAIN_SIZE" >> $GITHUB_ENV
+          echo "SOURCE_SIZE=$SOURCE_SIZE" >> $GITHUB_ENV
+          echo "On-chain bytecode size: $ONCHAIN_SIZE bytes"
+          echo "Source-built bytecode size: $SOURCE_SIZE bytes"
+
+      - name: Compare bytecodes
+        id: compare
+        run: |
+          echo "## Bytecode Verification Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Network:** ${{ env.NETWORK }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Contract ID:** ${{ env.CONTRACT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Git Ref:** ${{ github.event.inputs.tag || github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Verification Time:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Bytecode Hashes" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Source | Hash | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Source-built | \`${{ env.SOURCE_HASH }}\` | ${{ env.SOURCE_SIZE }} bytes |" >> $GITHUB_STEP_SUMMARY
+          echo "| On-chain | \`${{ env.ONCHAIN_HASH }}\` | ${{ env.ONCHAIN_SIZE }} bytes |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ env.SOURCE_HASH }}" = "${{ env.ONCHAIN_HASH }}" ]; then
+            echo "### ✅ Verification Passed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "The on-chain contract bytecode **matches** the source code built at this commit." >> $GITHUB_STEP_SUMMARY
+            echo "This deployment is verified and matches the audited source code." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "VERIFICATION_RESULT=PASSED" >> $GITHUB_ENV
+            echo "verification_passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "### ❌ Verification Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**CRITICAL:** The on-chain bytecode does **NOT** match the source code." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "This indicates one of the following:" >> $GITHUB_STEP_SUMMARY
+            echo "1. The contract was not built from the claimed source code" >> $GITHUB_STEP_SUMMARY
+            echo "2. The deployment was tampered with or corrupted" >> $GITHUB_STEP_SUMMARY
+            echo "3. Compiler/build environment differences (unlikely)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Action Required:** Investigate immediately before trusting this deployment." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "VERIFICATION_RESULT=FAILED" >> $GITHUB_ENV
+            echo "verification_passed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Perform detailed comparison on mismatch
+        if: steps.compare.outputs.verification_passed == 'false'
+        run: |
+          echo "Performing detailed bytecode analysis..."
+          
+          # Compare byte-by-byte
+          if ! cmp -l /tmp/onchain.wasm "${{ env.SOURCE_WASM_PATH }}" > /tmp/bytecode_diff.txt; then
+            echo "Bytecode differences found:" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -20 /tmp/bytecode_diff.txt >> $GITHUB_STEP_SUMMARY
+            echo "... (showing first 20 differences)" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          # Check for compiler flags that might differ
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Debug Information" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Rust version:" >> $GITHUB_STEP_SUMMARY
+          rustc --version >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Cargo version:" >> $GITHUB_STEP_SUMMARY
+          cargo --version >> $GITHUB_STEP_SUMMARY
+          
+          exit 1
+
+      - name: Create verification artifact
+        if: always()
+        run: |
+          mkdir -p /tmp/verification-report
+          
+          # Create JSON report
+          cat > /tmp/verification-report/verification.json << EOF
+          {
+            "timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "network": "${{ env.NETWORK }}",
+            "contract_id": "${{ env.CONTRACT_ID }}",
+            "git_ref": "${{ github.event.inputs.tag || github.ref }}",
+            "source_hash": "${{ env.SOURCE_HASH }}",
+            "onchain_hash": "${{ env.ONCHAIN_HASH }}",
+            "source_size_bytes": ${{ env.SOURCE_SIZE }},
+            "onchain_size_bytes": ${{ env.ONCHAIN_SIZE }},
+            "verification_passed": ${{ steps.compare.outputs.verification_passed || 'false' }},
+            "workflow_run": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          EOF
+          
+          cat /tmp/verification-report/verification.json
+          
+      - name: Upload verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bytecode-verification-report-${{ env.NETWORK }}
+          path: /tmp/verification-report/
+          retention-days: 90
+
+      - name: Publish release asset (on success)
+        if: github.event_name == 'release' && steps.compare.outputs.verification_passed == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            /tmp/verification-report/verification.json
+          append_body: true
+          body: |
+            ## Bytecode Verification
+            
+            ✅ **Verified on ${{ env.NETWORK }}**
+            - **Contract:** ${{ env.CONTRACT_ID }}
+            - **Source Hash:** `${{ env.SOURCE_HASH }}`
+            - **On-chain Hash:** `${{ env.ONCHAIN_HASH }}`
+            - **Verification:** Passed
+
+      - name: Comment on release (on failure)
+        if: github.event_name == 'release' && steps.compare.outputs.verification_passed == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `⚠️ **Bytecode Verification Failed for ${{ env.NETWORK }}**\n\nThe on-chain bytecode does NOT match the source code at this release tag. See [verification report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for details.`
+            })
+
+      - name: Fail workflow on verification failure
+        if: steps.compare.outputs.verification_passed == 'false'
+        run: |
+          echo "Bytecode verification failed. See report above."
+          exit 1
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Files Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- \`verification.json\` - Machine-readable verification report" >> $GITHUB_STEP_SUMMARY
+          echo "- \`source.wasm\` - Source-built WASM (available as artifact)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**How to verify independently:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Fetch and verify" >> $GITHUB_STEP_SUMMARY
+          echo "soroban contract fetch --id ${{ env.CONTRACT_ID }} --network ${{ env.NETWORK }} --out-file onchain.wasm" >> $GITHUB_STEP_SUMMARY
+          echo "sha256sum onchain.wasm" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Compare with this report:" >> $GITHUB_STEP_SUMMARY
+          echo "# On-chain hash: ${{ env.ONCHAIN_HASH }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY

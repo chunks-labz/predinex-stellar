@@ -2,22 +2,40 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import BettingSection from '../../app/components/BettingSection';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import BettingSection from '@/components/BettingSection';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
+import * as StacksProvider from '@/components/StacksProvider';
+import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
+import * as TxStatusHook from '../../app/lib/hooks/useTxStatus';
 import { useToast } from '../../providers/ToastProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
 import { renderWithProviders } from '../helpers/renderWithProviders';
+import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
+import { toastMessages } from '../../lib/toast-messages';
 
 // Mock WalletAdapterProvider hook
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('@/components/StacksProvider', () => ({
+  useStacks: vi.fn(),
+  StacksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
 vi.mock('../../app/lib/adapters/predinex-contract', () => ({
   predinexContract: {
-    placeBet: vi.fn(),
+    placeBetSoroban: vi.fn(),
   },
+}));
+
+vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
+  useNetworkMismatch: vi.fn(),
+}));
+
+vi.mock('../../app/lib/hooks/useTxStatus', () => ({
+  useTxStatus: vi.fn(),
 }));
 
 vi.mock('../../providers/ToastProvider', () => ({
@@ -25,6 +43,11 @@ vi.mock('../../providers/ToastProvider', () => ({
   // ToastProvider is used by renderWithProviders; pass children through so the
   // wrapper renders without throwing "No ToastProvider export" errors.
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// Mock useNetworkMismatch hook
+vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
+  useNetworkMismatch: vi.fn(),
 }));
 
 
@@ -37,6 +60,11 @@ const mockPool = {
   outcomeB: 'Outcome B',
   totalA: 1000000,
   totalB: 2000000,
+  // Pool-configured bet limits in raw token units (stroops).
+  // 1_000_000 stroops = 0.1 XLM
+  minBet: 1_000_000,
+  // 50_000_000 stroops = 5 XLM
+  maxBet: 50_000_000,
   settled: false,
   winningOutcome: undefined,
   expiry: 1000,
@@ -69,6 +97,13 @@ describe('BettingSection', () => {
     vi.mocked(useToast).mockReturnValue({
       showToast,
     });
+    vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue({
+      isMismatch: false,
+      expectedNetworkType: 'testnet',
+      expectedNetworkName: 'Stellar Testnet',
+      currentNetworkName: 'Stellar Testnet',
+      switchNetwork: vi.fn(),
+    });
   });
 
   it('renders betting section with pool information', () => {
@@ -100,11 +135,8 @@ describe('BettingSection', () => {
     const betButton = screen.getByText(/Bet on Outcome A/i);
     await user.click(betButton);
 
-    expect(showToast).toHaveBeenCalledWith(
-      toastMessages.bet.invalidAmount.message,
-      toastMessages.bet.invalidAmount.type
-    );
-    expect(vi.mocked(predinexContract.placeBet)).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('Please enter a valid amount', 'error');
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
   it('shows error toast for bet below minimum amount', async () => {
@@ -114,18 +146,34 @@ describe('BettingSection', () => {
     renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
 
     const input = screen.getByLabelText(/Enter bet amount/i);
-    await user.type(input, '0.05'); // Less than 0.1 STX minimum
+    await user.type(input, '0.05'); // Less than 0.1 XLM minimum
 
     const betButton = screen.getByText(/Bet on Outcome A/i);
     await user.click(betButton);
 
-    expect(showToast).toHaveBeenCalledWith('Minimum bet amount is 0.1 STX.', 'error');
-    expect(vi.mocked(predinexContract.placeBet)).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('Minimum bet is 0.1 XLM', 'error');
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
+  });
+
+  it('shows error toast for bet above maximum amount', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '6'); // Greater than max (5 XLM)
+
+    const betButton = screen.getByText(/Bet on Outcome A/i);
+    await user.click(betButton);
+
+    expect(showToast).toHaveBeenCalledWith('Maximum bet is 5 XLM', 'error');
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
   it('calls predinexContract.placeBet with correct parameters when placing bet', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
-    vi.mocked(predinexContract.placeBet).mockResolvedValue(undefined);
+    vi.mocked(predinexContract.placeBetSoroban).mockResolvedValue({ txHash: '0xbet-1' });
 
     const user = userEvent.setup();
     renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
@@ -137,11 +185,12 @@ describe('BettingSection', () => {
     await user.click(betButton);
 
     await waitFor(() => {
-      expect(predinexContract.placeBet).toHaveBeenCalledWith(
+      expect(predinexContract.placeBetSoroban).toHaveBeenCalledWith(
         expect.objectContaining({
+          wallet: connectedWallet,
           poolId: 0,
           outcome: 0,
-          amountMicroStx: 1_500_000,
+          amountStroops: 15_000_000,
         })
       );
     });
@@ -150,7 +199,7 @@ describe('BettingSection', () => {
   it('disables buttons while betting is in progress', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
-    vi.mocked(predinexContract.placeBet).mockImplementation(
+    vi.mocked(predinexContract.placeBetSoroban).mockImplementation(
       () => new Promise(() => {}) // Never resolves
     );
 

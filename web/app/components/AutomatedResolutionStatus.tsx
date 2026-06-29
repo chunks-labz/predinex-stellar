@@ -12,6 +12,8 @@ import {
   type ResolutionAttempt,
   type FallbackStatus,
 } from '../lib/fixtures/automatedResolution';
+import { useSettlePool } from '../lib/hooks/useSettlePool';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 
 export default function AutomatedResolutionStatus() {
   const [pools, setPools] = useState<Pool[]>([]);
@@ -19,6 +21,8 @@ export default function AutomatedResolutionStatus() {
   const [resolutionAttempts, setResolutionAttempts] = useState<ResolutionAttempt[]>([]);
   const [fallbackStatuses, setFallbackStatuses] = useState<FallbackStatus[]>([]);
   const [selectedTab, setSelectedTab] = useState<'automated' | 'pending' | 'fallback'>('automated');
+
+  const { settle, feePrompt, setFeePrompt, stage, setStage } = useSettlePool();
 
   // Effect-managed clock so render output is derived from state, not direct Date.now() calls
   const [now, setNow] = useState(() => Date.now());
@@ -289,7 +293,10 @@ export default function AutomatedResolutionStatus() {
                     </div>
                     
                     {fallback?.manualSettlementEnabled && (
-                      <button className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600">
+                      <button
+                        onClick={() => settle(pool.id, 0)} // defaulting to outcome 0 for mock purposes
+                        className="px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+                      >
                         Manual Settlement
                       </button>
                     )}
@@ -333,6 +340,22 @@ export default function AutomatedResolutionStatus() {
 
   return (
     <div className="max-w-6xl mx-auto p-6">
+      <TransactionFeeModal
+        isOpen={!!feePrompt}
+        actionName="Manual Settlement"
+        feeStroops={feePrompt?.feeStroops || '0'}
+        onConfirm={() => {
+            feePrompt?.resolve(true);
+            setFeePrompt(null);
+        }}
+        onCancel={() => {
+            feePrompt?.resolve(false);
+            setFeePrompt(null);
+            setStage('idle');
+        }}
+        isConfirming={stage === 'signing' || stage === 'submitting' || stage === 'polling'}
+      />
+
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Automated Resolution Status</h1>
         <p className="text-muted-foreground">

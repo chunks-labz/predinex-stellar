@@ -6,11 +6,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { cache } from '../cache';
 import { parseContractError } from '../error-handler';
 
-interface UseFetchOptions {
+interface UseFetchOptions<T> {
   cacheKey?: string;
   cacheTTL?: number;
   immediate?: boolean;
-  onSuccess?: (data: any) => void;
+  onSuccess?: (data: T) => void;
   onError?: (error: Error) => void;
 }
 
@@ -25,7 +25,7 @@ interface UseFetchState<T> {
  */
 export function useFetch<T>(
   url: string,
-  options: UseFetchOptions = {}
+  options: UseFetchOptions<T> = {}
 ) {
   const {
     cacheKey = url,

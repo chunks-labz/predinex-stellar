@@ -35,9 +35,350 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Bundle size budget check
+        if: github.event_name == 'pull_request'
+        run: |
+          # Budget definitions (KB). Update intentionally with a comment explaining the reason.
+          # Mainline bundle increased after recent UI + data-surface additions (dashboard cards,
+          # transactions page, favorites hook, and related adapters). Keep a small buffer over the
+          # current baseline so PR checks stay stable; tighten again once we do chunk splitting.
+          BUDGET_TOTAL_KB=5800
+          BUDGET_JS_KB=5000
+          BUDGET_CSS_KB=80
+
+          FAILED=0
+
+          echo "### Bundle Size Budget Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Asset type | Size | Budget | Status |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------------|------|--------|--------|" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -d ".next/static" ]; then
+            TOTAL_SIZE=$(du -sk .next/static | cut -f1)
+            JS_SIZE=$(find .next/static/chunks -name "*.js" 2>/dev/null -exec stat -c%s {} \; | awk '{s+=$1} END {printf "%d", s/1024}')
+            CSS_SIZE=$(find .next/static/css -name "*.css" 2>/dev/null -exec stat -c%s {} \; | awk '{s+=$1} END {printf "%d", s/1024}')
+          else
+            TOTAL_SIZE=0; JS_SIZE=0; CSS_SIZE=0
+          fi
+
+          check_budget() {
+            local name="$1" size="$2" budget="$3"
+            if [ "$size" -gt "$budget" ]; then
+              printf "| %s | %sKB | %sKB | OVER BUDGET |\n" "$name" "$size" "$budget" >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::$name bundle (${size}KB) exceeds budget of ${budget}KB."
+              FAILED=1
+            else
+              printf "| %s | %sKB | %sKB | OK |\n" "$name" "$size" "$budget" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          }
+
+          check_budget "Total static" "$TOTAL_SIZE" "$BUDGET_TOTAL_KB"
+          check_budget "JavaScript"   "$JS_SIZE"    "$BUDGET_JS_KB"
+          check_budget "CSS"          "$CSS_SIZE"   "$BUDGET_CSS_KB"
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo ""
+            echo "Bundle size budget exceeded. To update a budget intentionally, edit"
+            echo "the BUDGET_* variables in .github/workflows/ci.yml with a comment"
+            echo "explaining why the increase is justified."
+            exit 1
+          fi
+
   contract-checks:
     name: Contract Checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    env:
+      WASM_SIZE_LIMIT_BYTES: 327680
+      WASM_SIZE_WARN_PERCENT: 80
+      WASM_SIZE_FAIL_PERCENT: 95
+      WASM_SIZE_BUILD_OPTIMIZE: 'true'
+    defaults:
+      run:
+        working-directory: ./contracts/predinex
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out base branch for WASM comparison
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-branch
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Add Soroban WASM target
+        run: rustup target add wasm32v1-none
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+      - name: Measure current contract WASM size
+        id: wasm_size_head
+        working-directory: .
+        run: |
+          bash scripts/measure-contract-wasm-size.sh \
+            --manifest-path contracts/predinex/Cargo.toml \
+            --report-path "$RUNNER_TEMP/wasm-size/head.json" \
+            --out-dir "$RUNNER_TEMP/wasm-size/head-build"
+
+      - name: Measure base contract WASM size
+        if: always() && github.event_name == 'pull_request'
+        id: wasm_size_base
+        continue-on-error: true
+        working-directory: .
+        env:
+          WASM_SIZE_ENFORCE_THRESHOLDS: 'false'
+        run: |
+          bash scripts/measure-contract-wasm-size.sh \
+            --manifest-path base-branch/contracts/predinex/Cargo.toml \
+            --report-path "$RUNNER_TEMP/wasm-size/base.json" \
+            --out-dir "$RUNNER_TEMP/wasm-size/base-build"
+
+      - name: Summarize WASM size report
+        if: always() && steps.wasm_size_head.outputs.size_bytes != ''
+        id: wasm_size_summary
+        working-directory: .
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          HEAD_PACKAGE: ${{ steps.wasm_size_head.outputs.package_name }}
+          HEAD_SIZE_BYTES: ${{ steps.wasm_size_head.outputs.size_bytes }}
+          HEAD_SIZE_KIB: ${{ steps.wasm_size_head.outputs.size_kib }}
+          HEAD_PERCENT_OF_LIMIT: ${{ steps.wasm_size_head.outputs.percent_of_limit }}
+          HEAD_STATUS: ${{ steps.wasm_size_head.outputs.status }}
+          LIMIT_KIB: ${{ steps.wasm_size_head.outputs.limit_kib }}
+          WARN_PERCENT: ${{ steps.wasm_size_head.outputs.warn_percent }}
+          WARN_THRESHOLD_KIB: ${{ steps.wasm_size_head.outputs.warn_threshold_kib }}
+          FAIL_PERCENT: ${{ steps.wasm_size_head.outputs.fail_percent }}
+          FAIL_THRESHOLD_KIB: ${{ steps.wasm_size_head.outputs.fail_threshold_kib }}
+          BASE_SIZE_BYTES: ${{ steps.wasm_size_base.outputs.size_bytes }}
+          BASE_SIZE_KIB: ${{ steps.wasm_size_base.outputs.size_kib }}
+          BASE_PERCENT_OF_LIMIT: ${{ steps.wasm_size_base.outputs.percent_of_limit }}
+          BASE_STATUS: ${{ steps.wasm_size_base.outputs.status }}
+          BASE_STEP_OUTCOME: ${{ steps.wasm_size_base.outcome }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/wasm-size"
+
+          short_sha() {
+            printf '%s' "$1" | cut -c1-7
+          }
+
+          status_label() {
+            case "$1" in
+              ok) printf 'OK' ;;
+              warning) printf 'Warning' ;;
+              failure) printf 'Failure' ;;
+              *) printf 'Unavailable' ;;
+            esac
+          }
+
+          base_available=false
+          if [ -n "${BASE_SIZE_BYTES:-}" ]; then
+            base_available=true
+          fi
+
+          delta_bytes=""
+          delta_kib=""
+          delta_pct=""
+          delta_direction="n/a"
+
+          if [ "$base_available" = true ]; then
+            delta_bytes=$(( HEAD_SIZE_BYTES - BASE_SIZE_BYTES ))
+            delta_kib="$(awk "BEGIN { printf \"%.2f\", $delta_bytes / 1024 }")"
+
+            if [ "$BASE_SIZE_BYTES" -gt 0 ]; then
+              delta_pct="$(awk "BEGIN { printf \"%.2f\", ($delta_bytes / $BASE_SIZE_BYTES) * 100 }")"
+            else
+              delta_pct="0.00"
+            fi
+
+            if [ "$delta_bytes" -gt 0 ]; then
+              delta_direction="grew"
+            elif [ "$delta_bytes" -lt 0 ]; then
+              delta_direction="shrunk"
+            else
+              delta_direction="flat"
+            fi
+          fi
+
+          trend_json_path="$RUNNER_TEMP/wasm-size/trend.json"
+          comment_path="$RUNNER_TEMP/wasm-size/pr-comment.md"
+
+          cat > "$trend_json_path" <<EOF
+          {
+            "package_name": "$HEAD_PACKAGE",
+            "head": {
+              "sha": "$HEAD_SHA",
+              "size_bytes": $HEAD_SIZE_BYTES,
+              "size_kib": $HEAD_SIZE_KIB,
+              "percent_of_limit": $HEAD_PERCENT_OF_LIMIT,
+              "status": "$HEAD_STATUS"
+            },
+            "base": {
+              "sha": "${BASE_SHA:-}",
+              "size_bytes": ${BASE_SIZE_BYTES:-null},
+              "size_kib": ${BASE_SIZE_KIB:-null},
+              "percent_of_limit": ${BASE_PERCENT_OF_LIMIT:-null},
+              "status": "${BASE_STATUS:-}"
+            },
+            "delta": {
+              "bytes": ${delta_bytes:-null},
+              "kib": ${delta_kib:-null},
+              "percent": ${delta_pct:-null},
+              "direction": "$delta_direction"
+            }
+          }
+          EOF
+
+          {
+            echo "### Contract WASM Size Report"
+            echo
+            echo "| Ref | Size | % of limit | Status |"
+            echo "|-----|------|------------|--------|"
+            printf '| Head (`%s`) | %s KiB | %s%% | %s |\n' "$(short_sha "$HEAD_SHA")" "$HEAD_SIZE_KIB" "$HEAD_PERCENT_OF_LIMIT" "$(status_label "$HEAD_STATUS")"
+
+            if [ "$base_available" = true ]; then
+              printf '| Base (`%s`) | %s KiB | %s%% | %s |\n' "$(short_sha "$BASE_SHA")" "$BASE_SIZE_KIB" "$BASE_PERCENT_OF_LIMIT" "$(status_label "$BASE_STATUS")"
+              echo
+              printf 'Trend vs base: `%s KiB` (`%s%%`, %s).\n' "$delta_kib" "$delta_pct" "$delta_direction"
+            else
+              echo
+              echo "Base comparison: unavailable for this run."
+              if [ "${BASE_STEP_OUTCOME:-}" = "failure" ]; then
+                echo "The base branch could not be built with the current workflow settings."
+              fi
+            fi
+
+            echo
+            printf 'Thresholds: warning at `%s KiB` (%s%% of `%s KiB`), failure at `%s KiB` (%s%%).\n' \
+              "$WARN_THRESHOLD_KIB" "$WARN_PERCENT" "$LIMIT_KIB" "$FAIL_THRESHOLD_KIB" "$FAIL_PERCENT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "<!-- contract-wasm-size-monitor -->"
+            echo "## Contract WASM Size"
+            echo
+            printf '| Ref | Size | %% of %s KiB limit | Status |\n' "$LIMIT_KIB"
+            echo "| --- | ---: | ---: | --- |"
+            printf '| PR head (`%s`) | %s KiB | %s%% | %s |\n' "$(short_sha "$HEAD_SHA")" "$HEAD_SIZE_KIB" "$HEAD_PERCENT_OF_LIMIT" "$(status_label "$HEAD_STATUS")"
+
+            if [ "$base_available" = true ]; then
+              printf '| Base (`%s`) | %s KiB | %s%% | %s |\n' "$(short_sha "$BASE_SHA")" "$BASE_SIZE_KIB" "$BASE_PERCENT_OF_LIMIT" "$(status_label "$BASE_STATUS")"
+              echo
+              printf 'Trend vs base: `%s KiB` (`%s%%`, %s).\n' "$delta_kib" "$delta_pct" "$delta_direction"
+            else
+              echo
+              echo "Trend vs base: unavailable because the base branch build did not produce a WASM measurement."
+            fi
+
+            echo
+            printf 'Thresholds: warning at `%s KiB` (%s%%), failure at `%s KiB` (%s%%).\n' \
+              "$WARN_THRESHOLD_KIB" "$WARN_PERCENT" "$FAIL_THRESHOLD_KIB" "$FAIL_PERCENT"
+            echo
+            echo "Historical JSON reports are attached to this workflow run as artifacts."
+          } > "$comment_path"
+
+          {
+            echo "comment_path=$comment_path"
+            echo "trend_json_path=$trend_json_path"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bundle WASM size artifacts
+        if: always()
+        id: wasm_size_artifacts
+        working-directory: .
+        env:
+          HEAD_REPORT_PATH: ${{ steps.wasm_size_head.outputs.report_path }}
+          BASE_REPORT_PATH: ${{ steps.wasm_size_base.outputs.report_path }}
+          TREND_JSON_PATH: ${{ steps.wasm_size_summary.outputs.trend_json_path }}
+          COMMENT_PATH: ${{ steps.wasm_size_summary.outputs.comment_path }}
+        run: |
+          artifact_dir="$RUNNER_TEMP/wasm-size/artifact"
+          mkdir -p "$artifact_dir"
+
+          copy_if_exists() {
+            if [ -n "${1:-}" ] && [ -f "$1" ]; then
+              cp "$1" "$artifact_dir/$(basename "$1")"
+            fi
+          }
+
+          copy_if_exists "${HEAD_REPORT_PATH:-}"
+          copy_if_exists "${BASE_REPORT_PATH:-}"
+          copy_if_exists "${TREND_JSON_PATH:-}"
+          copy_if_exists "${COMMENT_PATH:-}"
+
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
+
+      - name: Comment PR with WASM size trend
+        if: always() && github.event_name == 'pull_request' && steps.wasm_size_summary.outputs.comment_path != '' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        env:
+          WASM_SIZE_COMMENT_PATH: ${{ steps.wasm_size_summary.outputs.comment_path }}
+        with:
+          script: |
+            const fs = require('fs');
+            const commentBody = fs.readFileSync(process.env.WASM_SIZE_COMMENT_PATH, 'utf8');
+            const prNumber = context.issue.number;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('<!-- contract-wasm-size-monitor -->')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            }
+
+      - name: Upload WASM size reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-wasm-size-report-${{ github.run_id }}
+          path: ${{ steps.wasm_size_artifacts.outputs.artifact_dir }}
+          if-no-files-found: warn
+          retention-days: 30
+
+  contract-benchmarks:
+    name: Contract Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
     defaults:
       run:
         working-directory: ./contracts/predinex
@@ -48,13 +389,75 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          components: rustfmt, clippy
 
-      - name: Format check
-        run: cargo fmt --check
+      - name: Run benchmarks
+        id: benchmarks
+        run: |
+          rm -f benchmark-results.json
+          cargo test --release --features testutils bench_ -- --nocapture 2>&1 | tee bench-output.txt
+          echo "bench_output_path=$PWD/bench-output.txt" >> "$GITHUB_OUTPUT"
+          echo "results_path=$PWD/benchmark-results.json" >> "$GITHUB_OUTPUT"
 
-      - name: Clippy
-        run: cargo clippy -- -D warnings
+      - name: Build PR comment
+        if: always() && steps.benchmarks.outcome != 'skipped'
+        id: bench_comment
+        run: |
+          comment_path="$RUNNER_TEMP/bench-comment.md"
+          {
+            echo "<!-- contract-benchmarks -->"
+            echo "## Contract Benchmark Results"
+            echo ""
+            echo "| Operation | Iterations | Avg (ms) | Total (ms) |"
+            echo "|-----------|-----------|----------|------------|"
+            if [ -f benchmark-results.json ]; then
+              node -e "
+                const r = JSON.parse(require('fs').readFileSync('benchmark-results.json','utf8'));
+                r.forEach(e => console.log('| ' + e.operation + ' | ' + e.iterations + ' | ' + e.avg_wall_ms.toFixed(3) + ' | ' + e.total_wall_ms.toFixed(3) + ' |'));
+              " 2>/dev/null || echo "| (parse error) | - | - | - |"
+            else
+              echo "| (no results) | - | - | - |"
+            fi
+          } > "$comment_path"
+          echo "comment_path=$comment_path" >> "$GITHUB_OUTPUT"
 
-      - name: Run tests
-        run: cargo test
+      - name: Post benchmark comment
+        if: always() && steps.bench_comment.outputs.comment_path != '' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/github-script@v7
+        env:
+          BENCH_COMMENT_PATH: ${{ steps.bench_comment.outputs.comment_path }}
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.BENCH_COMMENT_PATH, 'utf8');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('<!-- contract-benchmarks -->')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.run_id }}
+          path: contracts/predinex/benchmark-results.json
+          if-no-files-found: warn
+          retention-days: 30

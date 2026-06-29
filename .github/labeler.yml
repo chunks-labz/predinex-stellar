@@ -1,0 +1,28 @@
+# Path-based auto-labeling for predinex-stellar
+# Labels must exist in the repository before this file takes effect.
+# https://github.com/actions/labeler
+
+"area: contract":
+  - changed-files:
+      - any-glob-to-any-file: "contracts/**"
+
+"area: web":
+  - changed-files:
+      - any-glob-to-any-file: "web/**"
+
+"area: docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+          - "**/*.md"
+
+"area: ops":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "scripts/**"
+          - "Makefile"
+          - "*.toml"
+          - "*.yaml"
+          - "*.yml"

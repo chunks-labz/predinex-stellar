@@ -1,0 +1,26 @@
+name: Weekly Fuzz Test Suite
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday at midnight
+  workflow_dispatch: # On demand
+
+jobs:
+  fuzz:
+    name: Run Fuzz Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/predinex
+
+      - name: Run Fuzz Harness
+        run: |
+          cargo test --manifest-path contracts/predinex/Cargo.toml -- fuzz_

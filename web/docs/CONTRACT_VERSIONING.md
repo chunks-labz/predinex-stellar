@@ -27,7 +27,9 @@ version = "0.1.0"
 - Removing or renaming a public function
 - Changing the argument list of a public function (type or order)
 - Changing the structure of a `#[contracttype]` stored under a persistent key (e.g. `Pool`, `UserBet`)
-- Changing the topics or data shape of an event (see [CONTRACT_EVENTS.md](./CONTRACT_EVENTS.md))
+- Changing the topics or data shape of an event — this requires bumping the
+  per-event **schema version marker** documented in
+  [CONTRACT_EVENTS.md § Event versioning](./CONTRACT_EVENTS.md#event-versioning-issue-175)
 - Changing the storage key scheme (e.g. `DataKey` variants)
 
 ### What is NOT a breaking change

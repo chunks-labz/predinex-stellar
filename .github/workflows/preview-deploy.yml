@@ -1,0 +1,258 @@
+name: Preview Deployment
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+    paths:
+      - 'web/**'
+      - '.github/workflows/preview-deploy.yml'
+
+# Cancel any in-progress preview deployment for the same PR when a new commit arrives.
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Build & deploy a preview for every opened / updated PR
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy-preview:
+    name: Deploy Preview to Vercel
+    # On fork PRs, Vercel secrets are not available, which would otherwise
+    # cause the job to fail. Skip the deployment instead of failing CI.
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.fork == false
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write   # PR metadata access
+      issues: write          # post / update PR comment via issues API
+      contents: read
+      statuses: write        # create commit status check
+
+    outputs:
+      deployment-url: ${{ steps.deploy.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      # Pull project metadata (links the local checkout to the Vercel project).
+      # VERCEL_ORG_ID and VERCEL_PROJECT_ID are required so the CLI knows which
+      # project to target without an interactive login prompt.
+      - name: Pull Vercel Environment Information
+        working-directory: ./web
+        run: vercel pull --yes --environment=preview --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build Project Artifacts
+        working-directory: ./web
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy Preview to Vercel
+        id: deploy
+        working-directory: ./web
+        run: |
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$DEPLOYMENT_URL" >> $GITHUB_OUTPUT
+          echo "Preview deployed to: $DEPLOYMENT_URL"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      # Post (or update) a comment on the PR with the live preview link.
+      - name: Comment PR with Preview URL
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const deploymentUrl = '${{ steps.deploy.outputs.url }}';
+            const prNumber = context.issue.number;
+            const sha = context.sha.substring(0, 7);
+            const branch = context.payload.pull_request.head.ref;
+            const deployedAt = new Date().toUTCString();
+
+            const commentBody = [
+              '## 🚀 Preview Deployment',
+              '',
+              'Your preview deployment is ready!',
+              '',
+              `**Preview URL:** ${deploymentUrl}`,
+              '',
+              '---',
+              '',
+              '<details>',
+              '<summary>📋 Deployment Details</summary>',
+              '',
+              `- **Commit:** \`${sha}\``,
+              `- **Branch:** \`${branch}\``,
+              `- **Deployed at:** ${deployedAt}`,
+              '',
+              '</details>',
+              '',
+              '> ⚠️ **Note:** Preview deployments use **testnet** configuration by default.',
+              '> See [preview deployment docs](../../docs/preview-deployments.md) for environment setup.',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.includes('🚀 Preview Deployment')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            }
+
+      # Notify reviewers if the deployment step itself failed.
+      - name: Comment PR on Deployment Failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const sha = context.sha.substring(0, 7);
+
+            const commentBody = [
+              '## ❌ Preview Deployment Failed',
+              '',
+              `The preview deployment for commit \`${sha}\` failed.`,
+              '',
+              `[View workflow logs](${runUrl}) for details.`,
+              '',
+              '> Common causes: missing Vercel secrets, build errors, or npm install failures.',
+              '> See [preview deployment docs](../../docs/preview-deployments.md) for troubleshooting.',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              (c.body.includes('🚀 Preview Deployment') || c.body.includes('❌ Preview Deployment Failed'))
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody,
+              });
+            }
+
+      # Create a GitHub commit status so the preview link appears in the PR
+      # checks panel alongside CI results.
+      - name: Set Commit Deployment Status
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const deploymentUrl = '${{ steps.deploy.outputs.url }}';
+            const jobStatus = '${{ job.status }}';
+            const state = jobStatus === 'success' ? 'success' : 'failure';
+            const statusSha = context.payload.pull_request.head.sha;
+
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: statusSha,
+              state: state,
+              target_url: deploymentUrl || '',
+              description: state === 'success'
+                ? 'Preview deployment ready'
+                : 'Preview deployment failed — see workflow logs',
+              context: 'Preview Deployment / Vercel',
+            });
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # When a PR is closed (merged or abandoned), mark the preview as gone.
+  # ──────────────────────────────────────────────────────────────────────────
+  cleanup-preview:
+    name: Notify Preview Removed
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Update or close preview comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.issue.number;
+            const action = context.payload.pull_request.merged ? 'merged' : 'closed';
+            const emoji = action === 'merged' ? '✅' : '🔒';
+
+            const commentBody = [
+              `## ${emoji} Preview Deployment — PR ${action}`,
+              '',
+              `This PR has been **${action}**.`,
+              'The preview deployment has been automatically removed by Vercel.',
+              '',
+              action === 'merged'
+                ? '> The changes are now live in production after the release workflow completes.'
+                : '> The preview URL is no longer available.',
+            ].join('\n');
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              (c.body.includes('🚀 Preview Deployment') || c.body.includes('❌ Preview Deployment Failed'))
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody,
+              });
+            }
+            // If there was never a preview comment (e.g. no web/ changes), stay silent.

@@ -1,0 +1,220 @@
+name: Contract Benchmarks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  benchmark:
+    name: Gas Cost Benchmarks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./contracts/predinex
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out base branch for comparison
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-branch
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run benchmarks (HEAD)
+        id: bench_head
+        run: |
+          mkdir -p "$RUNNER_TEMP/benchmarks"
+          cargo test bench_ --features testutils -- --nocapture 2>&1 \
+            | tee "$RUNNER_TEMP/benchmarks/head-raw.txt"
+          # Parse "BENCH <op> <instructions>" lines into JSON
+          python3 - <<'PYEOF'
+          import re, json, os, sys
+          raw = open(os.path.join(os.environ["RUNNER_TEMP"], "benchmarks", "head-raw.txt")).read()
+          results = {}
+          for m in re.finditer(r"BENCH (\w+) (\d+)", raw):
+              results[m.group(1)] = int(m.group(2))
+          if not results:
+              print("ERROR: no benchmark results found", file=sys.stderr)
+              sys.exit(1)
+          out = os.path.join(os.environ["RUNNER_TEMP"], "benchmarks", "head.json")
+          json.dump({"sha": os.environ.get("GITHUB_SHA",""), "results": results}, open(out,"w"), indent=2)
+          print("Parsed results:", results)
+          PYEOF
+
+      - name: Run benchmarks (base)
+        if: github.event_name == 'pull_request'
+        id: bench_base
+        continue-on-error: true
+        working-directory: ./base-branch/contracts/predinex
+        run: |
+          mkdir -p "$RUNNER_TEMP/benchmarks"
+          cargo test bench_ --features testutils -- --nocapture 2>&1 \
+            | tee "$RUNNER_TEMP/benchmarks/base-raw.txt"
+          python3 - <<'PYEOF'
+          import re, json, os, sys
+          raw = open(os.path.join(os.environ["RUNNER_TEMP"], "benchmarks", "base-raw.txt")).read()
+          results = {}
+          for m in re.finditer(r"BENCH (\w+) (\d+)", raw):
+              results[m.group(1)] = int(m.group(2))
+          out = os.path.join(os.environ["RUNNER_TEMP"], "benchmarks", "base.json")
+          sha = os.environ.get("GITHUB_EVENT_PATH","")
+          import json as j2
+          try:
+              ev = j2.load(open(sha))
+              base_sha = ev.get("pull_request",{}).get("base",{}).get("sha","")
+          except Exception:
+              base_sha = ""
+          json.dump({"sha": base_sha, "results": results}, open(out,"w"), indent=2)
+          print("Parsed base results:", results)
+          PYEOF
+
+      - name: Compare and report
+        id: compare
+        env:
+          WARN_PCT: 10
+          FAIL_PCT: 25
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, sys
+
+          tmp = os.environ["RUNNER_TEMP"] + "/benchmarks"
+          warn_pct = float(os.environ["WARN_PCT"])
+          fail_pct = float(os.environ["FAIL_PCT"])
+
+          head = json.load(open(f"{tmp}/head.json"))
+          head_results = head["results"]
+          head_sha = head["sha"][:7] if head["sha"] else "head"
+
+          base_path = f"{tmp}/base.json"
+          base_results = None
+          base_sha = "base"
+          if os.path.exists(base_path):
+              base = json.load(open(base_path))
+              base_results = base["results"]
+              base_sha = base["sha"][:7] if base["sha"] else "base"
+
+          ops = ["create_pool", "place_bet", "settle_pool", "claim_winnings", "cancel_bet"]
+
+          summary_lines = ["### Contract Gas Cost Benchmarks\n"]
+          comment_lines = ["<!-- contract-benchmark-monitor -->\n## Contract Gas Cost Benchmarks\n"]
+
+          table_header = "| Operation | HEAD (instructions) | Base (instructions) | Delta | Status |"
+          table_sep   = "| --------- | ------------------: | ------------------: | ----: | ------ |"
+          summary_lines += [table_header, table_sep]
+          comment_lines += [table_header, table_sep]
+
+          exit_code = 0
+          warnings = []
+
+          for op in ops:
+              head_val = head_results.get(op)
+              if head_val is None:
+                  continue
+              base_val = base_results.get(op) if base_results else None
+
+              if base_val and base_val > 0:
+                  delta = head_val - base_val
+                  pct = (delta / base_val) * 100
+                  delta_str = f"{delta:+,} ({pct:+.1f}%)"
+                  if pct > fail_pct:
+                      status = "FAIL ❌"
+                      exit_code = 1
+                      warnings.append(f"{op}: +{pct:.1f}% exceeds failure threshold of {fail_pct}%")
+                  elif pct > warn_pct:
+                      status = "WARN ⚠️"
+                      warnings.append(f"{op}: +{pct:.1f}% exceeds warning threshold of {warn_pct}%")
+                  else:
+                      status = "OK ✅"
+              else:
+                  delta_str = "n/a"
+                  status = "OK ✅"
+
+              base_str = f"{base_val:,}" if base_val else "n/a"
+              row = f"| `{op}` | {head_val:,} | {base_str} | {delta_str} | {status} |"
+              summary_lines.append(row)
+              comment_lines.append(row)
+
+          if warnings:
+              warn_block = "\n**Threshold violations:**\n" + "\n".join(f"- {w}" for w in warnings)
+              summary_lines.append(warn_block)
+              comment_lines.append(warn_block)
+
+          summary_lines.append(f"\nThresholds: warn >{warn_pct}%, fail >{fail_pct}%")
+          comment_lines.append(f"\nThresholds: warn >{warn_pct}%, fail >{fail_pct}%")
+          comment_lines.append("\nHistorical JSON reports are attached as workflow artifacts.")
+
+          summary = "\n".join(summary_lines)
+          comment = "\n".join(comment_lines)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write(summary + "\n")
+
+          comment_path = f"{tmp}/pr-comment.md"
+          with open(comment_path, "w") as f:
+              f.write(comment + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"comment_path={comment_path}\n")
+              f.write(f"exit_code={exit_code}\n")
+
+          if exit_code != 0:
+              print("FAIL: one or more operations exceeded the failure threshold.", file=sys.stderr)
+              sys.exit(exit_code)
+          PYEOF
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request' && steps.compare.outputs.comment_path != ''
+        uses: actions/github-script@v7
+        env:
+          BENCHMARK_COMMENT_PATH: ${{ steps.compare.outputs.comment_path }}
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync(process.env.BENCHMARK_COMMENT_PATH, 'utf8');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('<!-- contract-benchmark-monitor -->')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-benchmarks-${{ github.run_id }}
+          path: ${{ runner.temp }}/benchmarks/
+          if-no-files-found: warn
+          retention-days: 90

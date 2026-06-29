@@ -1,0 +1,16 @@
+# Benchmark thresholds for contract gas cost monitoring.
+# Warning is posted as a PR comment; failure blocks the PR.
+thresholds:
+  warning_percent: 10   # warn when gas cost increases >10%
+  failure_percent: 25   # fail when gas cost increases >25%
+
+# Operations to benchmark (must match names emitted by the benchmark runner).
+operations:
+  - create_pool
+  - place_bet
+  - settle_pool
+  - claim_winnings
+  - cancel_bet
+
+# Artifact retention in days.
+artifact_retention_days: 90

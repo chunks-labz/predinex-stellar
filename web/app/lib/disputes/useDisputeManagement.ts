@@ -1,10 +1,13 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useDisputeManagement');
 
 import { useState, useEffect, useCallback } from 'react';
 import { useDisputes } from '../hooks/useDisputes';
 import type { Dispute, DisputeVote, DisputeTabId } from './types';
 import { fetchDisputesFromContract } from './fetchDisputesFromContract';
 import { getMockDisputes } from './mockDisputes';
+import { isDisputeMockDataEnabled } from '../feature-flags';
 
 export function useDisputeManagement(userAddress: string | null | undefined) {
   const { addVote } = useDisputes();
@@ -27,11 +30,14 @@ export function useDisputeManagement(userAddress: string | null | undefined) {
         const fetchedDisputes = await fetchDisputesFromContract();
         if (fetchedDisputes.length > 0) {
           setDisputes(fetchedDisputes);
-        } else {
+        } else if (isDisputeMockDataEnabled()) {
           setDisputes(getMockDisputes());
+        } else {
+          setDisputes([]);
         }
       } catch (error) {
-        console.error('Error loading disputes:', error);
+        log.error('Error loading disputes:', error);
+        setDisputes([]);
       } finally {
         setIsLoading(false);
       }
@@ -49,6 +55,13 @@ export function useDisputeManagement(userAddress: string | null | undefined) {
     [userVotes]
   );
 
+  /**
+   * Records a local vote for UI display.
+   *
+   * The underlying Predinex Soroban contract currently does not expose a
+   * community dispute-voting transaction. This hook preserves local vote state
+   * until a dedicated on-chain dispute contract is implemented.
+   */
   const handleVote = useCallback(
     async (disputeId: number, vote: boolean) => {
       if (!userAddress) return;
@@ -79,7 +92,7 @@ export function useDisputeManagement(userAddress: string | null | undefined) {
           );
         }
       } catch (error) {
-        console.error('Failed to cast vote:', error);
+        log.error('Failed to cast vote:', error);
       } finally {
         setIsLoading(false);
       }

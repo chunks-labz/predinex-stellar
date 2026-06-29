@@ -1,0 +1,95 @@
+name: Generate Release Notes Draft
+
+on:
+  pull_request:
+    types: [labeled, opened, synchronize]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to post the comment on'
+        required: true
+        type: string
+      tag_name:
+        description: 'Target tag name (e.g. v1.1.0)'
+        required: false
+        type: string
+      previous_tag:
+        description: 'Previous tag name'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  draft-notes:
+    name: Generate and Post Draft Notes
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.pull_request.labels.*.name, 'release')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine PR and Tag Info
+        id: info
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "pr_number=${{ github.event.inputs.pr_number }}" >> $GITHUB_OUTPUT
+            echo "tag_name=${{ github.event.inputs.tag_name || 'vNext' }}" >> $GITHUB_OUTPUT
+            echo "previous_tag=${{ github.event.inputs.previous_tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+            echo "tag_name=vNext" >> $GITHUB_OUTPUT
+            echo "previous_tag=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Fetch Latest Tag (fallback)
+        id: tags
+        run: |
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          echo "latest_tag=$latest_tag" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes
+        id: gen
+        run: |
+          PR_NUM="${{ steps.info.outputs.pr_number }}"
+          TAG_NAME="${{ steps.info.outputs.tag_name }}"
+          PREV_TAG="${{ steps.info.outputs.previous_tag || steps.tags.outputs.latest_tag }}"
+          
+          echo "Generating notes since tag: $PREV_TAG"
+          
+          # Request release notes generation from GitHub API
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(gh api \
+              -X POST \
+              /repos/{owner}/{repo}/releases/generate-notes \
+              -f tag_name="$TAG_NAME" \
+              -f previous_tag_name="$PREV_TAG" \
+              --jq '.body')
+          else
+            NOTES=$(gh api \
+              -X POST \
+              /repos/{owner}/{repo}/releases/generate-notes \
+              -f tag_name="$TAG_NAME" \
+              --jq '.body')
+          fi
+          
+          # Write notes to a temp file to avoid multi-line bash env variable issues
+          echo "$NOTES" > release_notes.md
+          
+          # Prepare comment header
+          echo -e "## 📝 Draft Release Notes\n\nGenerated automatically from merged PRs since \`$PREV_TAG\`:\n\n$NOTES" > comment.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Post comment to Release PR
+        run: |
+          PR_NUM="${{ steps.info.outputs.pr_number }}"
+          gh pr comment "$PR_NUM" --body-file comment.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

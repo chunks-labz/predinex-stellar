@@ -1,4 +1,6 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useIncentives');
 
 import { useState, useCallback } from 'react';
 import {
@@ -53,7 +55,7 @@ export function useIncentives() {
 
         return incentive;
       } catch (err) {
-        console.error('Error calculating incentive:', err);
+        log.error('Error calculating incentive:', err);
         throw err;
       }
     },
@@ -159,6 +161,7 @@ export function useIncentives() {
   return {
     config,
     incentives,
+    setIncentives,
     isLoading,
     error,
     calculateBetIncentive,

@@ -4,11 +4,26 @@
  */
 
 /**
+ * Token/Currency configuration
+ * Configurable token symbol for rewards, incentives, and display
+ */
+export const TOKEN_CONFIG = {
+  /** Display symbol for the native token (e.g., 'STX', 'XLM', 'USD') */
+  SYMBOL: process.env.NEXT_PUBLIC_TOKEN_SYMBOL ?? 'STX',
+  /** Full token name for display */
+  NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stacks Token',
+  /** Decimal places for display formatting */
+  DECIMALS: 2,
+  /** Stroops/micro units per token (for conversion) */
+  STROOPS_PER_UNIT: 1_000_000,
+} as const;
+
+/**
  * Bet configuration
  */
 export const BET_CONFIG = {
-  MINIMUM_BET: 0.1, // STX
-  MAXIMUM_BET: 1_000_000, // STX
+  MINIMUM_BET: 0.1, // in TOKEN_CONFIG.SYMBOL units
+  MAXIMUM_BET: 1_000_000, // in TOKEN_CONFIG.SYMBOL units
   FEE_PERCENTAGE: 2, // 2% fee
 } as const;
 

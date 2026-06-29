@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import AuthGuard from '../../app/components/AuthGuard';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import AuthGuard from '@/components/AuthGuard';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 
 // Mock the WalletAdapterProvider hook
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

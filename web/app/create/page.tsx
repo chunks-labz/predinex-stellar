@@ -1,232 +1,229 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('page');
 
 import { FormEvent, useState } from 'react';
-import { openContractCall } from '@stacks/connect';
-import { stringAsciiCV, uintCV } from '@stacks/transactions';
-import Navbar from '../components/Navbar';
-import AuthGuard from '../components/AuthGuard';
-import { useStacks } from '../components/StacksProvider';
+import { ArrowLeft, ArrowRight, Loader2 } from 'lucide-react';
+import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '../../providers/ToastProvider';
-import { useLocalStorage } from '../lib/hooks/useLocalStorage';
-import { validatePoolCreationForm } from '../lib/validators';
-import { getRuntimeConfig } from '../lib/runtime-config';
-import { Loader2 } from 'lucide-react';
-
-const CREATE_MARKET_DRAFT_KEY = 'predinex_create_market_draft_v1';
-
-interface CreateMarketDraft {
-    title: string;
-    description: string;
-    outcomeA: string;
-    outcomeB: string;
-    duration: string;
-}
-
-const EMPTY_DRAFT: CreateMarketDraft = {
-    title: '',
-    description: '',
-    outcomeA: '',
-    outcomeB: '',
-    duration: '',
-};
-
-type FormErrors = Partial<Record<keyof CreateMarketDraft, string>>;
+import { predinexContract } from '../lib/adapters/predinex-contract';
+import { invalidateOnCreatePool } from '../lib/cache-invalidation';
+import { TxStage } from '../lib/soroban-transaction-service';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
+import RouteErrorBoundary from '../../components/RouteErrorBoundary';
+import { useCreateWizard, type WizardStep } from './_wizard/useCreateWizard';
+import { StepIndicator } from './_wizard/StepIndicator';
+import { StepQuestion } from './_wizard/StepQuestion';
+import { StepParameters } from './_wizard/StepParameters';
+import { StepReview } from './_wizard/StepReview';
 
 export default function CreateMarket() {
-    const { userData, authenticate } = useStacks();
-    const { showToast } = useToast();
-    const [draft, setDraft, clearDraft] = useLocalStorage<CreateMarketDraft>(
-        CREATE_MARKET_DRAFT_KEY,
-        EMPTY_DRAFT
-    );
-    const [errors, setErrors] = useState<FormErrors>({});
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [txId, setTxId] = useState<string | null>(null);
+  const wallet = useWallet();
+  const { showToast } = useToast();
+  const wizard = useCreateWizard();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [stage, setStage] = useState<TxStage>('idle');
+  const [txId, setTxId] = useState<string | null>(null);
+  const [feePrompt, setFeePrompt] = useState<
+    { feeStroops: string; resolve: (v: boolean) => void } | null
+  >(null);
 
-    const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-        const { name, value } = e.target;
-        setDraft((prev) => ({ ...prev, [name]: value }));
-        if (errors[name as keyof CreateMarketDraft]) {
-            setErrors((prev) => ({ ...prev, [name]: undefined }));
-        }
-    };
+  const getStageLabel = (s: TxStage) => {
+    switch (s) {
+      case 'simulating':
+        return 'Simulating transaction…';
+      case 'signing':
+        return 'Waiting for signature…';
+      case 'submitting':
+        return 'Submitting to network…';
+      case 'polling':
+        return 'Confirming transaction…';
+      default:
+        return 'Submitting…';
+    }
+  };
 
-    const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
-        e.preventDefault();
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
 
-        if (!userData) {
-            authenticate();
-            return;
-        }
+    if (!wallet.isConnected) {
+      wallet.connect();
+      return;
+    }
 
-        const duration = parseInt(draft.duration, 10);
-        const validation = validatePoolCreationForm({
-            title: draft.title,
-            description: draft.description,
-            outcomeA: draft.outcomeA,
-            outcomeB: draft.outcomeB,
-            duration: isNaN(duration) ? 0 : duration,
-        });
+    const { valid } = wizard.validateAll();
+    if (!valid) {
+      // Send the user back to the earliest step with an error.
+      if (
+        wizard.errors.title ||
+        wizard.errors.description ||
+        wizard.errors.outcomeA ||
+        wizard.errors.outcomeB
+      ) {
+        wizard.goTo(1);
+      } else if (wizard.errors.duration) {
+        wizard.goTo(2);
+      }
+      return;
+    }
 
-        if (!validation.valid) {
-            setErrors(validation.errors as FormErrors);
-            return;
-        }
+    const duration = parseInt(wizard.draft.duration, 10);
+    setIsSubmitting(true);
+    setStage('idle');
+    try {
+      const { txHash } = await predinexContract.createMarketSoroban({
+        wallet,
+        title: wizard.draft.title,
+        description: wizard.draft.description,
+        outcomeA: wizard.draft.outcomeA,
+        outcomeB: wizard.draft.outcomeB,
+        durationSeconds: duration,
+        onStageChange: (s) => setStage(s),
+        onFeeEstimated: (fee) => {
+          return new Promise((resolve) => {
+            setFeePrompt({ feeStroops: fee, resolve });
+          });
+        },
+      });
 
-        setIsSubmitting(true);
-        try {
-            const { contract } = getRuntimeConfig();
-            await openContractCall({
-                contractAddress: contract.address,
-                contractName: contract.name,
-                functionName: 'create-pool',
-                functionArgs: [
-                    stringAsciiCV(draft.title),
-                    stringAsciiCV(draft.description),
-                    stringAsciiCV(draft.outcomeA),
-                    stringAsciiCV(draft.outcomeB),
-                    uintCV(duration),
-                ],
-                onFinish: (data) => {
-                    setTxId(data.txId);
-                    clearDraft();
-                    showToast('Market created successfully!', 'success');
-                    setIsSubmitting(false);
-                },
-                onCancel: () => {
-                    showToast('Transaction cancelled.', 'info');
-                    setIsSubmitting(false);
-                },
-            });
-        } catch (error) {
-            showToast(`Failed to create market: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-            setIsSubmitting(false);
-        }
-    };
+      setTxId(txHash);
+      wizard.resetDraft();
+      invalidateOnCreatePool();
+      showToast('Market created successfully!', 'success');
+    } catch (error) {
+      log.error('Failed to create market:', error);
+      showToast(
+        `Failed to create market: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'error'
+      );
+    } finally {
+      setIsSubmitting(false);
+      setStage('idle');
+      setFeePrompt(null);
+    }
+  };
 
-    return (
-        <main className="min-h-screen bg-background">
-            <Navbar />
-            <AuthGuard>
-                <div className="container mx-auto px-4 py-12 max-w-2xl">
-                    <h1 className="text-3xl font-bold mb-8">Create New Market</h1>
+  return (
+    <main className="min-h-screen bg-background">
+      <Navbar />
+      <RouteErrorBoundary routeName="CreateMarket">
+      <AuthGuard>
+        <div className="container mx-auto px-4 py-12 max-w-2xl">
+          <h1 className="text-3xl font-bold mb-8">Create new market</h1>
 
-                    {txId && (
-                        <div role="status" className="mb-6 p-4 rounded-xl border border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400">
-                            <p className="font-semibold">Market created!</p>
-                            <p className="text-sm mt-1 font-mono break-all">Tx: {txId}</p>
-                        </div>
-                    )}
+          <TransactionFeeModal
+            isOpen={!!feePrompt}
+            actionName="Create Pool"
+            feeStroops={feePrompt?.feeStroops || '0'}
+            onConfirm={() => {
+              feePrompt?.resolve(true);
+              setFeePrompt(null);
+            }}
+            onCancel={() => {
+              feePrompt?.resolve(false);
+              setFeePrompt(null);
+              setIsSubmitting(false);
+              setStage('idle');
+            }}
+            isConfirming={stage === 'signing' || stage === 'submitting' || stage === 'polling'}
+          />
 
-                    <form onSubmit={handleSubmit} noValidate className="space-y-6">
-                        <div className="p-6 rounded-xl border border-border space-y-5">
+          {txId && (
+            <div
+              role="status"
+              className="mb-6 p-4 rounded-xl border border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400"
+            >
+              <p className="font-semibold">Market created!</p>
+              <p className="text-sm mt-1 font-mono break-all">Tx: {txId}</p>
+            </div>
+          )}
 
-                            {/* Title */}
-                            <div>
-                                <label htmlFor="title" className="block text-sm font-medium mb-1">Question / Title</label>
-                                <input
-                                    id="title"
-                                    name="title"
-                                    type="text"
-                                    value={draft.title}
-                                    onChange={handleChange}
-                                    placeholder="e.g. Will Bitcoin be above $100k by end of 2025?"
-                                    className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                    aria-describedby={errors.title ? 'title-error' : undefined}
-                                    autoComplete="off"
-                                />
-                                {errors.title && <p id="title-error" role="alert" className="mt-1 text-sm text-red-500">{errors.title}</p>}
-                                <p className="mt-1 text-xs text-muted-foreground">Draft saved locally and restored after refresh.</p>
-                            </div>
+          <StepIndicator current={wizard.step} onJump={(target) => wizard.goTo(target)} />
 
-                            {/* Description */}
-                            <div>
-                                <label htmlFor="description" className="block text-sm font-medium mb-1">Description</label>
-                                <textarea
-                                    id="description"
-                                    name="description"
-                                    rows={3}
-                                    value={draft.description}
-                                    onChange={handleChange}
-                                    placeholder="Provide context and resolution criteria for this market."
-                                    className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
-                                    aria-describedby={errors.description ? 'description-error' : undefined}
-                                />
-                                {errors.description && <p id="description-error" role="alert" className="mt-1 text-sm text-red-500">{errors.description}</p>}
-                            </div>
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="p-6 rounded-xl border border-border">
+              {wizard.step === 1 && (
+                <StepQuestion
+                  draft={wizard.draft}
+                  errors={wizard.errors}
+                  touched={wizard.touched}
+                  setField={wizard.setField}
+                  blurField={wizard.blurField}
+                />
+              )}
+              {wizard.step === 2 && (
+                <StepParameters
+                  draft={wizard.draft}
+                  errors={wizard.errors}
+                  touched={wizard.touched}
+                  setField={wizard.setField}
+                  blurField={wizard.blurField}
+                />
+              )}
+              {wizard.step === 3 && (
+                <StepReview
+                  draft={wizard.draft}
+                  walletAddress={wallet.address}
+                  onEdit={(s: WizardStep) => wizard.goTo(s)}
+                />
+              )}
+            </div>
 
-                            {/* Outcomes */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label htmlFor="outcomeA" className="block text-sm font-medium mb-1">Outcome A</label>
-                                    <input
-                                        id="outcomeA"
-                                        name="outcomeA"
-                                        type="text"
-                                        value={draft.outcomeA}
-                                        onChange={handleChange}
-                                        placeholder="e.g. Yes"
-                                        className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                        aria-describedby={errors.outcomeA ? 'outcomeA-error' : undefined}
-                                    />
-                                    {errors.outcomeA && <p id="outcomeA-error" role="alert" className="mt-1 text-sm text-red-500">{errors.outcomeA}</p>}
-                                </div>
-                                <div>
-                                    <label htmlFor="outcomeB" className="block text-sm font-medium mb-1">Outcome B</label>
-                                    <input
-                                        id="outcomeB"
-                                        name="outcomeB"
-                                        type="text"
-                                        value={draft.outcomeB}
-                                        onChange={handleChange}
-                                        placeholder="e.g. No"
-                                        className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                        aria-describedby={errors.outcomeB ? 'outcomeB-error' : undefined}
-                                    />
-                                    {errors.outcomeB && <p id="outcomeB-error" role="alert" className="mt-1 text-sm text-red-500">{errors.outcomeB}</p>}
-                                </div>
-                            </div>
+            <div className="mt-6 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={wizard.resetDraft}
+                  disabled={isSubmitting}
+                  className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted/40 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Clear draft
+                </button>
+              </div>
 
-                            {/* Duration */}
-                            <div>
-                                <label htmlFor="duration" className="block text-sm font-medium mb-1">Duration (blocks)</label>
-                                <input
-                                    id="duration"
-                                    name="duration"
-                                    type="number"
-                                    min={10}
-                                    value={draft.duration}
-                                    onChange={handleChange}
-                                    placeholder="e.g. 1440 (~10 days on Stacks)"
-                                    className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
-                                    aria-describedby={errors.duration ? 'duration-error' : undefined}
-                                />
-                                {errors.duration && <p id="duration-error" role="alert" className="mt-1 text-sm text-red-500">{errors.duration}</p>}
-                            </div>
-
-                            <div className="flex items-center gap-3">
-                                <button
-                                    type="button"
-                                    onClick={clearDraft}
-                                    disabled={Object.values(draft).every((v) => v === '')}
-                                    className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    Clear Draft
-                                </button>
-                            </div>
-
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className="w-full py-3 bg-primary text-primary-foreground rounded-lg font-bold disabled:opacity-60 flex items-center justify-center gap-2 transition-opacity"
-                            >
-                                {isSubmitting && <Loader2 className="w-5 h-5 animate-spin" />}
-                                {isSubmitting ? 'Submitting…' : 'Create Market'}
-                            </button>
-                        </div>
-                    </form>
-                </div>
-            </AuthGuard>
-        </main>
-    );
+              <div className="flex items-center gap-3">
+                {wizard.step > 1 && (
+                  <button
+                    type="button"
+                    onClick={wizard.prev}
+                    disabled={isSubmitting}
+                    className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted/40 disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                    Back
+                  </button>
+                )}
+                {!wizard.isFinalStep ? (
+                  <button
+                    type="button"
+                    onClick={wizard.next}
+                    disabled={isSubmitting}
+                    aria-disabled={!wizard.canAdvance}
+                    className={`px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold inline-flex items-center gap-2 ${
+                      wizard.canAdvance ? '' : 'opacity-60'
+                    }`}
+                  >
+                    Next
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="px-6 py-2 rounded-lg bg-primary text-primary-foreground font-bold inline-flex items-center gap-2 disabled:opacity-60"
+                  >
+                    {isSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                    {isSubmitting ? getStageLabel(stage) : 'Create market'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </form>
+        </div>
+      </AuthGuard>
+      </RouteErrorBoundary>
+    </main>
+  );
 }

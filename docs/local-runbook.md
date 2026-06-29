@@ -13,7 +13,7 @@ This guide walks you through building or deploying the Predinex Soroban contract
 | Stellar CLI | 21+ | https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup |
 | Node.js | 18+ | https://nodejs.org |
 | npm | 8+ | bundled with Node.js |
-| Freighter wallet | latest | https://www.freighter.app (browser extension, for UI testing) |
+| Supported wallet flow | current | See [wallet and network support](../web/docs/WALLET_NETWORK_SUPPORT.md) for the active wallet entry point and unsupported combinations. |
 
 Verify everything is in order with the bootstrap script:
 
@@ -151,7 +151,7 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=YOUR_PROJECT_ID
 | `NEXT_PUBLIC_CONTRACT_NAME` | No | `predinex-pool` | Contract name suffix |
 | `NEXT_PUBLIC_APP_URL` | No | `https://predinex.app` | Used for WalletConnect metadata |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | — | WalletConnect Cloud project ID |
-| `NEXT_PUBLIC_STACKS_API_URL` | No | Hiro testnet URL | Override the Stacks/Stellar API endpoint |
+| `NEXT_PUBLIC_STACKS_API_URL` | No | Hiro testnet URL | Override the legacy helper API endpoint |
 | `DEBUG` | No | `false` | Enable verbose client-side logging |
 
 ---
@@ -167,9 +167,9 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000).
 
 **Smoke-check the contract wiring:**
-1. Connect your Freighter wallet (set to Stellar testnet).
+1. Connect using the supported wallet flow documented in [WALLET_NETWORK_SUPPORT.md](../web/docs/WALLET_NETWORK_SUPPORT.md) and set the app to the matching supported network.
 2. Navigate to **Markets** — the page fetches live pool data via `predinexReadApi.getMarkets()`.
-3. Open browser DevTools → Network. Confirm a request to `api.testnet.hiro.so` returns 200.
+3. Open browser DevTools → Network. Confirm a request to the configured helper API endpoint returns 200.
 4. If `DEBUG=true` is set in `.env.local`, check the console for the resolved runtime config log.
 
 ---
@@ -248,7 +248,7 @@ npm run build
 | Markets page shows no pools | Wrong contract ID in env | Double-check `NEXT_PUBLIC_CONTRACT_ADDRESS` matches the deployed contract |
 | `Already initialized` panic on deploy | Contract was already initialized | This is expected on re-deploy; only call `initialize` once per contract ID |
 | `wasm32-unknown-unknown` target missing | Rust target not installed | `rustup target add wasm32-unknown-unknown` |
-| Freighter shows "wrong network" | Freighter set to mainnet | Switch Freighter to Testnet in the extension settings |
+| Wallet shows "wrong network" | Wallet connected to the wrong supported network | Switch the app to the matching supported network and reconnect |
 | `stellar: command not found` | Stellar CLI not installed | Follow the [CLI setup guide](https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup) |
 
 ---

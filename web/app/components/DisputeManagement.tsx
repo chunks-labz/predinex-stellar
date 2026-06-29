@@ -1,11 +1,16 @@
 'use client';
 
+import React from 'react';
 import dynamic from 'next/dynamic';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useDisputeManagement } from '../lib/disputes/useDisputeManagement';
 import { DisputePageHeader } from './disputes/DisputePageHeader';
 import { DisputeTabNav } from './disputes/DisputeTabNav';
 import { ActiveDisputesSection } from './disputes/ActiveDisputesSection';
+import { DisputeUnavailable } from './disputes/DisputeUnavailable';
+import { DisconnectedState } from '../../components/DisconnectedState';
+import { EmptyState } from '../../components/EmptyState';
+import { isDisputeMockDataEnabled } from '../lib/feature-flags';
 
 function TabPanelSkeleton() {
   return (
@@ -28,9 +33,18 @@ const CreateDisputeSection = dynamic(
 );
 
 export default function DisputeManagement() {
-  const { address } = useWallet();
+  const { address, isConnected } = useWallet();
   const { disputes, selectedTab, setSelectedTab, isLoading, now, hasUserVoted, getUserVote, handleVote } =
     useDisputeManagement(address);
+
+  if (!isConnected) {
+    return <DisconnectedState />;
+  }
+
+  // Show unavailable state if feature is disabled and no real disputes exist
+  if (!isDisputeMockDataEnabled() && disputes.length === 0) {
+    return <DisputeUnavailable />;
+  }
 
   return (
     <div className="max-w-6xl mx-auto p-6">
@@ -47,7 +61,12 @@ export default function DisputeManagement() {
             onVote={handleVote}
           />
         )}
-        {selectedTab === 'resolved' && <ResolvedDisputesSection disputes={disputes} />}
+        {selectedTab === 'resolved' &&
+          (disputes.length === 0 ? (
+            <EmptyState message="No resolved disputes yet" />
+          ) : (
+            <ResolvedDisputesSection disputes={disputes} />
+          ))}
         {selectedTab === 'create' && <CreateDisputeSection isLoading={isLoading} />}
       </div>
     </div>

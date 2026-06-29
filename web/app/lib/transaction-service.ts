@@ -9,7 +9,9 @@ import {
   AnchorMode,
   PostConditionMode,
   ClarityValue,
+  type PostCondition,
   StacksTransactionWire,
+  getAddressFromPrivateKey,
 } from '@stacks/transactions';
 import { StacksNetwork } from '@stacks/network';
 import { TransactionPayload } from './wallet-service';
@@ -22,6 +24,7 @@ export interface TransactionOptions {
   nonce?: number;
   anchorMode?: AnchorMode;
   postConditionMode?: PostConditionMode;
+  postConditions?: PostCondition[];
 }
 
 /**
@@ -30,7 +33,7 @@ export interface TransactionOptions {
 export interface TransactionResult {
   txId: string;
   transaction: StacksTransactionWire;
-  broadcastResult: TxBroadcastResult;
+  broadcastResult: Awaited<ReturnType<typeof broadcastTransaction>>;
 }
 
 /**
@@ -59,8 +62,10 @@ export interface TransactionEstimate {
 
 /**
  * TransactionService provides high-level utilities for interacting with the Stacks blockchain.
- * It manages the lifecycle of a transaction from estimation and creation to broadcasting and status tracking.
  */
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('transaction-service');
 export class TransactionService {
   private network: StacksNetwork;
 
@@ -81,22 +86,42 @@ export class TransactionService {
     senderAddress: string
   ): Promise<TransactionEstimate> {
     try {
-      // Mocked for unblocking build - in real app would use @stacks/blockchain-api-client
-      const feeEstimate = 1000;
-      const nonceResponse = 0;
+      // Use @stacks/blockchain-api-client to get real fee and nonce estimates
+      const net = this.network as { coreApiUrl?: string; baseUrl?: string };
+      const apiUrl = net.coreApiUrl ?? net.baseUrl;
+
+      // Fetch current nonce for the sender address
+      const nonceResponse = await fetch(`${apiUrl}/extended/v1/address/${senderAddress}/nonces`);
+      if (!nonceResponse.ok) {
+        throw new Error(`Failed to fetch nonce: ${nonceResponse.status}`);
+      }
+      const nonceData = await nonceResponse.json();
+      const nonce = nonceData.possible_nonce || 0;
+
+      // Fetch fee estimate from network
+      const feeEstimate = await this.estimateFeeFromNetwork(apiUrl);
 
       return {
         estimatedFee: Number(feeEstimate),
-        estimatedNonce: Number(nonceResponse),
+        estimatedNonce: Number(nonce),
         totalCost: Number(feeEstimate),
       };
     } catch (error) {
-      console.error('Transaction estimation failed:', error);
-      return {
-        estimatedFee: 1000,
-        estimatedNonce: 0,
-        totalCost: 1000,
-      };
+      log.error('Transaction estimation failed', error);
+      return { estimatedFee: 1000, estimatedNonce: 0, totalCost: 1000 };
+    }
+  }
+
+  private async estimateFeeFromNetwork(apiUrl: string): Promise<number> {
+    try {
+      const feeResponse = await fetch(`${apiUrl}/v2/fees`);
+      if (!feeResponse.ok) {
+        return 10000;
+      }
+      const feeData = await feeResponse.json();
+      return feeData.middle?.fee_rate || 10000;
+    } catch {
+      return 10000;
     }
   }
 
@@ -161,14 +186,15 @@ export class TransactionService {
         senderKey,
         network: this.network,
         anchorMode: options.anchorMode || AnchorMode.Any,
-        postConditionMode: options.postConditionMode || PostConditionMode.Allow,
+        postConditionMode: options.postConditionMode ?? PostConditionMode.Deny,
+        ...(options.postConditions?.length ? { postConditions: options.postConditions } : {}),
         fee,
         nonce,
       };
 
       return await makeContractCall(txOptions);
     } catch (error) {
-      console.error('Transaction creation failed:', error);
+      log.error('Transaction creation failed', error);
       throw new Error(`Failed to create transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -193,7 +219,7 @@ export class TransactionService {
         broadcastResult,
       };
     } catch (error) {
-      console.error('Transaction broadcast failed:', error);
+      log.error('Transaction broadcast failed', error);
       throw new Error(`Failed to broadcast transaction: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
@@ -215,7 +241,7 @@ export class TransactionService {
       const transaction = await this.createTransaction(payload, senderKey, options);
       return await this.broadcastTransaction(transaction);
     } catch (error) {
-      console.error('Transaction execution failed:', error);
+      log.error('Transaction execution failed', error);
       throw error;
     }
   }
@@ -245,7 +271,7 @@ export class TransactionService {
       errors.push('Function arguments must be an array');
     }
 
-    if (payload.contractAddress && !this.isValidStacksAddress(payload.contractAddress)) {
+    if (payload.contractAddress && !this.isValidStellarAddress(payload.contractAddress)) {
       errors.push('Invalid contract address format');
     }
 
@@ -293,18 +319,24 @@ export class TransactionService {
         details: txData,
       };
     } catch (error) {
-      console.error('Failed to get transaction status:', error);
+      log.error('Failed to get transaction status', error);
       return { status: 'not_found' };
     }
   }
 
   private getAddressFromPrivateKey(privateKey: string): string {
-    return 'SP1EXAMPLE';
+    try {
+      return getAddressFromPrivateKey(privateKey);
+    } catch (error) {
+      console.error('Failed to derive address from private key:', error);
+      throw new Error('Invalid private key or derivation failed');
+    }
   }
 
-  private isValidStacksAddress(address: string): boolean {
-    const stacksAddressRegex = /^S[PT][0-9A-HJKMNP-TV-Z]{39}$/;
-    return stacksAddressRegex.test(address);
+  private isValidStellarAddress(address: string): boolean {
+    // Stellar addresses start with G (public keys) or C (contracts), 56 characters total
+    const stellarAddressRegex = /^[GC][A-Z0-9]{55}$/;
+    return stellarAddressRegex.test(address);
   }
 }// Plan: Integrate with Hiro Explorer API
 // Note: Consider implementing caching for frequently accessed transaction statuses

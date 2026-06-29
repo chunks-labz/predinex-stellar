@@ -3,73 +3,103 @@
  * Centralizes formatting logic for currency, percentages, addresses, and durations.
  */
 
+import { TOKEN_CONFIG } from './config';
+
 // =============================================================================
-// Currency Formatting
+// Currency Formatting (#202 — Configurable token symbol; 1 unit = 10_000_000 stroops)
 // =============================================================================
 
-const MICROSTX_PER_STX = 1_000_000;
+/** Stroops per token unit — the base unit. */
+const STROOPS_PER_UNIT = TOKEN_CONFIG.STROOPS_PER_UNIT;
+
+/** Configurable token symbol for display (e.g., 'STX', 'XLM', 'USD'). */
+const TOKEN_SYMBOL = TOKEN_CONFIG.SYMBOL;
+
+
 
 /**
- * Convert STX amount to microSTX (multiply by 1,000,000)
- * @param stxAmount Amount in STX
- * @returns Amount in microSTX
+ * Convert token units to stroops (multiply by STROOPS_PER_UNIT).
  */
-export function stxToMicroStx(stxAmount: number): number {
-  return Math.floor(stxAmount * MICROSTX_PER_STX);
+export function unitsToStroops(amount: bigint): bigint {
+  return amount * BigInt(STROOPS_PER_UNIT);
 }
 
 /**
- * Convert microSTX to STX (divide by 1,000,000)
- * @param microStxAmount Amount in microSTX
- * @returns Amount in STX
+ * Backward-compatible alias for code still using the legacy STX naming.
  */
-export function microStxToStx(microStxAmount: number): number {
-  return microStxAmount / MICROSTX_PER_STX;
+export const stxToMicroStx = unitsToStroops;
+
+
+/**
+ * Convert stroops to token units (divide by STROOPS_PER_UNIT).
+ */
+export function stroopsToUnits(stroops: bigint): number {
+  return Number(stroops) / STROOPS_PER_UNIT;
 }
 
 /**
- * Format a microSTX amount for display with proper decimal places.
- * Uses 2-6 decimal places based on value size.
- * @param microStxAmount Amount in microSTX
- * @returns Formatted string (e.g., "1,250.00 STX" or "0.000001 STX")
+ * Backward-compatible alias for code still using the legacy STX naming.
  */
-export function formatStxAmount(microStxAmount: number): string {
-  const stxAmount = microStxToStx(microStxAmount);
-  return stxAmount.toLocaleString('en-US', {
+export const microStxToStx = stroopsToUnits;
+
+
+/**
+ * Format a stroops amount for display with proper decimal places.
+ * Uses 2–7 decimal places based on value size.
+ * Uses configurable TOKEN_SYMBOL.
+ */
+export function formatTokenAmount(stroops: bigint): string {
+  const units = stroopsToUnits(stroops);
+  return units.toLocaleString('en-US', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 6,
-  }) + ' STX';
+    maximumFractionDigits: 7,
+  }) + ' ' + TOKEN_SYMBOL;
 }
 
 /**
- * Format a microSTX amount with compact notation (K, M suffixes).
- * Best for displaying large values in constrained spaces.
- * @param microStxAmount Amount in microSTX
- * @returns Formatted string (e.g., "1.5M STX", "250K STX")
+ * Backward-compatible alias for code still using the legacy STX naming.
  */
-export function formatStxAmountCompact(microStxAmount: number): string {
-  const amount = microStxToStx(microStxAmount);
-  
+export const formatStxAmount = formatTokenAmount;
+
+
+/**
+ * Format a stroops amount with compact notation (K, M suffixes).
+ * Uses configurable TOKEN_SYMBOL.
+ */
+export function formatTokenAmountCompact(stroops: bigint): string {
+  const amount = stroopsToUnits(stroops);
   if (amount >= 1_000_000) {
-    return `${(amount / 1_000_000).toFixed(1)}M STX`;
+    return `${(amount / 1_000_000).toFixed(1)}M ${TOKEN_SYMBOL}`;
   } else if (amount >= 1_000) {
-    return `${(amount / 1_000).toFixed(1)}K STX`;
+    return `${(amount / 1_000).toFixed(1)}K ${TOKEN_SYMBOL}`;
   } else if (amount >= 1) {
-    return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} STX`;
+    return `${amount.toLocaleString('en-US', { maximumFractionDigits: 2 })} ${TOKEN_SYMBOL}`;
   } else {
-    return `${amount.toLocaleString('en-US', { maximumFractionDigits: 6 })} STX`;
+    return `${amount.toLocaleString('en-US', { maximumFractionDigits: 7 })} ${TOKEN_SYMBOL}`;
   }
 }
 
 /**
- * Format a raw microSTX value without STX suffix.
- * Used when the currency is implied by context.
- * @param microStxAmount Amount in microSTX
- * @returns Formatted number string (e.g., "1,250.00")
+ * Backward-compatible alias for code still using the legacy STX naming.
  */
-export function formatMicroStxValue(microStxAmount: number): string {
-  return microStxToStx(microStxAmount).toFixed(2);
+export const formatStxAmountCompact = formatTokenAmountCompact;
+
+
+/**
+ * Format a raw stroops value without asset suffix.
+ */
+export function formatStroopsValue(stroops: bigint): string {
+  return stroopsToUnits(stroops).toFixed(2);
 }
+
+/**
+ * Backward-compatible alias for code still using the legacy STX naming.
+ */
+export const formatMicroStxValue = formatStroopsValue;
+
+
+// Export the configurable token symbol for use in components
+export { TOKEN_SYMBOL, TOKEN_CONFIG };
 
 // =============================================================================
 // Percentage Formatting
@@ -141,12 +171,12 @@ export function formatAddress(
 }
 
 /**
- * Format a Stacks address for standard wallet display.
+ * Format a Stellar address for standard wallet display.
  * Uses the canonical 6...4 truncation pattern.
- * @param address The full Stacks address
+ * @param address The full Stellar address
  * @returns Formatted address string
  */
-export function formatStacksAddress(address: string): string {
+export function formatStellarAddress(address: string): string {
   return formatAddress(address, { startChars: 6, endChars: 4 });
 }
 
@@ -232,8 +262,8 @@ export function formatTimestamp(
   timestamp: number,
   format: 'short' | 'long' | 'relative' = 'short'
 ): string {
-  // Detect if timestamp is in seconds (before year 2100) or milliseconds
-  const ms = timestamp < 4_000_000_000_000 ? timestamp * 1000 : timestamp;
+  // Treat 10-digit unix timestamps as seconds and 13-digit values as milliseconds.
+  const ms = timestamp < 10_000_000_000 ? timestamp * 1000 : timestamp;
   const date = new Date(ms);
   
   switch (format) {

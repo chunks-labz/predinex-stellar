@@ -15,4 +15,6 @@ Lower-level modules (`stacks-api`, `appkit-transactions`) remain the implementat
 ## Testing
 
 - Mock `predinexContract` or `predinexReadApi` in component tests instead of Stacks SDK modules.
+- For read-path activity tests, prefer Soroban RPC/event-service payloads over legacy Stacks transaction shapes.
+- Keep direct `@stacks/*` mocks only in compatibility suites that are explicitly labeled as such.
 - See `web/tests/lib/predinex-contract-adapter.test.ts` for isolated adapter behavior.
