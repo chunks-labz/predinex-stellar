@@ -253,6 +253,62 @@ npm run build
 
 ---
 
+---
+
+## 7. Mainnet deployment
+
+> ⚠️ **Mainnet deployments are automated via the CI/CD pipeline. Only run this manually if the pipeline is unavailable.**
+
+### 7a. Automated pipeline (recommended)
+
+The pipeline in `.github/workflows/mainnet-deploy.yml` triggers on any tag matching `v<major>.<minor>.<patch>`:
+
+```bash
+# Create and push a release tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+Pipeline stages:
+1. **Safety checks** — `cargo fmt --check`, `cargo clippy`, `cargo test`, WASM build, deployer balance check (≥ 20 XLM required)
+2. **Deploy** (requires manual approval in GitHub → Environments → `mainnet`) — deploys WASM, initializes contract, saves deployment record to `deployments/`
+3. **Smoke tests** — `get_pool_count`, `create_pool`, `get_pool`
+4. **Notify** — posts status to Slack / Discord
+
+Required GitHub secrets:
+
+| Secret | Description |
+|---|---|
+| `MAINNET_DEPLOYER_SECRET` | Stellar secret key of the deploy account |
+| `MAINNET_XLM_SAC` | XLM Stellar Asset Contract address on mainnet |
+| `MAINNET_TREASURY_ADDRESS` | Treasury recipient address |
+| `VALIDATION_CLOUD_KEY` | Validation Cloud RPC API key |
+| `SLACK_WEBHOOK_URL` | (optional) Slack incoming webhook |
+| `DISCORD_WEBHOOK_URL` | (optional) Discord webhook |
+
+After a successful deploy, the contract ID is recorded in `deployments/v<version>.json` and committed to `main`.
+
+### 7b. Emergency rollback
+
+If a bad deployment needs to be reverted, redeploy an older verified WASM:
+
+```bash
+export MAINNET_DEPLOYER_SECRET=S...
+export MAINNET_XLM_SAC=C...
+export MAINNET_TREASURY_ADDRESS=G...
+
+./scripts/rollback.sh v1.0.1   # version to roll back TO
+```
+
+The script:
+1. Loads `deployments/v1.0.1.json` and verifies the WASM SHA-256 hash
+2. Asks for typed confirmation before touching mainnet
+3. Redeploys the verified WASM as a new contract ID
+4. Initializes the new contract
+5. Prints the steps to update `NEXT_PUBLIC_CONTRACT_ADDRESS`
+
+> Soroban contracts are immutable — rollback deploys a new contract ID. Update your env vars and redeploy the web app after running the rollback.
+
 ## Further reading
 
 - [Contract versioning and migration](../web/docs/CONTRACT_VERSIONING.md)
