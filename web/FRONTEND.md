@@ -3,19 +3,26 @@
 ## Overview
 Predinex is a decentralized prediction market built on the **Stellar blockchain** (via Soroban). The frontend is a modern Next.js application that prioritizes performance, type safety, and a premium user experience in the Stellar ecosystem.
 
-> [!IMPORTANT]
-> **Migration in Progress**: This frontend is currently being migrated from a Stacks-based architecture to a full Stellar/Soroban implementation. Some internal component names and libraries (e.g., `StacksProvider`) are legacy artifacts that are being systematically replaced by Stellar SDK and Freighter integrations.
+> **Canonical frontend location.** `web/` is the single canonical Next.js
+> application. It is the only frontend built, tested, and deployed by CI
+> (`.github/workflows/ci.yml`, `working-directory: ./web`). A former
+> `apps/web/` directory held an unwired skeleton that duplicated components
+> already present here; it was removed and its one unique feature — the
+> embeddable pool widget — was consolidated into this app (see below). Add new
+> frontend code here, not in a second top-level app.
 
 ## Tech Stack
-- **Framework**: Next.js 14 (App Router)
-- **Styling**: Tailwind CSS
+- **Framework**: Next.js 16 (App Router)
+- **React**: React 19
+- **Styling**: Tailwind CSS 4
 - **Blockchain Interop**: Stellar SDK, Soroban integration
 - **Wallet Connection**: Freighter, WalletConnect
 - **Icons**: Lucide React
-- **State Management**: React Context (Legacy: `StacksProvider`, migrating to `StellarProvider`)
+- **State Management**: React Context
+- **Testing**: Vitest with React Testing Library
 
 ## Core Components
-- **StellarProvider (Legacy: StacksProvider)**: Manages authentication and wallet state for the Stellar network.
+- **Wallet Providers**: Manages authentication and wallet state for the Stellar network.
 - **Navbar**: Main navigation and Stellar wallet connection status.
 - **Hero**: Institutional-grade landing section featuring Stellar-themed aesthetics.
 - **MarketCard**: Detailed representation of individual prediction markets on Soroban.
@@ -23,18 +30,24 @@ Predinex is a decentralized prediction market built on the **Stellar blockchain*
 - **Rewards**: Leaderboard and incentive tracking.
 
 ## Directory Structure
-- `app/`: Next.js pages and layouts.
-- `components/`: Reusable UI components.
-- `lib/`: Core logic, services, and utilities (migrating and legacy).
+- `app/`: Next.js 16 pages, layouts, and route handlers.
+- `app/components/`: Page-specific UI components.
+- `components/`: Shared reusable UI components.
+- `lib/`: Core logic, services, and utilities.
 - `providers/`: Context providers for global state.
-- `styles/`: Global CSS and Tailwind configuration.
+- `tests/`: Vitest test suites for components and utilities.
+- `public/`: Static assets.
+- `app/embed/pool/[poolId]/`: Standalone, iframe-friendly pool widget route
+  used for embedding a single pool on external sites. Renders
+  `components/PoolEmbedWidget`; `components/EmbedCodeSnippet` produces the
+  copyable `<iframe>` markup.
 
 ## Component Documentation
 
 ### Layout Components
 - **Navbar**: Responsive navigation with mobile menu support. Handles the primary Stellar wallet connection.
 - **Footer**: Professional footer with social links, legal info, and Stellar ecosystem overview.
-- **StellarProvider**: Context provider that wraps the application to provide wallet authentication state.
+- **Wallet Providers**: Context providers that wrap the application to provide wallet authentication state.
 
 ### Dashboard Components
 - **PortfolioOverview**: High-level summary of user earnings, wagered amounts (XLM), and profit/loss.
@@ -71,7 +84,7 @@ The frontend interacts with Soroban smart contracts using the Stellar SDK.
 ## Styling and Design System
 
 ### Tailwind CSS
-We use Tailwind CSS for all component styling, leveraging a custom theme that provides a cohesive institutional aesthetic.
+We use Tailwind CSS 4 for all component styling, leveraging a custom theme that provides a cohesive institutional aesthetic.
 
 **Core Design Principles:**
 - **Glassmorphism**: Extensive use of `backdrop-blur` and semi-transparent backgrounds.

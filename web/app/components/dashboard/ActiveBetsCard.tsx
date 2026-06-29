@@ -2,14 +2,17 @@
 
 import Link from 'next/link';
 import { Clock, TrendingUp, ExternalLink, Gift } from 'lucide-react';
-import { UserBet, ClaimTransaction } from '../../lib/dashboard-types';
-import { formatTimeRemaining } from '../../lib/market-utils';
+import type { UserBet } from '../../lib/dashboard-types';
+import type { ClaimTxState } from '../../lib/hooks/useClaimWinnings';
 import { formatPercentage, formatCurrency } from '../../lib/dashboard-utils';
+import ClaimAllButton from '../../../components/ClaimAllButton';
 
 interface ActiveBetsCardProps {
   bets: UserBet[];
-  claimTransactions: Map<number, ClaimTransaction>;
+  claimTransactions: Map<number, ClaimTxState>;
   onClaim: (poolId: number) => void;
+  userAddress?: string | null;
+  onClaimAllSuccess?: () => void;
   isLoading?: boolean;
 }
 
@@ -17,6 +20,8 @@ export default function ActiveBetsCard({
   bets,
   claimTransactions,
   onClaim,
+  userAddress,
+  onClaimAllSuccess,
   isLoading = false
 }: ActiveBetsCardProps) {
   if (isLoading) {
@@ -114,9 +119,19 @@ export default function ActiveBetsCard({
               <Gift className="w-5 h-5 text-green-500" />
               <h3 className="text-lg font-semibold text-green-500">Claimable Winnings</h3>
             </div>
-            <span className="text-sm text-muted-foreground">
-              {claimableBets.length} ready to claim
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground">
+                {claimableBets.length} ready to claim
+              </span>
+              <ClaimAllButton
+                claimablePools={claimableBets.map((bet) => ({
+                  poolId: bet.poolId,
+                  marketTitle: bet.marketTitle,
+                }))}
+                userAddress={userAddress}
+                onClaimSuccess={onClaimAllSuccess}
+              />
+            </div>
           </div>
 
           <div className="space-y-4">

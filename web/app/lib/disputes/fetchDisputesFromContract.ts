@@ -1,3 +1,5 @@
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('fetchDisputesFromContract');
 import { getPool } from '../stacks-api';
 import type { Dispute } from './types';
 
@@ -35,7 +37,7 @@ export async function fetchDisputesFromContract(): Promise<Dispute[]> {
 
     return disputes;
   } catch (error) {
-    console.error('Failed to fetch disputes from contract:', error);
+    log.error('Failed to fetch disputes from contract:', error);
     return [];
   }
 }

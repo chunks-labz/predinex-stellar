@@ -1,200 +1,302 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import CreateMarket from '../../app/create/page';
+import { predinexContract } from '../../app/lib/adapters/predinex-contract';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 
-// ── Mocks ────────────────────────────────────────────────────────────────────
-
-vi.mock('../../app/lib/runtime-config', () => ({
-    getRuntimeConfig: vi.fn(() => ({
-        network: 'testnet',
-        contract: {
-            address: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM',
-            name: 'predinex-pool',
-            id: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
-        },
-        api: { coreApiUrl: '', explorerUrl: '', rpcUrl: '' },
-    })),
+vi.mock('@/components/WalletAdapterProvider', () => ({
+  useWallet: vi.fn(),
+  WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-const mockOpenContractCall = vi.fn();
-vi.mock('@stacks/connect', () => ({
-    openContractCall: (...args: unknown[]) => mockOpenContractCall(...args),
-    AppConfig: vi.fn(),
-    UserSession: vi.fn(() => ({
-        isSignInPending: () => false,
-        isUserSignedIn: () => false,
-        handlePendingSignIn: vi.fn(),
-        loadUserData: vi.fn(),
-        signUserOut: vi.fn(),
-    })),
-    showConnect: vi.fn(),
+vi.mock('../../app/lib/adapters/predinex-contract', () => ({
+  predinexContract: {
+    createMarketSoroban: vi.fn(),
+  },
 }));
 
-const mockAuthenticate = vi.fn();
-vi.mock('../../app/components/StacksProvider', () => ({
-    useStacks: vi.fn(),
-    StacksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+vi.mock('../../app/lib/cache-invalidation', () => ({
+  invalidateOnCreatePool: vi.fn(),
 }));
 
-vi.mock('../../components/Navbar', () => ({
-    default: () => <nav data-testid="navbar" />,
+vi.mock('@/components/Navbar', () => ({
+  default: () => <nav data-testid="navbar" />,
 }));
 
-vi.mock('../../components/AuthGuard', () => ({
-    default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+vi.mock('@/components/AuthGuard', () => ({
+  default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/lib/hooks/useTxStatus', () => ({
-    useTxStatus: vi.fn(() => [{ status: 'idle', txId: null, error: null }, vi.fn()]),
-}));
+const mockConnect = vi.fn();
+const mockDisconnect = vi.fn();
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const connectedWallet = {
+  chain: 'stacks' as const,
+  isConnected: true,
+  isLoading: false,
+  address: 'GBUSER123STELLARADDRESS',
+  connect: mockConnect,
+  disconnect: mockDisconnect,
+};
 
-import * as StacksProvider from '../../app/components/StacksProvider';
+const disconnectedWallet = {
+  ...connectedWallet,
+  isConnected: false,
+  address: null,
+};
 
-function setupWithUser(userData: unknown = { appPrivateKey: 'key' }) {
-    vi.mocked(StacksProvider.useStacks).mockReturnValue({
-        userData,
-        authenticate: mockAuthenticate,
-        userSession: {} as any,
-        setUserData: vi.fn(),
-        signOut: vi.fn(),
-        openWalletModal: vi.fn(),
-        isLoading: false,
-    });
+function setWalletState(
+  wallet: typeof connectedWallet | typeof disconnectedWallet = connectedWallet
+) {
+  vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(wallet as never);
 }
 
-async function fillValidForm(user: ReturnType<typeof userEvent.setup>) {
-    await user.type(screen.getByLabelText(/question/i), 'Will BTC hit 100k?');
-    await user.type(screen.getByLabelText(/description/i), 'Resolution based on Coinbase price at midnight UTC.');
-    await user.type(screen.getByLabelText(/outcome a/i), 'Yes');
-    await user.type(screen.getByLabelText(/outcome b/i), 'No');
-    await user.clear(screen.getByLabelText(/duration/i));
-    await user.type(screen.getByLabelText(/duration/i), '1440');
+async function fillStep1(user: ReturnType<typeof userEvent.setup>, outcomeB = 'No') {
+  await user.type(screen.getByLabelText(/question \/ title/i), 'Will BTC hit 100k?');
+  await user.type(
+    screen.getByLabelText(/description/i),
+    'Resolution based on Coinbase price at midnight UTC.'
+  );
+  await user.type(screen.getByLabelText(/outcome a/i), 'Yes');
+  await user.type(screen.getByLabelText(/outcome b/i), outcomeB);
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+async function fillStep2(user: ReturnType<typeof userEvent.setup>, durationSeconds = 1440) {
+  const durationInput = screen.getByLabelText(/duration/i);
+  await user.clear(durationInput);
+  await user.type(durationInput, String(durationSeconds));
+}
 
-describe('CreateMarket page', () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
+async function advanceToReview(user: ReturnType<typeof userEvent.setup>) {
+  await fillStep1(user);
+  await user.click(screen.getByRole('button', { name: /^next/i }));
+  await fillStep2(user);
+  await user.click(screen.getByRole('button', { name: /^next/i }));
+}
+
+describe('CreateMarket wizard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    setWalletState();
+  });
+
+  it('renders step 1 fields on initial mount', () => {
+    renderWithProviders(<CreateMarket />);
+
+    expect(screen.getByLabelText(/question \/ title/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/outcome a/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/outcome b/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^next/i })).toBeInTheDocument();
+  });
+
+  it('blocks step 1 advancement when fields are empty and surfaces errors', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    const nextBtn = screen.getByRole('button', { name: /^next/i });
+    expect(nextBtn).toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(nextBtn);
+    // Still on step 1 — duration label (step 2) is not visible.
+    expect(screen.queryByLabelText(/duration/i)).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      const alerts = screen.queryAllByRole('alert');
+      expect(alerts.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('shows a validation error when outcomes match on step 1', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    await fillStep1(user, 'YES');
+    await user.click(screen.getByRole('button', { name: /^next/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/outcomes must be different/i)).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText(/question \/ title/i)).toBeInTheDocument(); // still on step 1
+  });
+
+  it('advances through all three steps and shows the live preview', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    await fillStep1(user);
+    await user.click(screen.getByRole('button', { name: /^next/i }));
+    expect(await screen.findByLabelText(/duration/i)).toBeInTheDocument();
+
+    await fillStep2(user);
+    await user.click(screen.getByRole('button', { name: /^next/i }));
+
+    // Review step renders the live preview — title appears in summary row AND in MarketCard.
+    const titles = await screen.findAllByText(/Will BTC hit 100k\?/);
+    expect(titles.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('button', { name: /create market/i })).toBeInTheDocument();
+  });
+
+  it('submits createMarketSoroban with the wizard draft on step 3', async () => {
+    vi.mocked(predinexContract.createMarketSoroban).mockResolvedValue({
+      txHash: 'mock-tx-id-123',
     });
 
-    it('renders all form fields', () => {
-        setupWithUser();
-        renderWithProviders(<CreateMarket />);
-        expect(screen.getByLabelText(/question/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/outcome a/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/outcome b/i)).toBeInTheDocument();
-        expect(screen.getByLabelText(/duration/i)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /create market/i })).toBeInTheDocument();
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
+
+    await waitFor(() => {
+      expect(predinexContract.createMarketSoroban).toHaveBeenCalledTimes(1);
     });
 
-    it('shows inline validation errors and blocks transaction on invalid submit', async () => {
-        setupWithUser();
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+    expect(predinexContract.createMarketSoroban).toHaveBeenCalledWith(
+      expect.objectContaining({
+        wallet: connectedWallet,
+        title: 'Will BTC hit 100k?',
+        description: 'Resolution based on Coinbase price at midnight UTC.',
+        outcomeA: 'Yes',
+        outcomeB: 'No',
+        durationSeconds: 1440,
+        onStageChange: expect.any(Function),
+      })
+    );
+  });
 
-        await user.click(screen.getByRole('button', { name: /create market/i }));
-
-        await waitFor(() => {
-            expect(screen.getAllByRole('alert').length).toBeGreaterThan(0);
-        });
-
-        expect(mockOpenContractCall).not.toHaveBeenCalled();
+  it('shows success feedback after the transaction completes', async () => {
+    vi.mocked(predinexContract.createMarketSoroban).mockResolvedValue({
+      txHash: 'mock-tx-id-123',
     });
 
-    it('shows a validation error when outcomes are identical', async () => {
-        setupWithUser();
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
 
-        await user.type(screen.getByLabelText(/question/i), 'Will BTC hit 100k?');
-        await user.type(screen.getByLabelText(/description/i), 'Resolution based on Coinbase price at midnight UTC.');
-        await user.type(screen.getByLabelText(/outcome a/i), 'Yes');
-        await user.type(screen.getByLabelText(/outcome b/i), 'Yes');
-        await user.type(screen.getByLabelText(/duration/i), '1440');
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
 
-        await user.click(screen.getByRole('button', { name: /create market/i }));
+    // The success banner is the role="status" container that holds the heading.
+    const heading = await screen.findByText(/^market created!$/i);
+    const status = heading.closest('[role="status"]') as HTMLElement;
+    expect(status).not.toBeNull();
+    expect(within(status).getByText(/mock-tx-id-123/i)).toBeInTheDocument();
+  });
 
-        await waitFor(() => {
-            expect(screen.getByText(/outcomes must be different/i)).toBeInTheDocument();
-        });
-        expect(mockOpenContractCall).not.toHaveBeenCalled();
+  it('calls connect when wallet is disconnected and step 3 is submitted', async () => {
+    setWalletState(disconnectedWallet);
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(predinexContract.createMarketSoroban).not.toHaveBeenCalled();
+  });
+
+  it('clears a field error when the user starts typing again', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
+
+    await user.click(screen.getByLabelText(/question \/ title/i));
+    await user.tab(); // trigger blur → error
+    await waitFor(() => {
+      expect(screen.queryByText(/title is required/i)).toBeInTheDocument();
     });
 
-    it('calls openContractCall with correct args on valid submit', async () => {
-        setupWithUser();
-        mockOpenContractCall.mockImplementation(({ onFinish }) => {
-            onFinish({ txId: 'mock-tx-id-123' });
-        });
+    await user.type(screen.getByLabelText(/question \/ title/i), 'A solid question');
 
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+    await waitFor(() => {
+      expect(screen.queryByText(/title is required/i)).not.toBeInTheDocument();
+    });
+  });
 
-        await fillValidForm(user);
-        await user.click(screen.getByRole('button', { name: /create market/i }));
+  it('shows an error toast when the contract call fails due to network error', async () => {
+    vi.mocked(predinexContract.createMarketSoroban).mockRejectedValue(
+      new Error('Network error: connection refused')
+    );
 
-        await waitFor(() => {
-            expect(mockOpenContractCall).toHaveBeenCalledOnce();
-        });
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
 
-        const callArgs = mockOpenContractCall.mock.calls[0][0];
-        expect(callArgs.functionName).toBe('create-pool');
-        expect(callArgs.contractName).toBe('predinex-pool');
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to create market/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows and accepts the transaction fee modal before completing the submission', async () => {
+    vi.mocked(predinexContract.createMarketSoroban).mockImplementation(async (params) => {
+      const approved = await params.onFeeEstimated?.('500');
+      if (!approved) throw new Error('Fee rejected');
+      return { txHash: 'mock-fee-tx' };
     });
 
-    it('shows success feedback after transaction completes', async () => {
-        setupWithUser();
-        // Make useTxStatus return 'pending' once trackTx is called
-        const mockTrackTx = vi.fn();
-        vi.mocked(require('../../app/lib/hooks/useTxStatus').useTxStatus)
-            .mockReturnValue([{ status: 'pending', txId: 'mock-tx-id-123', error: null }, mockTrackTx]);
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
 
-        mockOpenContractCall.mockImplementation(({ onFinish }) => {
-            onFinish({ txId: 'mock-tx-id-123' });
-        });
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
 
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+    // Fee modal should appear with the estimated fee
+    expect(await screen.findByText(/confirm transaction/i)).toBeInTheDocument();
 
-        await fillValidForm(user);
-        await user.click(screen.getByRole('button', { name: /create market/i }));
+    // Confirm the fee
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
 
-        await waitFor(() => {
-            expect(screen.getByRole('status')).toBeInTheDocument();
-        });
-        expect(mockTrackTx).toHaveBeenCalledWith('mock-tx-id-123');
+    // Transaction should complete successfully
+    await waitFor(() => {
+      expect(screen.getByText(/market created!/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows a failure toast when fee is rejected in the transaction fee modal', async () => {
+    vi.mocked(predinexContract.createMarketSoroban).mockImplementation(async (params) => {
+      const approved = await params.onFeeEstimated?.('500');
+      if (!approved) throw new Error('User rejected fee estimation');
+      return { txHash: 'mock-tx' };
     });
 
-    it('calls authenticate when wallet is not connected and form is submitted', async () => {
-        setupWithUser(null); // no userData = not connected
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
 
-        await user.click(screen.getByRole('button', { name: /create market/i }));
+    await advanceToReview(user);
+    await user.click(screen.getByRole('button', { name: /create market/i }));
 
-        expect(mockAuthenticate).toHaveBeenCalledOnce();
-        expect(mockOpenContractCall).not.toHaveBeenCalled();
+    // Fee modal should appear
+    expect(await screen.findByText(/confirm transaction/i)).toBeInTheDocument();
+
+    // Cancel the fee
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    // Should show failure toast
+    await waitFor(() => {
+      expect(screen.getByText(/failed to create market/i)).toBeInTheDocument();
     });
+  });
 
-    it('clears field error when user starts typing', async () => {
-        setupWithUser();
-        const user = userEvent.setup();
-        renderWithProviders(<CreateMarket />);
+  it('validates duration must be a positive number on step 2', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CreateMarket />);
 
-        // Trigger validation errors
-        await user.click(screen.getByRole('button', { name: /create market/i }));
-        await waitFor(() => expect(screen.getAllByRole('alert').length).toBeGreaterThan(0));
+    await fillStep1(user);
+    await user.click(screen.getByRole('button', { name: /^next/i }));
+    expect(await screen.findByLabelText(/duration/i)).toBeInTheDocument();
 
-        // Start typing in title — its error should disappear
-        await user.type(screen.getByLabelText(/question/i), 'A');
-        await waitFor(() => {
-            expect(screen.queryByText(/title is required/i)).not.toBeInTheDocument();
-        });
+    const durationInput = screen.getByLabelText(/duration/i);
+    await user.clear(durationInput);
+    await user.type(durationInput, '0');
+    await user.click(screen.getByRole('button', { name: /^next/i }));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/duration/i)).toBeInTheDocument();
     });
+  });
 });

@@ -1,0 +1,48 @@
+name: Integration Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  integration-tests:
+    name: Web Integration Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./web
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: |
+          npm run test -- --run \
+            --reporter=verbose \
+            --testPathPattern="tests/integration"
+        env:
+          # Tests run fully in-process with mocked Soroban RPC.
+          # No real Stellar network access is required.
+          NODE_ENV: test
+          NEXT_PUBLIC_CONTRACT_ID: CTEST_PREDINEX_CONTRACT_ADDRESS_123456789012345678901234
+          NEXT_PUBLIC_NETWORK: testnet
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: web/test-results/
+          retention-days: 7

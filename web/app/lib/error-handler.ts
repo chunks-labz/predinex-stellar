@@ -7,7 +7,7 @@ export class ContractError extends Error {
   constructor(
     public code: string,
     message: string,
-    public details?: any
+    public details?: unknown
   ) {
     super(message);
     this.name = 'ContractError';
@@ -33,31 +33,27 @@ export class NetworkError extends Error {
  * @param error Error object
  * @returns Formatted error message
  */
-export function parseContractError(error: any): string {
+export function parseContractError(error: unknown): string {
   if (error instanceof ContractError) {
     return error.message;
   }
-
-  if (error?.message?.includes('ERR-')) {
-    const match = error.message.match(/ERR-\w+/);
+  const e = error as { message?: string };
+  if (e?.message?.includes('ERR-')) {
+    const match = e.message.match(/ERR-\w+/);
     if (match) {
       return formatErrorCode(match[0]);
     }
   }
-
-  if (error?.message?.includes('429')) {
+  if (e?.message?.includes('429')) {
     return 'Rate limit exceeded. Please try again in a moment.';
   }
-
-  if (error?.message?.includes('Network')) {
+  if (e?.message?.includes('Network')) {
     return 'Network error. Please check your connection.';
   }
-
-  if (error?.message?.includes('User cancelled')) {
+  if (e?.message?.includes('User cancelled')) {
     return 'Transaction cancelled by user.';
   }
-
-  return error?.message || 'An unknown error occurred';
+  return e?.message || 'An unknown error occurred';
 }
 
 /**
@@ -90,28 +86,20 @@ export function formatErrorCode(code: string): string {
  * @param context Context information
  * @param error Error object
  */
-export function logError(context: string, error: any): void {
-  console.error(`[${context}]`, {
-    message: error?.message,
-    code: error?.code,
-    details: error?.details,
-    stack: error?.stack,
+export function logError(context: string, error: unknown): void {
+  const e = error as { message?: string; code?: string; details?: unknown };
+  // Use dynamic import to avoid circular dependency
+  void import('./logger').then(({ logger }) => {
+    logger.error(e?.message ?? 'Unknown error', context, { code: e?.code, details: e?.details });
   });
 }
 
-/**
- * Retry async function with exponential backoff
- * @param fn Function to retry
- * @param maxRetries Maximum number of retries
- * @param delayMs Initial delay in milliseconds
- * @returns Result of function
- */
 export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxRetries: number = 3,
   delayMs: number = 1000
 ): Promise<T> {
-  let lastError: any;
+  let lastError: unknown;
 
   for (let i = 0; i < maxRetries; i++) {
     try {

@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import React from 'react';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -18,7 +18,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-import AuthGuard from '../../app/components/AuthGuard';
+import AuthGuard from '@/components/AuthGuard';
 
 const connectedWallet = {
   chain: 'stacks' as const,

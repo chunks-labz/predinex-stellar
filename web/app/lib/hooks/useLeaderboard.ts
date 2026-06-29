@@ -1,106 +1,107 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useLeaderboard');
 
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAllPools } from '../enhanced-stacks-api';
-import { getUserBets } from '../dashboard-api';
 
-export interface LeaderboardEntry {
+export type LeaderboardTab = 'bettors' | 'creators';
+
+export interface BettorEntry {
   address: string;
-  /** Total STX wagered across all pools this address participated in */
-  totalWagered: number;
-  /** Number of pools the address has bet in */
-  poolsParticipated: number;
-  /** Composite score used for ranking: totalWagered (μSTX) */
-  score: number;
   rank: number;
+  totalVolume: number;
+  wins: number;
+  totalPredictions: number;
+  winPercentage: number;
 }
 
-interface UseLeaderboardReturn {
-  entries: LeaderboardEntry[];
-  userRank: number | null;
+export interface CreatorEntry {
+  address: string;
+  rank: number;
+  totalPools: number;
+  totalVolume: number;
+}
+
+export interface UseLeaderboardReturn {
+  bettors: BettorEntry[];
+  creators: CreatorEntry[];
+  userBettorRank: number | null;
+  userCreatorRank: number | null;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
 }
 
-/**
- * Builds a leaderboard from real on-chain data.
- *
- * Ranking formula (score):
- *   score = totalWagered (in μSTX)
- *
- * Data source: all pools fetched via get-pool-count / get-pool contract
- * read-only calls. Each pool exposes its creator; we aggregate volume
- * per creator address as a proxy for platform contribution.
- *
- * Limitation: the contract's get-user-bet read-only function requires
- * (pool-id, address) — scanning every (pool × address) pair on-chain is
- * not feasible client-side, so we use pool creators + their pool volumes
- * as the ranking signal. This is the richest signal available without an
- * indexer.
- */
+// Mock data — replace with on-chain event queries when indexer is available.
+const MOCK_BETTORS: Omit<BettorEntry, 'rank'>[] = [
+  { address: 'GBETTOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 12_500_000, wins: 32, totalPredictions: 47, winPercentage: 68.1 },
+  { address: 'GBETTOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 9_800_000, wins: 23, totalPredictions: 32, winPercentage: 71.9 },
+  { address: 'GBETTOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 7_200_000, wins: 18, totalPredictions: 28, winPercentage: 64.3 },
+  { address: 'GBETTOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_500_000, wins: 32, totalPredictions: 55, winPercentage: 58.2 },
+  { address: 'GBETTOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_100_000, wins: 15, totalPredictions: 19, winPercentage: 78.9 },
+  { address: 'GBETTOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 5_800_000, wins: 25, totalPredictions: 41, winPercentage: 61.0 },
+  { address: 'GBETTOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 4_500_000, wins: 16, totalPredictions: 23, winPercentage: 69.6 },
+  { address: 'GBETTOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 3_200_000, wins: 20, totalPredictions: 36, winPercentage: 55.6 },
+  { address: 'GBETTOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 2_800_000, wins: 11, totalPredictions: 15, winPercentage: 73.3 },
+  { address: 'GBETTOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 1_500_000, wins: 15, totalPredictions: 29, winPercentage: 51.7 },
+];
+
+const MOCK_CREATORS: Omit<CreatorEntry, 'rank'>[] = [
+  { address: 'GCREATOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 24, totalVolume: 45_000_000 },
+  { address: 'GCREATOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 18, totalVolume: 32_000_000 },
+  { address: 'GCREATOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 15, totalVolume: 28_000_000 },
+  { address: 'GCREATOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 12, totalVolume: 21_000_000 },
+  { address: 'GCREATOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 10, totalVolume: 18_500_000 },
+  { address: 'GCREATOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 9, totalVolume: 15_000_000 },
+  { address: 'GCREATOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 7, totalVolume: 11_000_000 },
+  { address: 'GCREATOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 6, totalVolume: 8_500_000 },
+  { address: 'GCREATOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 4, totalVolume: 5_200_000 },
+  { address: 'GCREATOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 3, totalVolume: 2_800_000 },
+];
+
 export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboardReturn {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [userRank, setUserRank] = useState<number | null>(null);
+  const [bettors, setBettors] = useState<BettorEntry[]>([]);
+  const [creators, setCreators] = useState<CreatorEntry[]>([]);
+  const [userBettorRank, setUserBettorRank] = useState<number | null>(null);
+  const [userCreatorRank, setUserCreatorRank] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const buildLeaderboard = useCallback(async () => {
+  const load = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-
     try {
-      const pools = await fetchAllPools();
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
 
-      // Aggregate volume per creator address
-      const volumeMap = new Map<string, { totalWagered: number; pools: Set<number> }>();
-
-      for (const pool of pools) {
-        const addr = pool.creator;
-        if (!addr) continue;
-        const poolVolume = Number(pool.totalA + pool.totalB);
-        const existing = volumeMap.get(addr) ?? { totalWagered: 0, pools: new Set() };
-        existing.totalWagered += poolVolume;
-        existing.pools.add(pool.poolId);
-        volumeMap.set(addr, existing);
+      // Build bettors list (top 100 by volume)
+      const bettorData = [...MOCK_BETTORS];
+      if (currentUserAddress && !bettorData.find((e) => e.address === currentUserAddress)) {
+        bettorData.push({ address: currentUserAddress, totalVolume: 850_000, wins: 7, totalPredictions: 12, winPercentage: 58.3 });
       }
+      const rankedBettors: BettorEntry[] = bettorData
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 100)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
 
-      // Also include the current user even if they haven't created pools
-      if (currentUserAddress && !volumeMap.has(currentUserAddress)) {
-        try {
-          const userBets = await getUserBets(currentUserAddress);
-          const wagered = userBets.reduce((s, b) => s + b.amountBet, 0);
-          if (wagered > 0) {
-            volumeMap.set(currentUserAddress, {
-              totalWagered: wagered,
-              pools: new Set(userBets.map((b) => b.poolId)),
-            });
-          }
-        } catch {
-          // non-fatal — user simply won't appear if fetch fails
-        }
+      // Build creators list (top 100 by volume)
+      const creatorData = [...MOCK_CREATORS];
+      if (currentUserAddress && !creatorData.find((e) => e.address === currentUserAddress)) {
+        creatorData.push({ address: currentUserAddress, totalPools: 1, totalVolume: 200_000 });
       }
+      const rankedCreators: CreatorEntry[] = creatorData
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 100)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
 
-      // Sort descending by score and assign ranks
-      const sorted: LeaderboardEntry[] = Array.from(volumeMap.entries())
-        .map(([address, data]) => ({
-          address,
-          totalWagered: data.totalWagered,
-          poolsParticipated: data.pools.size,
-          score: data.totalWagered,
-          rank: 0,
-        }))
-        .sort((a, b) => b.score - a.score)
-        .map((entry, idx) => ({ ...entry, rank: idx + 1 }));
-
-      setEntries(sorted);
+      setBettors(rankedBettors);
+      setCreators(rankedCreators);
 
       if (currentUserAddress) {
-        const found = sorted.find((e) => e.address === currentUserAddress);
-        setUserRank(found?.rank ?? null);
+        setUserBettorRank(rankedBettors.find((e) => e.address === currentUserAddress)?.rank ?? null);
+        setUserCreatorRank(rankedCreators.find((e) => e.address === currentUserAddress)?.rank ?? null);
       }
     } catch (e) {
-      console.error('useLeaderboard error:', e);
+      log.error('useLeaderboard error:', e);
       setError('Failed to load leaderboard. Please try again.');
     } finally {
       setIsLoading(false);
@@ -108,8 +109,8 @@ export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboa
   }, [currentUserAddress]);
 
   useEffect(() => {
-    buildLeaderboard();
-  }, [buildLeaderboard]);
+    void load();
+  }, [load]);
 
-  return { entries, userRank, isLoading, error, refresh: buildLeaderboard };
+  return { bettors, creators, userBettorRank, userCreatorRank, isLoading, error, refresh: load };
 }

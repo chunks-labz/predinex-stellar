@@ -1,4 +1,4 @@
-export type WalletChain = 'stacks';
+export type WalletChain = 'stacks' | 'stellar';
 
 /**
  * Chain-agnostic wallet operations that the UI needs.
@@ -9,7 +9,6 @@ export interface WalletClient {
   isLoading: boolean;
   isConnected: boolean;
   address: string | null;
-  connect: () => void;
+  connect: () => Promise<void>;
   disconnect: () => void;
 }
-

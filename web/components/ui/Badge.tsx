@@ -20,11 +20,11 @@ export default function Badge({
     className = ''
 }: BadgeProps) {
     const variantClasses = {
-        default: 'bg-muted text-muted-foreground border-border',
-        primary: 'bg-primary/90/10 text-primary border-primary/20',
-        success: 'bg-green-500/10 text-green-400 border-green-500/20',
-        warning: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-        error: 'bg-red-500/10 text-red-500 border-red-500/20',
+        default: 'bg-muted/80 text-foreground border-border',
+        primary: 'bg-primary/20 text-primary-foreground border-primary/40',
+        success: 'bg-green-500/20 text-green-200 border-green-400/40',
+        warning: 'bg-orange-500/20 text-orange-200 border-orange-400/40',
+        error: 'bg-red-500/20 text-red-200 border-red-400/40',
         outline: 'bg-transparent text-foreground border-border',
     };
 

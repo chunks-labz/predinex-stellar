@@ -17,12 +17,12 @@ export function DashboardOverviewPanel({ bets, isLoading }: DashboardBetPanelsPr
       ) : (
         <div className="space-y-3">
           {bets.slice(0, 5).map((bet, idx) => (
-            <div key={idx} className="flex justify-between items-center p-4 bg-muted/50 rounded-lg">
-              <div className="flex-1">
-                <p className="font-bold">{bet.poolTitle}</p>
+            <div key={idx} className="flex justify-between items-start gap-2 p-4 bg-muted/50 rounded-lg">
+              <div className="flex-1 min-w-0">
+                <p className="font-bold truncate">{bet.poolTitle}</p>
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
                 <span
                   className={`text-xs px-2 py-1 rounded-full border ${getBetStatusClasses(bet.status)}`}
@@ -51,13 +51,13 @@ export function DashboardActiveBetsPanel({ bets, isLoading }: DashboardBetPanels
           {active.map((bet, idx) => (
             <div
               key={idx}
-              className="flex justify-between items-center p-4 bg-blue-500/10 rounded-lg border border-blue-500/20"
+              className="flex justify-between items-start gap-2 p-4 bg-blue-500/10 rounded-lg border border-blue-500/20"
             >
-              <div className="flex-1">
-                <p className="font-bold">{bet.poolTitle}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold truncate">{bet.poolTitle}</p>
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
                 <p className="text-xs text-muted-foreground">Active</p>
               </div>
@@ -83,13 +83,13 @@ export function DashboardHistoryPanel({ bets, isLoading }: DashboardBetPanelsPro
           {history.map((bet, idx) => (
             <div
               key={idx}
-              className={`flex justify-between items-center p-4 rounded-lg border ${getBetStatusClasses(bet.status)}`}
+              className={`flex justify-between items-start gap-2 p-4 rounded-lg border ${getBetStatusClasses(bet.status)}`}
             >
-              <div className="flex-1">
-                <p className="font-bold">{bet.poolTitle}</p>
+              <div className="flex-1 min-w-0">
+                <p className="font-bold truncate">{bet.poolTitle}</p>
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
-              <div className="text-right">
+              <div className="text-right shrink-0">
                 <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
                 {bet.winnings !== undefined && (
                   <p className="text-sm font-bold">

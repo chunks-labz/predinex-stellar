@@ -1,15 +1,15 @@
 import React, { ReactElement } from 'react';
 import { render, RenderOptions } from '@testing-library/react';
-import { StacksProvider } from '../app/components/StacksProvider';
+import { WalletProvider } from '@/components/WalletProvider';
 import { ToastProvider } from '../providers/ToastProvider';
 
 const AllTheProviders = ({ children }: { children: React.ReactNode }) => {
   return (
-    <StacksProvider>
+    <WalletProvider>
       <ToastProvider>
         {children}
       </ToastProvider>
-    </StacksProvider>
+    </WalletProvider>
   );
 };
 

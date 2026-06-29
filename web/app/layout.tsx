@@ -1,10 +1,15 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { WalletAdapterProvider } from "./components/WalletAdapterProvider";
+import { WalletAdapterProvider } from '@/components/WalletAdapterProvider';
 import { ToastProvider } from "../providers/ToastProvider";
-import Footer from "./components/Footer";
+import { ThemeProvider, ThemeInitScript } from "../lib/theme";
+import { I18nProvider } from "./providers/I18nProvider";
+import Footer from '@/components/Footer';
 import MarketListPreloader from "./components/MarketListPreloader";
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration';
+import PWAInstallPrompt from '@/components/PWAInstallPrompt';
+import PushNotificationPrompt from '@/components/PushNotificationPrompt';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,6 +46,19 @@ export const metadata: Metadata = {
     description: "Predict the future. Win on Stellar.",
     images: ["/og-image.png"],
   },
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Predinex",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#8b5cf6",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
 };
 
 export default function RootLayout({
@@ -49,17 +67,37 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeInitScript />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <WalletAdapterProvider>
-          <ToastProvider>
-            <MarketListPreloader />
-            {children}
-            <Footer />
-          </ToastProvider>
-        </WalletAdapterProvider>
+        <ThemeProvider>
+          <I18nProvider>
+            <WalletAdapterProvider>
+              <ToastProvider>
+                {/* #458 a11y: skip-to-content link for keyboard users */}
+                <a
+                  href="#main-content"
+                  className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[200] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-lg focus:font-medium"
+                >
+                  Skip to main content
+                </a>
+                <ServiceWorkerRegistration />
+                <MarketListPreloader />
+                {/* #455 mobile: has-bottom-nav adds padding so content isn't hidden behind the fixed bottom nav */}
+                <div id="main-content" className="has-bottom-nav">
+                  {children}
+                </div>
+                <Footer />
+                <PushNotificationPrompt />
+                <PWAInstallPrompt />
+              </ToastProvider>
+            </WalletAdapterProvider>
+          </I18nProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

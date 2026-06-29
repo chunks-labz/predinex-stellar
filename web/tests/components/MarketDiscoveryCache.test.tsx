@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import { useMarketDiscovery } from '../../app/lib/hooks/useMarketDiscovery';
 import {
   writeMarketListCache,
@@ -51,6 +51,13 @@ function MarketsDiscoveryHarness() {
       {blockHeightWarning ? `-warn` : ''}
     </div>
   );
+}
+
+async function flushMarketDiscoveryRefresh() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 describe('Market discovery cache', () => {
@@ -121,12 +128,8 @@ describe('Market discovery cache', () => {
     render(<MarketsDiscoveryHarness />);
     expect(screen.getByText(/loading-0-none/)).toBeInTheDocument();
 
-    // Flush all pending promises and timers
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
     // With live height=200 and pool expiry=100 => expired
+    await flushMarketDiscoveryRefresh();
     expect(screen.getByText(/loaded-1-expired/)).toBeInTheDocument();
   });
 
@@ -145,12 +148,8 @@ describe('Market discovery cache', () => {
     render(<MarketsDiscoveryHarness />);
     expect(screen.getByText(/loading-0-none/)).toBeInTheDocument();
 
-    // Flush all pending promises and timers
-    await act(async () => {
-      await vi.runAllTimersAsync();
-    });
-
     // height=50, expiry=100 => active + warning surfaced
+    await flushMarketDiscoveryRefresh();
     expect(screen.getByText(/loaded-1-active-warn/)).toBeInTheDocument();
   });
 });

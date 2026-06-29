@@ -30,7 +30,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     return (
         <ToastContext.Provider value={{ showToast }}>
             {children}
-            <div className="fixed bottom-0 right-0 p-4 z-[100] flex flex-col gap-2 pointer-events-none">
+            {/*
+             * #458 a11y: aria-live region for screen reader announcements.
+             * Individual Toast components also carry role/aria-live for
+             * assertive (error) vs polite (others) announcements.
+             */}
+            <div
+                aria-label="Notifications"
+                className="fixed bottom-0 right-0 p-4 z-[100] flex flex-col gap-2 pointer-events-none"
+            >
                 {toasts.map((toast) => (
                     <div key={toast.id} className="pointer-events-auto">
                         <Toast

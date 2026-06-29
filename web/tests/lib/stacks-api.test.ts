@@ -1,9 +1,34 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchCallReadOnlyFunction, cvToValue } from '@stacks/transactions';
 import { getPoolCount, getPool, fetchActivePools, getUserBet } from '../../app/lib/stacks-api';
-import { uintCV } from '@stacks/transactions';
 
-// Mock runtime-config so tests don't require NEXT_PUBLIC_NETWORK env var
+// Compatibility-only coverage for the legacy Stacks transport layer.
+// Production-facing adapter tests should prefer Soroban-shaped mocks.
+
+const {
+  mockFetchCallReadOnlyFunction,
+  mockCvToValue,
+  mockUintCV,
+  mockPrincipalCV,
+} = vi.hoisted(() => ({
+  mockFetchCallReadOnlyFunction: vi.fn(),
+  mockCvToValue: vi.fn(),
+  mockUintCV: vi.fn((value: unknown) => ({ __mockUintCV: value })),
+  mockPrincipalCV: vi.fn((value: unknown) => ({ __mockPrincipalCV: value })),
+}));
+
+vi.mock('@stacks/network', () => ({
+  STACKS_MAINNET: { client: { baseUrl: 'https://mainnet.invalid' } },
+  STACKS_TESTNET: { client: { baseUrl: 'https://testnet.invalid' } },
+}));
+
+vi.mock('@stacks/transactions', () => ({
+  fetchCallReadOnlyFunction: mockFetchCallReadOnlyFunction,
+  cvToValue: mockCvToValue,
+  uintCV: mockUintCV,
+  principalCV: mockPrincipalCV,
+  ClarityValue: {},
+}));
+
 vi.mock('../../app/lib/runtime-config', () => ({
   getRuntimeConfig: vi.fn(() => ({
     network: 'testnet',
@@ -21,32 +46,22 @@ vi.mock('../../app/lib/runtime-config', () => ({
   __resetRuntimeConfigForTests: vi.fn(),
 }));
 
-// Mock @stacks/transactions
-vi.mock('@stacks/transactions', async () => {
-  const actual = await vi.importActual('@stacks/transactions');
-  return {
-    ...actual,
-    fetchCallReadOnlyFunction: vi.fn(),
-    cvToValue: vi.fn(),
-  };
-});
-
-describe('stacks-api', () => {
+describe('stacks-api compatibility', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe('getPoolCount', () => {
     it('returns pool count successfully', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
-        type: 0, // ResponseOk
-        value: { type: 1, value: 5n }, // uint
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
+        type: 0,
+        value: { type: 1, value: 5n },
       } as any);
-      vi.mocked(cvToValue).mockReturnValue(5);
+      vi.mocked(mockCvToValue).mockReturnValue(5);
 
       const count = await getPoolCount();
       expect(count).toBe(5);
-      expect(fetchCallReadOnlyFunction).toHaveBeenCalledWith(
+      expect(mockFetchCallReadOnlyFunction).toHaveBeenCalledWith(
         expect.objectContaining({
           functionName: 'get-pool-count',
         })
@@ -54,7 +69,7 @@ describe('stacks-api', () => {
     });
 
     it('returns 0 on error', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
+      vi.mocked(mockFetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
 
       const count = await getPoolCount();
       expect(count).toBe(0);
@@ -77,12 +92,11 @@ describe('stacks-api', () => {
         expiry: { type: 1, value: 1000n },
       };
 
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
-        type: 0, // ResponseOk
-        value: { type: 4, value: mockPoolData }, // OptionalSome
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
+        type: 0,
+        value: { type: 4, value: mockPoolData },
       } as any);
-      // cvToValue with readable=true returns plain object
-      vi.mocked(cvToValue).mockReturnValue({
+      vi.mocked(mockCvToValue).mockReturnValue({
         title: 'Test Pool',
         description: 'Test Description',
         creator: 'ST123',
@@ -99,27 +113,27 @@ describe('stacks-api', () => {
       expect(pool).toBeTruthy();
       expect(pool?.id).toBe(0);
       expect(pool?.title).toBe('Test Pool');
-      expect(fetchCallReadOnlyFunction).toHaveBeenCalledWith(
+      expect(mockFetchCallReadOnlyFunction).toHaveBeenCalledWith(
         expect.objectContaining({
           functionName: 'get-pool',
-          functionArgs: [uintCV(0)],
+          functionArgs: [expect.objectContaining({ __mockUintCV: 0 })],
         })
       );
     });
 
     it('returns null when pool does not exist', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
-        type: 0, // ResponseOk
-        value: { type: 5, value: null }, // OptionalNone
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
+        type: 0,
+        value: { type: 5, value: null },
       } as any);
-      vi.mocked(cvToValue).mockReturnValue(null);
+      vi.mocked(mockCvToValue).mockReturnValue(null);
 
       const pool = await getPool(999);
       expect(pool).toBeNull();
     });
 
     it('returns null on error', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
+      vi.mocked(mockFetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
 
       const pool = await getPool(0);
       expect(pool).toBeNull();
@@ -128,13 +142,12 @@ describe('stacks-api', () => {
 
   describe('fetchActivePools', () => {
     it('fetches all active pools successfully', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValueOnce({
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValueOnce({
         type: 0,
-        value: { type: 1, value: 3n }, // pool count = 3
+        value: { type: 1, value: 3n },
       } as any);
-      vi.mocked(cvToValue).mockReturnValueOnce(3);
+      vi.mocked(mockCvToValue).mockReturnValueOnce(3);
 
-      // Mock getPool calls - cvToValue(result, true) returns plain readable values
       const mockPoolData = {
         title: 'Pool 0',
         description: 'Desc',
@@ -148,19 +161,19 @@ describe('stacks-api', () => {
         expiry: 1000n,
       };
 
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
         type: 0,
         value: { type: 4, value: mockPoolData },
       } as any);
-      vi.mocked(cvToValue).mockReturnValue(mockPoolData);
+      vi.mocked(mockCvToValue).mockReturnValue(mockPoolData);
 
       const pools = await fetchActivePools();
       expect(pools).toHaveLength(3);
-      expect(fetchCallReadOnlyFunction).toHaveBeenCalledTimes(4); // 1 for count + 3 for pools
+      expect(mockFetchCallReadOnlyFunction).toHaveBeenCalledTimes(4);
     });
 
     it('handles errors gracefully', async () => {
-      vi.mocked(fetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
+      vi.mocked(mockFetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
 
       const pools = await fetchActivePools();
       expect(pools).toEqual([]);
@@ -175,14 +188,13 @@ describe('stacks-api', () => {
         'total-bet': { type: 1, value: 1500000n },
       };
 
-      // Use a valid Stacks address format
       const validAddress = 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM';
 
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
         type: 0,
         value: { type: 4, value: mockBetData },
       } as any);
-      vi.mocked(cvToValue).mockReturnValue({
+      vi.mocked(mockCvToValue).mockReturnValue({
         'amount-a': 1000000,
         'amount-b': 500000,
         'total-bet': 1500000,
@@ -197,11 +209,11 @@ describe('stacks-api', () => {
 
     it('returns null when user has no bet', async () => {
       const validAddress = 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM';
-      vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({
+      vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({
         type: 0,
-        value: { type: 5, value: null }, // OptionalNone
+        value: { type: 5, value: null },
       } as any);
-      vi.mocked(cvToValue).mockReturnValue(null);
+      vi.mocked(mockCvToValue).mockReturnValue(null);
 
       const bet = await getUserBet(0, validAddress);
       expect(bet).toBeNull();
@@ -209,11 +221,10 @@ describe('stacks-api', () => {
 
     it('returns null on error', async () => {
       const validAddress = 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM';
-      vi.mocked(fetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
+      vi.mocked(mockFetchCallReadOnlyFunction).mockRejectedValue(new Error('Network error'));
 
       const bet = await getUserBet(0, validAddress);
       expect(bet).toBeNull();
     });
   });
 });
-

@@ -1,35 +1,22 @@
 /**
- * Fixtures for PoolIntegration component
- * Static mock data moved out of render-time component
+ * Fixtures for PoolIntegration component.
+ *
+ * The PoolIntegration component fetches live data from the Stacks blockchain
+ * via `stacks-api.ts`. This file is retained for test compatibility and provides
+ * a single source-of-truth re-export of the `Pool` type alongside an empty
+ * mock list.
+ *
+ * Do NOT duplicate the Pool interface here — import it from stacks-api instead
+ * so both stay in sync automatically.
  */
 
-export interface Pool {
-  id: number;
-  title: string;
-  description: string;
-  outcomeA: string;
-  outcomeB: string;
-  totalA: number;
-  totalB: number;
-  settled: boolean;
-  winningOutcome?: number;
-  creator: string;
-  createdAt: number;
-  expiryBlock: number;
-}
+import type { Pool } from '../stacks-api';
 
-export const mockPools: Pool[] = [
-  {
-    id: 0,
-    title: 'Bitcoin Price > $100k?',
-    description: 'Will Bitcoin reach $100,000 by end of Q1 2025?',
-    outcomeA: 'Yes',
-    outcomeB: 'No',
-    totalA: 50000000,
-    totalB: 30000000,
-    settled: false,
-    creator: 'SP...',
-    createdAt: Date.now(),
-    expiryBlock: 144,
-  },
-];
+export type { Pool };
+
+/**
+ * Empty mock pools array.
+ * The component uses live blockchain data; this is kept for tests that need
+ * to import a ready-made empty baseline.
+ */
+export const mockPools: Pool[] = [];

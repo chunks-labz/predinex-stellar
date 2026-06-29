@@ -1,5 +1,8 @@
+'use client';
+
 import { Gift } from 'lucide-react';
 import type { DashboardTabId } from '@/app/lib/user-dashboard/types';
+import { useI18n } from '@/app/lib/i18n';
 
 interface DashboardTabBarProps {
   activeTab: DashboardTabId;
@@ -7,6 +10,8 @@ interface DashboardTabBarProps {
 }
 
 export function DashboardTabBar({ activeTab, onTabChange }: DashboardTabBarProps) {
+  const { t } = useI18n();
+
   return (
     <div className="flex gap-4 border-b border-border overflow-x-auto">
       <button
@@ -18,7 +23,7 @@ export function DashboardTabBar({ activeTab, onTabChange }: DashboardTabBarProps
             : 'text-muted-foreground hover:text-foreground'
         }`}
       >
-        Overview
+        {t('dashboard.overview')}
       </button>
       <button
         type="button"
@@ -29,7 +34,7 @@ export function DashboardTabBar({ activeTab, onTabChange }: DashboardTabBarProps
             : 'text-muted-foreground hover:text-foreground'
         }`}
       >
-        Active Bets
+        {t('dashboard.activeBets')}
       </button>
       <button
         type="button"
@@ -40,7 +45,7 @@ export function DashboardTabBar({ activeTab, onTabChange }: DashboardTabBarProps
             : 'text-muted-foreground hover:text-foreground'
         }`}
       >
-        History
+        {t('dashboard.history')}
       </button>
       <button
         type="button"
@@ -52,7 +57,7 @@ export function DashboardTabBar({ activeTab, onTabChange }: DashboardTabBarProps
         }`}
       >
         <Gift className="w-4 h-4" />
-        Incentives
+        {t('dashboard.incentives')}
       </button>
     </div>
   );

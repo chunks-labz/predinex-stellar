@@ -1,6 +1,11 @@
 # Wallet Connection Components
 
-This directory contains the enhanced wallet connection system for Predinex, providing comprehensive Stacks wallet integration.
+Shared UI components should live in [`../../components`](../../components) and
+be imported with `@/components/...`. This directory is for App Router-specific
+components and temporary compatibility re-exports for older `app/components`
+imports.
+
+This directory contains the wallet connection UI for Predinex. The current support matrix is documented in [WALLET_NETWORK_SUPPORT.md](../../docs/WALLET_NETWORK_SUPPORT.md).
 
 ## Components
 
@@ -8,8 +13,8 @@ This directory contains the enhanced wallet connection system for Predinex, prov
 The main wallet connection interface component.
 
 **Features:**
-- Multi-wallet provider support (Hiro, Xverse, Leather)
 - Wallet provider selection dropdown
+- Entry point for the currently supported wallet flow
 - Balance display and refresh functionality
 - Loading states and error handling
 - Responsive design
@@ -24,7 +29,7 @@ function MyComponent() {
 ```
 
 ### NetworkSwitcher
-Component for switching between Stacks mainnet and testnet.
+Component for switching between the currently supported Stellar networks.
 
 **Features:**
 - Visual network status indicator
@@ -81,6 +86,17 @@ function MyApp() {
 }
 ```
 
+### OracleManagement
+Feature status: fixture-backed placeholder tooling, disabled by default for production-facing surfaces.
+
+Set `NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER=true` only in a contributor or test environment to review the mock oracle-management path. When enabled, the component labels itself as a placeholder preview and keeps registration actions disabled so fixture data is not presented as live oracle administration.
+
+To find the oracle-management route visit [page.tsx](file:///C:/Stellar%20Contributions/predinex-stellar/web/app/oracle-management/page.tsx).
+
+To find oracle-management placeholder gating visit [OracleManagement.tsx](file:///C:/Stellar%20Contributions/predinex-stellar/web/app/components/OracleManagement.tsx).
+
+The oracle-management feature flag can be found in [feature-flags.ts](file:///C:/Stellar%20Contributions/predinex-stellar/web/app/lib/feature-flags.ts).
+
 ## Context and Hooks
 
 ### useWalletConnect
@@ -93,7 +109,7 @@ Main hook for accessing wallet functionality.
 - `availableWallets`: List of detected wallet providers
 - `connect(walletType?)`: Connect to a specific wallet
 - `disconnect()`: Disconnect current wallet
-- `switchNetwork(network)`: Switch between networks
+- `switchNetwork(network)`: Switch between supported networks
 - `signMessage(message)`: Sign a message
 - `sendTransaction(payload)`: Send a transaction
 - `refreshBalance()`: Refresh wallet balance
@@ -166,3 +182,5 @@ Supported browsers:
 - Edge 90+
 
 Mobile wallet support varies by provider and may require specific mobile apps.
+
+For wallet and network support details, see [WALLET_NETWORK_SUPPORT.md](../../docs/WALLET_NETWORK_SUPPORT.md).

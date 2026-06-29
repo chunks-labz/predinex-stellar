@@ -164,13 +164,3 @@ export function getIncentiveDescription(bonusType: string): string {
       return 'Incentive Bonus';
   }
 }
-// Liquidity incentives system improvement 1
-// Liquidity incentives system improvement 2
-// Liquidity incentives system improvement 3
-// Liquidity incentives system improvement 4
-// Liquidity incentives system improvement 5
-// Liquidity incentives system improvement 6
-// Liquidity incentives system improvement 7
-// Liquidity incentives system improvement 8
-// Liquidity incentives system improvement 9
-// Liquidity incentives system improvement 10

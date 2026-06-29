@@ -3,7 +3,6 @@
  * These helpers manage odds calculations, status determinations, and formatting for prediction markets.
  */
 
-import { STACKS_MAINNET, STACKS_TESTNET, type StacksNetwork } from '@stacks/network';
 import { PoolData, ProcessedMarket, MarketStatus } from './market-types';
 import { getRuntimeConfig } from './runtime-config';
 
@@ -29,12 +28,12 @@ export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number
  * @returns Object with oddsA and oddsB (defaulting to 50/50 for empty pools)
  */
 export function calculateOdds(totalA: bigint, totalB: bigint): { oddsA: number; oddsB: number } {
-  const total = Number(totalA + totalB);
-  if (total === 0) return { oddsA: 50, oddsB: 50 };
+  const total = totalA + totalB;
+  if (total === BigInt(0)) return { oddsA: 50, oddsB: 50 };
 
   return {
-    oddsA: Math.round((Number(totalA) / total) * 100),
-    oddsB: Math.round((Number(totalB) / total) * 100)
+    oddsA: Math.round((Number(totalA) / Number(total)) * 100),
+    oddsB: Math.round((Number(totalB) / Number(total)) * 100)
   };
 }
 
@@ -77,7 +76,10 @@ export function processMarketData(pool: PoolData, currentBlockHeight: number): P
     timeRemaining,
     createdAt: pool.createdAt,
     settledAt: pool.settledAt,
-    creator: pool.creator
+    creator: pool.creator,
+    participantCount: pool.participantCount,
+    assetType: pool.assetType,
+    disputed: pool.disputed,
   };
 }
 
@@ -136,11 +138,6 @@ type BlockHeightCachePayload = {
   cachedAt: number;
   height: number;
 };
-
-function getStacksNetwork(): StacksNetwork {
-  const cfg = getRuntimeConfig();
-  return cfg.network === 'testnet' ? STACKS_TESTNET : STACKS_MAINNET;
-}
 
 function readBlockHeightCache(now: number = Date.now()): {
   height: number;
@@ -210,8 +207,8 @@ export async function fetchCurrentBlockHeightLive(options?: {
     };
   }
 
-  const network = getStacksNetwork();
-  const url = `${network.coreApiUrl}/extended/v1/status`;
+  const cfg = getRuntimeConfig();
+  const url = `${cfg.api.coreApiUrl}/extended/v1/status`;
 
   try {
     const controller =
@@ -249,7 +246,13 @@ export async function fetchCurrentBlockHeightLive(options?: {
 
     writeBlockHeightCache(height);
     return { height, warning: null };
-  } catch (e) {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      // Expected: the timeout above intentionally aborts the request. The
+      // fallback cache already covers this case, so no warning is needed.
+      return { height: getCurrentBlockHeight(), warning: null };
+    }
+
     const fallbackHeight = getCurrentBlockHeight();
     const warning =
       fallbackHeight > 0

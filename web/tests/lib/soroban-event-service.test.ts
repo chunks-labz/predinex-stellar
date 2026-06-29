@@ -3,6 +3,7 @@ import {
     decodeSorobanEvent,
     mapEventToActivityItem,
     getUserActivityFromSoroban,
+    SUPPORTED_EVENT_SCHEMA_VERSION,
 } from '../../app/lib/soroban-event-service';
 import type { SorobanEventServiceConfig } from '../../app/lib/soroban-event-service';
 
@@ -16,6 +17,10 @@ const TEST_CONFIG: SorobanEventServiceConfig = {
 
 const USER_ADDRESS = 'GBUSER123STELLARADDRESS';
 
+// Issue #175: every contract event carries a schema-version Symbol at topic
+// position 1. Mocks below mirror the on-chain shape: [name, version, ...ids].
+const VERSION_TOPIC = { type: 'symbol', value: SUPPORTED_EVENT_SCHEMA_VERSION };
+
 // Representative raw Soroban events (as returned by getEvents RPC)
 const RAW_PLACE_BET_EVENT = {
     id: 'ledger-001',
@@ -25,6 +30,7 @@ const RAW_PLACE_BET_EVENT = {
     contractId: 'CTEST123CONTRACT',
     topic: [
         { type: 'symbol', value: 'place_bet' },
+        VERSION_TOPIC,
         { type: 'u32', value: 5 },
         { type: 'address', value: USER_ADDRESS },
     ],
@@ -39,6 +45,7 @@ const RAW_CLAIM_WINNINGS_EVENT = {
     contractId: 'CTEST123CONTRACT',
     topic: [
         { type: 'symbol', value: 'claim_winnings' },
+        VERSION_TOPIC,
         { type: 'u32', value: 5 },
         { type: 'address', value: USER_ADDRESS },
     ],
@@ -53,6 +60,7 @@ const RAW_CREATE_POOL_EVENT = {
     contractId: 'CTEST123CONTRACT',
     topic: [
         { type: 'symbol', value: 'create_pool' },
+        VERSION_TOPIC,
         { type: 'u32', value: 5 },
     ],
     value: { type: 'address', value: USER_ADDRESS },
@@ -66,9 +74,11 @@ const RAW_SETTLE_POOL_EVENT = {
     contractId: 'CTEST123CONTRACT',
     topic: [
         { type: 'symbol', value: 'settle_pool' },
+        VERSION_TOPIC,
         { type: 'u32', value: 5 },
     ],
-    value: 1, // outcome B won
+    // settle_pool data is a tuple (caller, winning_outcome, ...). Decoder reads index 1.
+    value: ['GBSETTLER123', 1, 600000000, 1000000000, 20000000],
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +129,66 @@ describe('decodeSorobanEvent', () => {
     it('returns null for empty topics', () => {
         const raw = { ...RAW_PLACE_BET_EVENT, topic: [] };
         expect(decodeSorobanEvent(raw)).toBeNull();
+    });
+
+    // Issue #175 — schema version handling
+    describe('schema version handling (issue #175)', () => {
+        it('exposes the schema version on the decoded event', () => {
+            const decoded = decodeSorobanEvent(RAW_PLACE_BET_EVENT);
+            expect(decoded).not.toBeNull();
+            expect(decoded!.schemaVersion).toBe(SUPPORTED_EVENT_SCHEMA_VERSION);
+        });
+
+        it('skips events with an unsupported schema version', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const raw = {
+                ...RAW_PLACE_BET_EVENT,
+                topic: [
+                    { type: 'symbol', value: 'place_bet' },
+                    { type: 'symbol', value: 'v999' },
+                    { type: 'u32', value: 5 },
+                    { type: 'address', value: USER_ADDRESS },
+                ],
+            };
+            expect(decodeSorobanEvent(raw)).toBeNull();
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+            expect(warnSpy.mock.calls[0][0]).toContain('v999');
+            warnSpy.mockRestore();
+        });
+
+        it('skips events that are missing the schema version marker entirely', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const legacyRaw = {
+                ...RAW_PLACE_BET_EVENT,
+                // No version marker — the old (pre-#175) topic shape
+                topic: [
+                    { type: 'symbol', value: 'place_bet' },
+                    { type: 'u32', value: 5 },
+                    { type: 'address', value: USER_ADDRESS },
+                ],
+            };
+            expect(decodeSorobanEvent(legacyRaw)).toBeNull();
+            expect(warnSpy).toHaveBeenCalledTimes(1);
+            warnSpy.mockRestore();
+        });
+
+        it('decoder dispatches by (name, version) so future v2 events stay quarantined', () => {
+            const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            const v2Event = {
+                ...RAW_CREATE_POOL_EVENT,
+                topic: [
+                    { type: 'symbol', value: 'create_pool' },
+                    { type: 'symbol', value: 'v2' },
+                    { type: 'u32', value: 7 },
+                ],
+            };
+            expect(decodeSorobanEvent(v2Event)).toBeNull();
+            // v1 still decodes
+            const v1 = decodeSorobanEvent(RAW_CREATE_POOL_EVENT);
+            expect(v1).not.toBeNull();
+            expect(v1!.poolId).toBe(5);
+            warnSpy.mockRestore();
+        });
     });
 });
 
@@ -201,6 +271,7 @@ describe('getUserActivityFromSoroban', () => {
             ...RAW_PLACE_BET_EVENT,
             topic: [
                 { type: 'symbol', value: 'place_bet' },
+                VERSION_TOPIC,
                 { type: 'u32', value: 5 },
                 { type: 'address', value: 'GBOTHER_USER_ADDRESS' },
             ],

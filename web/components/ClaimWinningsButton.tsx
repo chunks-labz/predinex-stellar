@@ -1,20 +1,29 @@
 "use client";
 
 import { useState } from 'react';
-import { predinexContract } from '@/app/lib/adapters/predinex-contract';
-import { useWallet } from '../app/components/WalletAdapterProvider';
+import { useClaimWinnings } from '@/app/lib/hooks/useClaimWinnings';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { Loader2, Coins } from 'lucide-react';
 
 interface ClaimWinningsButtonProps {
     poolId: number;
     isSettled: boolean;
     userHasWinnings: boolean;
+    userAddress?: string | null;
+    onClaimSuccess?: () => void;
 }
 
-export default function ClaimWinningsButton({ poolId, isSettled, userHasWinnings }: ClaimWinningsButtonProps) {
+export default function ClaimWinningsButton({
+    poolId,
+    isSettled,
+    userHasWinnings,
+    userAddress,
+    onClaimSuccess,
+}: ClaimWinningsButtonProps) {
     const [isPending, setIsPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const { isConnected } = useWallet();
+    const { address, isConnected } = useWallet();
+    const { claim } = useClaimWinnings(userAddress ?? address);
 
     const handleClaim = async () => {
         if (!isConnected) return;
@@ -23,19 +32,11 @@ export default function ClaimWinningsButton({ poolId, isSettled, userHasWinnings
         setError(null);
 
         try {
-            await predinexContract.claimWinnings({
-                poolId,
-                onFinish: (data) => {
-                    console.log('Claim submitted:', data);
-                    setIsPending(false);
-                },
-                onCancel: () => {
-                    setIsPending(false);
-                }
-            });
-        } catch (err: any) {
-            console.error('Claim error:', err);
-            setError(err.message || 'Failed to claim');
+            await claim(poolId, onClaimSuccess);
+            setIsPending(false);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Failed to claim';
+            setError(message);
             setIsPending(false);
         }
     };

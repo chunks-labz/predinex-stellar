@@ -3,6 +3,13 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ShareButton from '../../components/ShareButton';
 
+// Mock qrcode so tests don't depend on canvas / node-canvas in jsdom
+vi.mock('qrcode', () => ({
+  default: {
+    toDataURL: vi.fn().mockResolvedValue('data:image/png;base64,FAKE_QR'),
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -214,6 +221,49 @@ describe('ShareButton', () => {
 
     await waitFor(() =>
       expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong')
+    );
+  });
+
+  // --- QR code -------------------------------------------------------------
+
+  it('renders the QR code button', () => {
+    spyClipboardSuccess();
+    teardownNativeShare();
+    render(<ShareButton url="https://example.com/markets/1" />);
+    expect(screen.getByRole('button', { name: /show qr code/i })).toBeInTheDocument();
+  });
+
+  it('opens the QR code popover when the QR button is clicked', async () => {
+    spyClipboardSuccess();
+    teardownNativeShare();
+    const user = userEvent.setup();
+
+    render(<ShareButton url="https://example.com/markets/99" />);
+    await user.click(screen.getByRole('button', { name: /show qr code/i }));
+
+    const dialog = screen.getByRole('dialog', { name: /qr code/i });
+    expect(dialog).toBeInTheDocument();
+
+    // The QR image is generated locally as a data: URL — no external request
+    const img = await screen.findByRole('img', { name: /qr code for/i });
+    expect(img).toHaveAttribute('src', 'data:image/png;base64,FAKE_QR');
+  });
+
+  it('closes the QR code popover when the close button is clicked', async () => {
+    spyClipboardSuccess();
+    teardownNativeShare();
+    const user = userEvent.setup();
+
+    render(<ShareButton url="https://example.com/markets/1" />);
+
+    // Open
+    await user.click(screen.getByRole('button', { name: /show qr code/i }));
+    expect(screen.getByRole('dialog', { name: /qr code/i })).toBeInTheDocument();
+
+    // Close
+    await user.click(screen.getByRole('button', { name: /close qr code popover/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /qr code/i })).not.toBeInTheDocument()
     );
   });
 });

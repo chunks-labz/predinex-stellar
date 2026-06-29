@@ -4,6 +4,9 @@
  */
 
 import { SessionStorageService } from './session-storage';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('error-recovery');
 
 export interface RecoveryAction {
   type: 'retry' | 'fallback' | 'reset' | 'ignore';
@@ -98,7 +101,7 @@ export class ErrorRecoveryService {
           try {
             localStorage.clear();
           } catch (e) {
-            console.error('Failed to clear storage:', e);
+            log.error('Failed to clear storage', e);
           }
         },
       };
@@ -130,7 +133,7 @@ export class ErrorRecoveryService {
       }
       return true;
     } catch (error) {
-      console.error('Recovery action failed:', error);
+      log.error('Recovery action failed', error);
       return false;
     }
   }

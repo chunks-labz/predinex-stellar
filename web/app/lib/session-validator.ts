@@ -5,6 +5,9 @@
 
 import { WalletSession } from './wallet-service';
 import { SessionStorageService } from './session-storage';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('session-validator');
 
 export interface SessionValidationResult {
   isValid: boolean;
@@ -67,7 +70,7 @@ export class SessionValidator {
     }
 
     // Check address format
-    if (!this.isValidStacksAddress(session.address)) {
+    if (!this.isValidStellarAddress(session.address)) {
       return { 
         isValid: false, 
         reason: 'Invalid address format',
@@ -92,26 +95,26 @@ export class SessionValidator {
       const validation = this.validateSession(storedSession);
       
       if (!validation.isValid) {
-        console.log(`Session invalid: ${validation.reason}`);
+        log.debug(`Session invalid: ${validation.reason}`);
         SessionStorageService.clearSession();
         return null;
       }
 
       return storedSession;
     } catch (error) {
-      console.error('Session validation failed:', error);
+      log.error('Session validation failed', error);
       SessionStorageService.clearSession();
       return null;
     }
   }
 
   /**
-   * Check if address is a valid Stacks address
+   * Check if address is a valid Stellar address
    */
-  private static isValidStacksAddress(address: string): boolean {
-    // Stacks addresses start with SP (mainnet) or ST (testnet)
-    const stacksAddressRegex = /^S[PT][0-9A-HJKMNP-TV-Z]{39}$/;
-    return stacksAddressRegex.test(address);
+  private static isValidStellarAddress(address: string): boolean {
+    // Stellar addresses start with G (public keys) or C (contracts), 56 characters total
+    const stellarAddressRegex = /^[GC][A-Z0-9]{55}$/;
+    return stellarAddressRegex.test(address);
   }
 
   /**

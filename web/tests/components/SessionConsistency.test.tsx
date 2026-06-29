@@ -2,20 +2,57 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import Navbar from '../../app/components/Navbar';
-import AuthGuard from '../../app/components/AuthGuard';
-import BettingSection from '../../app/components/BettingSection';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
+import BettingSection from '@/components/BettingSection';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 
 // Mock all external dependencies
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+vi.mock('@/components/StacksProvider', () => ({
+  useStacks: vi.fn(() => ({
+    userData: null,
+    authenticate: vi.fn(),
+    userSession: {},
+    setUserData: vi.fn(),
+    signOut: vi.fn(),
+    openWalletModal: vi.fn(),
+    isLoading: false,
+  })),
+  StacksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('../../providers/ToastProvider', () => ({
   useToast: vi.fn(() => ({ showToast: vi.fn() })),
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock('@/components/NetworkMismatchWarning', () => ({
+  NetworkMismatchWarning: () => null,
+  default: () => null,
+}));
+
+vi.mock('../../components/WalletAddressCopyButton', () => ({
+  WalletAddressCopyButton: ({ address }: { address: string }) => <span>{address}</span>,
+  default: ({ address }: { address: string }) => <span>{address}</span>,
+}));
+
+vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
+  useNetworkMismatch: vi.fn(() => ({
+    isMismatch: false,
+    expectedNetworkType: 'testnet',
+    expectedNetworkName: 'Stellar Testnet',
+    currentNetworkName: 'Stellar Testnet',
+    switchNetwork: vi.fn(),
+  })),
+}));
+
+vi.mock('../../app/lib/hooks/useTxStatus', () => ({
+  useTxStatus: vi.fn(() => [{ status: 'idle', txId: null, error: null }, vi.fn()]),
 }));
 
 vi.mock('../../app/lib/runtime-config', () => ({
@@ -29,6 +66,10 @@ vi.mock('../../app/lib/runtime-config', () => ({
 vi.mock('@stacks/connect', () => ({
   openContractCall: vi.fn(),
 }));
+
+function importMissing(specifier: string) {
+  return import(/* @vite-ignore */ specifier);
+}
 
 const mockPool = {
   id: 0, title: 'Test', description: 'Test', creator: 'ST123',
@@ -128,8 +169,8 @@ describe('Session consistency — all surfaces use the same auth source', () => 
 
   it('no dead auth hooks remain importable', async () => {
     // These files should no longer exist — dynamic import should throw
-    await expect(() => import('../../lib/hooks/useWalletConnection')).rejects.toThrow();
-    await expect(() => import('../../lib/hooks/useAppKit')).rejects.toThrow();
-    await expect(() => import('../../lib/hooks/useNetwork')).rejects.toThrow();
+    await expect(importMissing('../../lib/hooks/useWalletConnection')).rejects.toThrow();
+    await expect(importMissing('../../lib/hooks/useAppKit')).rejects.toThrow();
+    await expect(importMissing('../../lib/hooks/useNetwork')).rejects.toThrow();
   });
 });

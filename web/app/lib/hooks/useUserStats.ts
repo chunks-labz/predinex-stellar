@@ -1,4 +1,6 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useUserStats');
 
 import { useState, useCallback } from 'react';
 
@@ -71,7 +73,7 @@ export function useUserStats() {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch user bets';
       setError(message);
-      console.error('Error fetching user bets:', err);
+      log.error('Error fetching user bets:', err);
     } finally {
       setIsLoading(false);
     }

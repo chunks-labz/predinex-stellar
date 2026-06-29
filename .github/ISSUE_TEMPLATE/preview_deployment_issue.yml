@@ -1,0 +1,99 @@
+name: Preview Deployment Issue
+description: Report issues with preview deployments for pull requests
+title: "[Preview] "
+labels: ["ci", "preview-deployment"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a preview deployment issue! This helps us improve the CI/CD pipeline.
+
+  - type: input
+    id: pr-number
+    attributes:
+      label: Pull Request Number
+      description: Which PR is experiencing the preview deployment issue?
+      placeholder: "#123"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      description: What kind of preview deployment issue are you experiencing?
+      options:
+        - Deployment fails to start
+        - Build errors
+        - Preview URL not posted to PR
+        - Preview shows wrong configuration
+        - Environment variables not working
+        - Deployment timeout
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the issue you're experiencing with the preview deployment
+      placeholder: Tell us what happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+      placeholder: Describe the expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Workflow Logs
+      description: |
+        Please paste relevant logs from the GitHub Actions workflow run.
+        You can find these in the Actions tab → Preview Deployment workflow.
+      placeholder: Paste logs here
+      render: shell
+
+  - type: input
+    id: workflow-run
+    attributes:
+      label: Workflow Run URL
+      description: Link to the failed workflow run (optional but helpful)
+      placeholder: https://github.com/dimka90/predinex-stellar/actions/runs/...
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Details
+      description: Any relevant environment details
+      placeholder: |
+        - Branch name:
+        - Commit SHA:
+        - Vercel project:
+        - Any custom configuration:
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here
+      placeholder: Screenshots, error messages, etc.
+
+  - type: checkboxes
+    id: troubleshooting
+    attributes:
+      label: Troubleshooting Steps Taken
+      description: Have you tried these troubleshooting steps?
+      options:
+        - label: Checked the workflow logs in GitHub Actions
+        - label: Verified GitHub secrets are configured correctly
+        - label: Checked Vercel dashboard for deployment status
+        - label: Reviewed the preview deployment documentation
+        - label: Tried re-running the workflow

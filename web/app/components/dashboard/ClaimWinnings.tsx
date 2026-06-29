@@ -3,12 +3,16 @@
 import { useState } from 'react';
 import { Gift, CheckCircle, AlertCircle, RefreshCw, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
-import { UserBet, ClaimTransaction } from '../../lib/dashboard-types';
+import type { UserBet } from '../../lib/dashboard-types';
+import type { ClaimTxState } from '../../lib/hooks/useClaimWinnings';
 import { formatCurrency } from '../../lib/dashboard-utils';
+import { getNetworkConfig } from '../../lib/constants';
+import TransactionReceipt, { TransactionReceiptData } from '@/components/TransactionReceipt';
+import { Dialog } from '../../../components/ui/Dialog';
 
 interface ClaimWinningsProps {
   claimableBets: UserBet[];
-  claimTransactions: Map<number, ClaimTransaction>;
+  claimTransactions: Map<number, ClaimTxState>;
   onClaim: (poolId: number) => void;
   onBatchClaim: (poolIds: number[]) => void;
   isLoading?: boolean;
@@ -23,6 +27,8 @@ export default function ClaimWinnings({
 }: ClaimWinningsProps) {
   const [selectedBets, setSelectedBets] = useState<Set<number>>(new Set());
   const [showBatchClaim, setShowBatchClaim] = useState(false);
+  const [receiptData, setReceiptData] = useState<TransactionReceiptData | null>(null);
+  const [showReceipt, setShowReceipt] = useState(false);
 
   const totalClaimable = claimableBets.reduce((sum, bet) => sum + (bet.claimableAmount || 0), 0);
   const selectedClaimable = claimableBets
@@ -45,6 +51,26 @@ export default function ClaimWinnings({
     } else {
       setSelectedBets(new Set());
     }
+  };
+
+  const handleViewReceipt = (bet: UserBet) => {
+    const claimTx = claimTransactions.get(bet.poolId);
+    if (!claimTx?.txId) return;
+
+    const receipt: TransactionReceiptData = {
+      txId: claimTx.txId,
+      network: getNetworkConfig().network,
+      marketId: bet.poolId,
+      marketTitle: bet.marketTitle,
+      type: 'claim',
+      amount: bet.claimableAmount,
+      outcome: bet.outcomeName,
+      status: claimTx.status,
+      error: claimTx.error,
+      timestamp: bet.betTimestamp * 1000,
+    };
+    setReceiptData(receipt);
+    setShowReceipt(true);
   };
 
   const handleBatchClaim = () => {
@@ -202,31 +228,37 @@ export default function ClaimWinnings({
                   </div>
 
                   {/* Transaction Status */}
-                  {claimTx && (
-                    <div className="mb-3">
-                      {isPending && (
-                        <div className="flex items-center gap-2 text-sm text-blue-500">
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Processing claim transaction...</span>
-                        </div>
-                      )}
-                      
-                      {isSuccess && (
-                        <div className="flex items-center gap-2 text-sm text-green-500">
-                          <CheckCircle className="w-4 h-4" />
-                          <span>Successfully claimed!</span>
-                          {claimTx.txId && (
-                            <a 
-                              href={`https://explorer.stacks.co/txid/${claimTx.txId}`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="underline hover:no-underline"
-                            >
-                              View transaction
-                            </a>
-                          )}
-                        </div>
-                      )}
+                   {claimTx && (
+                     <div className="mb-3">
+                       {isPending && (
+                         <div className="flex items-center gap-2 text-sm text-blue-500">
+                           <RefreshCw className="w-4 h-4 animate-spin" />
+                           <span>Processing claim transaction...</span>
+                         </div>
+                       )}
+                       
+                       {isSuccess && (
+                         <div className="flex items-center gap-2 text-sm text-green-500">
+                           <CheckCircle className="w-4 h-4" />
+                           <span>Successfully claimed!</span>
+                           {claimTx.txId && (
+                             <a 
+                               href={`https://explorer.stacks.co/txid/${claimTx.txId}`}
+                               target="_blank"
+                               rel="noopener noreferrer"
+                               className="underline hover:no-underline"
+                             >
+                               View transaction
+                             </a>
+                           )}
+                           <button
+                             onClick={() => handleViewReceipt(bet)}
+                             className="text-xs underline hover:no-underline ml-2"
+                           >
+                             View Receipt
+                           </button>
+                         </div>
+                       )}
                       
                       {isFailed && (
                         <div className="flex items-center gap-2 text-sm text-red-500">
@@ -262,31 +294,43 @@ export default function ClaimWinnings({
       </div>
 
       {/* Batch Claim Confirmation Modal */}
-      {showBatchClaim && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="glass p-6 rounded-xl max-w-md w-full">
-            <h3 className="text-lg font-semibold mb-4">Confirm Batch Claim</h3>
-            <p className="text-muted-foreground mb-6">
-              You&apos;re about to claim winnings from {selectedBets.size} markets for a total of{' '}
-              <span className="font-semibold text-green-500">{formatCurrency(selectedClaimable)}</span>.
-            </p>
-            
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowBatchClaim(false)}
-                className="flex-1 px-4 py-2 border border-muted/50 rounded-lg hover:bg-muted/50 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleBatchClaim}
-                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium"
-              >
-                Claim All
-              </button>
-            </div>
-          </div>
+      <Dialog
+        open={showBatchClaim}
+        onClose={() => setShowBatchClaim(false)}
+        title="Confirm Batch Claim"
+        showCloseButton={false}
+      >
+        <p className="text-muted-foreground mb-6">
+          You&apos;re about to claim winnings from {selectedBets.size} markets for a total of{' '}
+          <span className="font-semibold text-green-500">{formatCurrency(selectedClaimable)}</span>.
+        </p>
+
+        <div className="flex gap-3">
+          <button
+            onClick={() => setShowBatchClaim(false)}
+            className="flex-1 px-4 py-2 border border-muted/50 rounded-lg hover:bg-muted/50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleBatchClaim}
+            className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors font-medium"
+          >
+            Claim All
+          </button>
         </div>
+      </Dialog>
+
+      {/* Transaction Receipt Modal */}
+      {receiptData && (
+        <TransactionReceipt
+          receipt={receiptData}
+          isOpen={showReceipt}
+          onClose={() => {
+            setShowReceipt(false);
+            setReceiptData(null);
+          }}
+        />
       )}
     </div>
   );

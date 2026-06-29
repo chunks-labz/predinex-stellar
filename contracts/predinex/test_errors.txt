@@ -1,0 +1,497 @@
+   Compiling predinex v0.1.0 (/home/solodev/Documents/dripsNetwork/second/predinex-stellar/contracts/predinex)
+error[E0428]: the name `PoolPayoutState` is defined multiple times
+   --> src/lib.rs:326:1
+    |
+230 | pub struct PoolPayoutState {
+    | -------------------------- previous definition of the type `PoolPayoutState` here
+...
+326 | pub struct PoolPayoutState {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^ `PoolPayoutState` redefined here
+    |
+    = note: `PoolPayoutState` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `__SPEC_XDR_TYPE_POOLPAYOUTSTATE` is defined multiple times
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- previous definition of the value `__SPEC_XDR_TYPE_POOLPAYOUTSTATE` here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ `__SPEC_XDR_TYPE_POOLPAYOUTSTATE` redefined here
+    |
+    = note: `__SPEC_XDR_TYPE_POOLPAYOUTSTATE` must be defined only once in the value namespace of this module
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0428]: the name `ClaimEvent` is defined multiple times
+   --> src/lib.rs:335:1
+    |
+251 | pub struct ClaimEvent {
+    | --------------------- previous definition of the type `ClaimEvent` here
+...
+335 | pub struct ClaimEvent {
+    | ^^^^^^^^^^^^^^^^^^^^^ `ClaimEvent` redefined here
+    |
+    = note: `ClaimEvent` must be defined only once in the type namespace of this module
+
+error[E0428]: the name `__SPEC_XDR_TYPE_CLAIMEVENT` is defined multiple times
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- previous definition of the value `__SPEC_XDR_TYPE_CLAIMEVENT` here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ `__SPEC_XDR_TYPE_CLAIMEVENT` redefined here
+    |
+    = note: `__SPEC_XDR_TYPE_CLAIMEVENT` must be defined only once in the value namespace of this module
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: cannot find macro `format` in this scope
+   --> src/lib.rs:621:20
+    |
+621 |             panic!(format!(
+    |                    ^^^^^^
+
+error[E0425]: cannot find value `MAX_POOL_DURATION` in this scope
+   --> src/lib.rs:620:40
+    |
+ 94 | const MAX_POOL_DURATION_SECS: u64 = 1_000_000;
+    | ---------------------------------------------- similarly named constant `MAX_POOL_DURATION_SECS` defined here
+...
+620 |         if duration == 0 || duration > MAX_POOL_DURATION {
+    |                                        ^^^^^^^^^^^^^^^^^
+    |
+help: a constant with a similar name exists
+    |
+620 |         if duration == 0 || duration > MAX_POOL_DURATION_SECS {
+    |                                                         +++++
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::Val>` for type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `PoolPayoutState`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, PoolPayoutState>` for type `soroban_sdk::Val`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::Val`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::xdr::ScMap>` for type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `PoolPayoutState`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::xdr::ScVal>` for type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `PoolPayoutState`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::Val>` for type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `ClaimEvent`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, ClaimEvent>` for type `soroban_sdk::Val`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::Val`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::xdr::ScMap>` for type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `ClaimEvent`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFromVal<Env, soroban_sdk::xdr::ScVal>` for type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `ClaimEvent`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<&PoolPayoutState>` for type `soroban_sdk::xdr::ScMap`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScMap`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<PoolPayoutState>` for type `soroban_sdk::xdr::ScMap`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScMap`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<&PoolPayoutState>` for type `soroban_sdk::xdr::ScVal`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScVal`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<PoolPayoutState>` for type `soroban_sdk::xdr::ScVal`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScVal`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<&ClaimEvent>` for type `soroban_sdk::xdr::ScMap`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScMap`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<ClaimEvent>` for type `soroban_sdk::xdr::ScMap`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScMap`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<&ClaimEvent>` for type `soroban_sdk::xdr::ScVal`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScVal`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `TryFrom<ClaimEvent>` for type `soroban_sdk::xdr::ScVal`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `soroban_sdk::xdr::ScVal`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `Clone` for type `PoolPayoutState`
+   --> src/lib.rs:324:10
+    |
+228 | #[derive(Clone, Default, PartialEq)]
+    |          ----- first implementation here
+...
+324 | #[derive(Clone, Default)]
+    |          ^^^^^ conflicting implementation for `PoolPayoutState`
+
+error[E0119]: conflicting implementations of trait `Clone` for type `ClaimEvent`
+   --> src/lib.rs:333:10
+    |
+249 | #[derive(Clone)]
+    |          ----- first implementation here
+...
+333 | #[derive(Clone)]
+    |          ^^^^^ conflicting implementation for `ClaimEvent`
+
+error[E0119]: conflicting implementations of trait `SorobanArbitrary` for type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+229 | #[contracttype]
+    | --------------- first implementation here
+...
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `PoolPayoutState`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `SorobanArbitrary` for type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+250 | #[contracttype]
+    | --------------- first implementation here
+...
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ conflicting implementation for `ClaimEvent`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0119]: conflicting implementations of trait `Default` for type `PoolPayoutState`
+   --> src/lib.rs:324:17
+    |
+228 | #[derive(Clone, Default, PartialEq)]
+    |                 ------- first implementation here
+...
+324 | #[derive(Clone, Default)]
+    |                 ^^^^^^^ conflicting implementation for `PoolPayoutState`
+
+error[E0592]: duplicate definitions with name `spec_xdr`
+   --> src/lib.rs:229:1
+    |
+229 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ duplicate definitions for `spec_xdr`
+...
+325 | #[contracttype]
+    | --------------- other definition for `spec_xdr`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0592]: duplicate definitions with name `spec_xdr`
+   --> src/lib.rs:250:1
+    |
+250 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ duplicate definitions for `spec_xdr`
+...
+334 | #[contracttype]
+    | --------------- other definition for `spec_xdr`
+    |
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0599]: no method named `is_ok` found for type `u32` in the current scope
+    --> src/test.rs:2803:20
+     |
+2803 |     assert!(result.is_ok());
+     |                    ^^^^^ method not found in `u32`
+
+error[E0599]: no method named `is_ok` found for type `u32` in the current scope
+    --> src/test.rs:2835:20
+     |
+2835 |     assert!(result.is_ok());
+     |                    ^^^^^ method not found in `u32`
+
+error[E0599]: no method named `is_err` found for type `u32` in the current scope
+    --> src/test.rs:2867:20
+     |
+2867 |     assert!(result.is_err());
+     |                    ^^^^^^
+     |
+help: there is a method `is_zero` with a similar name
+     |
+2867 -     assert!(result.is_err());
+2867 +     assert!(result.is_zero());
+     |
+
+error[E0599]: no method named `is_err` found for type `u32` in the current scope
+    --> src/test.rs:2898:20
+     |
+2898 |     assert!(result.is_err());
+     |                    ^^^^^^
+     |
+help: there is a method `is_zero` with a similar name
+     |
+2898 -     assert!(result.is_err());
+2898 +     assert!(result.is_zero());
+     |
+
+error[E0599]: no method named `is_err` found for type `u32` in the current scope
+    --> src/test.rs:2929:20
+     |
+2929 |     assert!(result.is_err());
+     |                    ^^^^^^
+     |
+help: there is a method `is_zero` with a similar name
+     |
+2929 -     assert!(result.is_err());
+2929 +     assert!(result.is_zero());
+     |
+
+error[E0034]: multiple applicable items in scope
+   --> src/lib.rs:229:1
+    |
+229 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ multiple `spec_xdr` found
+    |
+note: candidate #1 is defined in an impl for the type `PoolPayoutState`
+   --> src/lib.rs:229:1
+    |
+229 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0283]: type annotations needed
+   --> src/lib.rs:229:15
+    |
+229 | #[contracttype]
+    |               ^ cannot infer type
+    |
+    = note: multiple `impl`s satisfying `soroban_sdk::xdr::Error: From<_>` found in the following crates: `soroban_env_common`, `stellar_xdr`:
+            - impl From<FromUtf8Error> for soroban_sdk::xdr::Error;
+            - impl From<TryFromSliceError> for soroban_sdk::xdr::Error;
+            - impl From<core::str::Utf8Error> for soroban_sdk::xdr::Error;
+            - impl From<soroban_sdk::Error> for soroban_sdk::xdr::Error;
+            - impl From<stellar_strkey::error::DecodeError> for soroban_sdk::xdr::Error;
+            - impl From<test::std::io::Error> for soroban_sdk::xdr::Error;
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0034]: multiple applicable items in scope
+   --> src/lib.rs:250:1
+    |
+250 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ multiple `spec_xdr` found
+    |
+note: candidate #1 is defined in an impl for the type `ClaimEvent`
+   --> src/lib.rs:250:1
+    |
+250 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0283]: type annotations needed
+   --> src/lib.rs:250:15
+    |
+250 | #[contracttype]
+    |               ^ cannot infer type
+    |
+    = note: multiple `impl`s satisfying `soroban_sdk::xdr::Error: From<_>` found in the following crates: `soroban_env_common`, `stellar_xdr`:
+            - impl From<FromUtf8Error> for soroban_sdk::xdr::Error;
+            - impl From<TryFromSliceError> for soroban_sdk::xdr::Error;
+            - impl From<core::str::Utf8Error> for soroban_sdk::xdr::Error;
+            - impl From<soroban_sdk::Error> for soroban_sdk::xdr::Error;
+            - impl From<stellar_strkey::error::DecodeError> for soroban_sdk::xdr::Error;
+            - impl From<test::std::io::Error> for soroban_sdk::xdr::Error;
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0034]: multiple applicable items in scope
+   --> src/lib.rs:325:1
+    |
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ multiple `spec_xdr` found
+    |
+note: candidate #1 is defined in an impl for the type `PoolPayoutState`
+   --> src/lib.rs:229:1
+    |
+229 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `PoolPayoutState`
+   --> src/lib.rs:325:1
+    |
+325 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0283]: type annotations needed
+   --> src/lib.rs:325:15
+    |
+325 | #[contracttype]
+    |               ^ cannot infer type
+    |
+    = note: multiple `impl`s satisfying `soroban_sdk::xdr::Error: From<_>` found in the following crates: `soroban_env_common`, `stellar_xdr`:
+            - impl From<FromUtf8Error> for soroban_sdk::xdr::Error;
+            - impl From<TryFromSliceError> for soroban_sdk::xdr::Error;
+            - impl From<core::str::Utf8Error> for soroban_sdk::xdr::Error;
+            - impl From<soroban_sdk::Error> for soroban_sdk::xdr::Error;
+            - impl From<stellar_strkey::error::DecodeError> for soroban_sdk::xdr::Error;
+            - impl From<test::std::io::Error> for soroban_sdk::xdr::Error;
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0034]: multiple applicable items in scope
+   --> src/lib.rs:334:1
+    |
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^ multiple `spec_xdr` found
+    |
+note: candidate #1 is defined in an impl for the type `ClaimEvent`
+   --> src/lib.rs:250:1
+    |
+250 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+note: candidate #2 is defined in an impl for the type `ClaimEvent`
+   --> src/lib.rs:334:1
+    |
+334 | #[contracttype]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0283]: type annotations needed
+   --> src/lib.rs:334:15
+    |
+334 | #[contracttype]
+    |               ^ cannot infer type
+    |
+    = note: multiple `impl`s satisfying `soroban_sdk::xdr::Error: From<_>` found in the following crates: `soroban_env_common`, `stellar_xdr`:
+            - impl From<FromUtf8Error> for soroban_sdk::xdr::Error;
+            - impl From<TryFromSliceError> for soroban_sdk::xdr::Error;
+            - impl From<core::str::Utf8Error> for soroban_sdk::xdr::Error;
+            - impl From<soroban_sdk::Error> for soroban_sdk::xdr::Error;
+            - impl From<stellar_strkey::error::DecodeError> for soroban_sdk::xdr::Error;
+            - impl From<test::std::io::Error> for soroban_sdk::xdr::Error;
+    = note: this error originates in the attribute macro `contracttype` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+Some errors have detailed explanations: E0034, E0119, E0283, E0425, E0428, E0592, E0599.
+For more information about an error, try `rustc --explain E0034`.
+error: could not compile `predinex` (lib test) due to 42 previous errors

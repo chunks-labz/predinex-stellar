@@ -1,31 +1,66 @@
 'use client';
 
-import { useMemo } from 'react';
-import Navbar from "../components/Navbar";
+import { Suspense, useCallback, useMemo } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import Navbar from '@/components/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
-import SearchBar from "../components/SearchBar";
-import FilterControls from "../components/FilterControls";
-import SortControls from "../components/SortControls";
-import MarketGrid from "../components/MarketGrid";
-import Pagination from "../components/Pagination";
+import MarketFilterBar from "../components/MarketFilterBar";
+import MarketGrid from '@/components/MarketGrid';
+import Pagination from '@/components/Pagination';
+import { marketFiltersToParams, parseMarketFiltersFromParams } from "../lib/market-filtering";
+import type { MarketFilters } from "../lib/market-types";
 import { useMarketDiscovery } from "../lib/hooks/useMarketDiscovery";
+import { useFilterPresets } from "../lib/hooks/useFilterPresets";
 import RouteErrorBoundary from "../../components/RouteErrorBoundary";
+import CompareBadge from '@/components/CompareBadge';
 
 function MarketsContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const queryKey = searchParams.toString();
+  const urlFilters = useMemo(() => parseMarketFiltersFromParams(searchParams), [searchParams]);
+  const syncFiltersToUrl = useCallback(
+    (nextFilters: MarketFilters) => {
+      const nextQuery = marketFiltersToParams(nextFilters).toString();
+      const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
+      const currentUrl = queryKey ? `${pathname}?${queryKey}` : pathname;
+      if (nextUrl !== currentUrl) {
+        router.replace(nextUrl, { scroll: false });
+      }
+    },
+    [pathname, queryKey, router],
+  );
+
   const {
     paginatedMarkets,
     isLoading,
     error,
     blockHeightWarning,
     filters,
+    assetOptions,
+    hasActiveFilters,
     pagination,
     setSearch,
     setStatusFilter,
+    setAssetFilter,
+    setMinVolume,
+    setMaxVolume,
+    setTimeRange,
     setSortBy,
+    setFilters,
+    resetFilters,
     setPage,
     retry,
     filteredMarkets
-  } = useMarketDiscovery();
+  } = useMarketDiscovery({
+    initialFilters: urlFilters,
+    externalFilters: urlFilters,
+    externalFiltersKey: queryKey,
+    onFiltersChange: syncFiltersToUrl,
+  });
+
+  const { presets, savePreset, deletePreset, canSave, maxPresets } = useFilterPresets();
 
   // Calculate filter counts for display
   const filterCounts = useMemo(() => {
@@ -33,17 +68,17 @@ function MarketsContent() {
       all: filteredMarkets.length,
       active: 0,
       settled: 0,
-      expired: 0
+      expired: 0,
+      disputed: 0,
     };
 
     filteredMarkets.forEach(market => {
       counts[market.status]++;
+      if (market.disputed) counts.disputed++;
     });
 
     return counts;
   }, [filteredMarkets]);
-
-  const hasActiveFilters = filters.search.trim() !== '' || filters.status !== 'all';
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -59,42 +94,34 @@ function MarketsContent() {
         </div>
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <StatsCard title="Total Markets" value={filterCounts.all} />
-          <StatsCard title="Active" value={filterCounts.active} />
+          <StatsCard title="Open" value={filterCounts.active} />
           <StatsCard title="Settled" value={filterCounts.settled} />
+          <StatsCard title="Disputed" value={filterCounts.disputed} />
         </div>
 
         {/* Controls */}
-        <div className="space-y-6 mb-8 sticky top-16 z-30 py-4 bg-background/80 backdrop-blur-md border-b border-transparent md:border-border/10">
-          {/* Search */}
-          <div className="max-w-2xl">
-            <SearchBar
-              value={filters.search}
-              onChange={setSearch}
-              placeholder="Search markets by title or description..."
-            />
-          </div>
-
-          {/* Filters and Sort */}
-          <div className="flex flex-col lg:flex-row gap-6">
-            {/* Status Filters */}
-            <div className="flex-1">
-              <FilterControls
-                selectedStatus={filters.status}
-                onStatusChange={setStatusFilter}
-                counts={filterCounts}
-              />
-            </div>
-
-            {/* Sort Controls */}
-            <div className="lg:w-64">
-              <SortControls
-                selectedSort={filters.sortBy}
-                onSortChange={setSortBy}
-              />
-            </div>
-          </div>
+        <div className="mb-8 sticky top-16 z-30 py-4 bg-background/90 backdrop-blur-md border-b border-transparent md:border-border/10">
+          <MarketFilterBar
+            filters={filters}
+            assetOptions={assetOptions}
+            onSearchChange={setSearch}
+            onStatusChange={setStatusFilter}
+            onAssetChange={setAssetFilter}
+            onMinVolumeChange={setMinVolume}
+            onMaxVolumeChange={setMaxVolume}
+            onTimeRangeChange={setTimeRange}
+            onSortChange={setSortBy}
+            onReset={resetFilters}
+            hasActiveFilters={hasActiveFilters}
+            presets={presets}
+            canSavePreset={canSave}
+            maxPresets={maxPresets}
+            onApplyPreset={setFilters}
+            onSavePreset={savePreset}
+            onDeletePreset={deletePreset}
+          />
         </div>
 
         {/* Non-blocking freshness warning */}
@@ -114,6 +141,7 @@ function MarketsContent() {
           isLoading={isLoading}
           error={error}
           onRetry={retry}
+          onResetFilters={resetFilters}
           searchQuery={filters.search}
           hasFilters={hasActiveFilters}
         />
@@ -126,6 +154,8 @@ function MarketsContent() {
           />
         )}
       </div>
+
+      <CompareBadge />
     </main>
   );
 }
@@ -133,7 +163,9 @@ function MarketsContent() {
 export default function MarketsPage() {
   return (
     <RouteErrorBoundary routeName="Markets">
-      <MarketsContent />
+      <Suspense fallback={<main className="min-h-screen bg-background text-foreground" />}>
+        <MarketsContent />
+      </Suspense>
     </RouteErrorBoundary>
   );
 }

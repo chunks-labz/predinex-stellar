@@ -3,7 +3,7 @@ import {
   formatDisplayAddress,
   WALLET_ADDRESS_DISPLAY,
 } from '../../app/lib/address-display';
-import { truncateAddress } from '../../app/lib/utils';
+import { truncateAddress } from '../../lib/utils';
 
 const SAMPLE = 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM';
 

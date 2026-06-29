@@ -14,9 +14,9 @@ vi.mock('@/app/lib/runtime-config', () => ({
 }));
 
 vi.mock('@/lib/appkit-config', () => ({
-  stacksNetworks: {
-    mainnet: { id: 'stacks:mainnet', name: 'Stacks Mainnet' },
-    testnet: { id: 'stacks:testnet', name: 'Stacks Testnet' },
+  stellarNetworks: {
+    mainnet: { id: 'stellar:pubnet', name: 'Stellar Mainnet' },
+    testnet: { id: 'stellar:testnet', name: 'Stellar Testnet' },
   },
 }));
 
@@ -27,7 +27,7 @@ describe('useNetworkMismatch', () => {
 
   it('returns isMismatch: false when networks match (testnet)', () => {
     vi.mocked(AppKitReact.useAppKitNetwork).mockReturnValue({
-      caipNetwork: { id: 'stacks:testnet', name: 'Stacks Testnet' },
+      caipNetwork: { id: 'stellar:testnet', name: 'Stellar Testnet' },
       switchNetwork: vi.fn(),
     } as any);
 
@@ -39,11 +39,12 @@ describe('useNetworkMismatch', () => {
 
     expect(result.current.isMismatch).toBe(false);
     expect(result.current.expectedNetworkType).toBe('testnet');
+    expect(result.current.expectedNetworkName).toBe('Stellar Testnet');
   });
 
   it('returns isMismatch: true when networks mismatch (wallet on mainnet, app on testnet)', () => {
     vi.mocked(AppKitReact.useAppKitNetwork).mockReturnValue({
-      caipNetwork: { id: 'stacks:mainnet', name: 'Stacks Mainnet' },
+      caipNetwork: { id: 'stellar:pubnet', name: 'Stellar Mainnet' },
       switchNetwork: vi.fn(),
     } as any);
 
@@ -55,7 +56,7 @@ describe('useNetworkMismatch', () => {
 
     expect(result.current.isMismatch).toBe(true);
     expect(result.current.expectedNetworkType).toBe('testnet');
-    expect(result.current.currentNetworkName).toBe('Stacks Mainnet');
+    expect(result.current.currentNetworkName).toBe('Stellar Mainnet');
   });
 
   it('returns isMismatch: false when no wallet is connected', () => {
@@ -76,7 +77,7 @@ describe('useNetworkMismatch', () => {
   it('calls switchNetwork with correct target when switchNetwork is triggered', async () => {
     const mockSwitchNetwork = vi.fn();
     vi.mocked(AppKitReact.useAppKitNetwork).mockReturnValue({
-      caipNetwork: { id: 'stacks:mainnet', name: 'Stacks Mainnet' },
+      caipNetwork: { id: 'stellar:pubnet', name: 'Stellar Mainnet' },
       switchNetwork: mockSwitchNetwork,
     } as any);
 
@@ -88,6 +89,23 @@ describe('useNetworkMismatch', () => {
 
     await result.current.switchNetwork();
 
-    expect(mockSwitchNetwork).toHaveBeenCalledWith(expect.objectContaining({ id: 'stacks:testnet' }));
+    expect(mockSwitchNetwork).toHaveBeenCalledWith(expect.objectContaining({ id: 'stellar:testnet' }));
+  });
+
+  it('returns the Stellar Mainnet expected name when app is configured for mainnet', () => {
+    vi.mocked(AppKitReact.useAppKitNetwork).mockReturnValue({
+      caipNetwork: { id: 'stellar:pubnet', name: 'Stellar Mainnet' },
+      switchNetwork: vi.fn(),
+    } as any);
+
+    vi.mocked(RuntimeConfig.getRuntimeConfig).mockReturnValue({
+      network: 'mainnet',
+    } as any);
+
+    const { result } = renderHook(() => useNetworkMismatch());
+
+    expect(result.current.isMismatch).toBe(false);
+    expect(result.current.expectedNetworkType).toBe('mainnet');
+    expect(result.current.expectedNetworkName).toBe('Stellar Mainnet');
   });
 });

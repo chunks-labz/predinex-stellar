@@ -1,53 +1,161 @@
-"use client";
+'use client';
 
-import { useWallet } from '../app/components/WalletAdapterProvider';
-import { TruncatedAddress } from './TruncatedAddress';
-import { Wallet, CircleDollarSign, Info } from 'lucide-react';
-import Card from './ui/Card';
-import Tooltip from './ui/Tooltip';
+import { useMemo } from 'react';
+import { TrendingUp, TrendingDown, DollarSign, Target, Trophy, Activity } from 'lucide-react';
+import { UserPortfolio } from '@/app/lib/dashboard-types';
+import { formatCurrency, formatPercentage, formatProfitLoss } from '@/app/lib/dashboard-utils';
+import { selectPortfolioMetricCards } from '@/app/lib/dashboard-selectors';
 
-export default function PortfolioOverview() {
-    const { isConnected, address } = useWallet();
+interface PortfolioOverviewProps {
+  portfolio: UserPortfolio;
+  isLoading?: boolean;
+}
 
-    if (!isConnected) return null;
+export default function PortfolioOverview({ portfolio, isLoading = false }: PortfolioOverviewProps) {
+  const profitLossData = useMemo(() => formatProfitLoss(portfolio.profitLoss), [portfolio.profitLoss]);
+  const metrics = useMemo(() => selectPortfolioMetricCards(portfolio), [portfolio]);
 
+  if (isLoading) {
     return (
-        <div className="mb-8 p-8 rounded-3xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-accent/5 glass relative overflow-hidden">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 relative z-10">
-                <div>
-                    <h2 className="text-3xl font-black mb-1 flex items-center gap-2">
-                        Portfolio Overview
-                        <Tooltip content="Live stats from your Stacks wallet address">
-                            <Info className="w-4 h-4 text-muted-foreground cursor-help" />
-                        </Tooltip>
-                    </h2>
-                    <p className="text-muted-foreground font-medium flex items-center gap-2">
-                        <Wallet className="w-4 h-4" />
-                        {address ? <TruncatedAddress address={address} /> : null}
-                    </p>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-8 w-full md:w-auto">
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-bold text-primary tracking-widest mb-1">Total Wagered</span>
-                        <span className="text-2xl font-black">1,250 STX</span>
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-bold text-accent tracking-widest mb-1">Total Won</span>
-                        <span className="text-2xl font-black">840 STX</span>
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-[10px] uppercase font-bold text-green-400 tracking-widest mb-1">Net P/L</span>
-                        <div className="flex items-center gap-2">
-                            <CircleDollarSign className="w-5 h-5 text-green-400" />
-                            <span className="text-2xl font-black text-green-400">+590 STX</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {/* Decorative background element */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 blur-[120px] rounded-full -mr-32 -mt-32 animate-pulse" />
+      <div className="space-y-6">
+        <div className="flex items-center justify-between">
+          <div className="h-8 bg-muted/50 rounded w-48 animate-pulse"></div>
+          <div className="h-4 bg-muted/50 rounded w-32 animate-pulse"></div>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="glass p-6 rounded-xl animate-pulse">
+              <div className="p-3 rounded-lg bg-muted/20 w-12 h-12 mb-4"></div>
+              <div className="space-y-2">
+                <div className="h-3 bg-muted/50 rounded w-24"></div>
+                <div className="h-8 bg-muted/50 rounded w-32"></div>
+                <div className="h-2 bg-muted/50 rounded w-28"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="glass p-6 rounded-xl animate-pulse">
+          <div className="h-6 bg-muted/50 rounded w-40 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="flex flex-col items-center">
+                <div className="h-8 bg-muted/50 rounded w-16 mb-2"></div>
+                <div className="h-3 bg-muted/50 rounded w-20"></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     );
+  }
+
+  const renderedMetrics = useMemo(
+    () =>
+      metrics.map((metric) => {
+        const icon =
+          metric.title === 'Total Portfolio Value'
+            ? DollarSign
+            : metric.title === 'Active Bets'
+              ? Activity
+              : metric.title === 'Total Wagered'
+                ? Target
+                : metric.title === 'Total Winnings'
+                  ? Trophy
+                  : metric.title === 'Claimable Amount'
+                    ? DollarSign
+                    : metric.title === 'Profit/Loss'
+                      ? profitLossData.isProfit
+                        ? TrendingUp
+                        : TrendingDown
+                      : DollarSign;
+
+        const color =
+          metric.tone === 'blue'
+            ? 'text-blue-500'
+            : metric.tone === 'green'
+              ? 'text-green-500'
+              : metric.tone === 'purple'
+                ? 'text-purple-500'
+                : metric.tone === 'yellow'
+                  ? 'text-yellow-500'
+                  : metric.tone === 'red'
+                    ? 'text-red-500'
+                    : 'text-muted-foreground';
+
+        const bgColor =
+          metric.tone === 'blue'
+            ? 'bg-blue-500/10'
+            : metric.tone === 'green'
+              ? 'bg-green-500/10'
+              : metric.tone === 'purple'
+                ? 'bg-purple-500/10'
+                : metric.tone === 'yellow'
+                  ? 'bg-yellow-500/10'
+                  : metric.tone === 'red'
+                    ? 'bg-red-500/10'
+                    : 'bg-muted/10';
+
+        return { ...metric, icon, color, bgColor };
+      }),
+    [metrics, profitLossData.isProfit],
+  );
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Portfolio Overview</h2>
+        <div className="text-sm text-muted-foreground">
+          Last updated: {new Date().toLocaleTimeString()}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {renderedMetrics.map((metric, index) => {
+          const Icon = metric.icon;
+
+          return (
+            <div key={index} className="glass p-6 rounded-xl hover:border-primary/50 transition-all duration-200">
+              <div className="flex items-start justify-between mb-4">
+                <div className={`p-3 rounded-lg ${metric.bgColor}`}>
+                  <Icon className={`w-6 h-6 ${metric.color}`} />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-muted-foreground">{metric.title}</p>
+                <p className={`text-2xl font-bold ${metric.color}`}>{metric.value}</p>
+                <p className="text-xs text-muted-foreground">{metric.subtitle}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="glass p-4 sm:p-6 rounded-xl">
+        <h3 className="text-lg font-semibold mb-4 text-center sm:text-left">Performance Summary</h3>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-blue-500">
+              {formatPercentage(portfolio.winRate)}
+            </div>
+            <div className="text-sm text-muted-foreground">Win Rate</div>
+          </div>
+
+          <div className="text-center">
+            <div className={`text-2xl font-bold ${profitLossData.isProfit ? 'text-green-500' : profitLossData.isBreakeven ? 'text-muted-foreground' : 'text-red-500'}`}>
+              {portfolio.totalWagered > 0 ? formatPercentage((portfolio.profitLoss / portfolio.totalWagered) * 100) : '0%'}
+            </div>
+            <div className="text-sm text-muted-foreground">ROI</div>
+          </div>
+
+          <div className="text-center">
+            <div className="text-2xl font-bold text-purple-500">
+              {portfolio.totalBets > 0 ? formatCurrency(portfolio.totalWagered / portfolio.totalBets) : formatCurrency(0)}
+            </div>
+            <div className="text-sm text-muted-foreground">Avg Bet Size</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

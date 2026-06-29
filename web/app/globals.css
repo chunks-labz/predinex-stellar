@@ -6,10 +6,10 @@
     --foreground: #fafafa;
     --primary: #8b5cf6;
     --primary-foreground: #ffffff;
-    --muted: #121212;
-    --muted-foreground: #a3a3a3;
+    --muted: #161616;
+    --muted-foreground: #d1d5db;
     --accent: #22d3ee;
-    --border: #1e1e1e;
+    --border: #2b2b2b;
 
     /* Transitions */
     --transition-fast: 150ms;
@@ -60,14 +60,14 @@ body {
 
 /* Premium Glassmorphism */
 .glass {
-    background: rgba(10, 10, 10, 0.4);
+    background: rgba(8, 8, 8, 0.72);
     backdrop-filter: blur(16px) saturate(180%);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .glass-panel {
-    @apply bg-background/60 backdrop-blur-xl border border-border;
+    @apply bg-background/80 backdrop-blur-xl border border-border;
 }
 
 .glass-light {
@@ -148,4 +148,62 @@ body {
 .hover-lift:hover {
     transform: translateY(-4px);
     box-shadow: 0 12px 24px -10px rgba(139, 92, 246, 0.3);
+}
+
+/* ── #458 A11y: Visible focus indicators (WCAG 2.1 AA) ─────────────────────── */
+/* Provide a 2px solid ring that meets 3:1 contrast against any background.    */
+:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+/* Remove default outline only when :focus-visible is supported */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* ── #458 A11y: Respect prefers-reduced-motion ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+
+    .animate-float,
+    .animate-float-delayed,
+    .animate-glow,
+    .text-gradient {
+        animation: none !important;
+    }
+}
+
+/* ── #455 Mobile: Touch-friendly minimum target sizes ───────────────────────── */
+/* Ensure all interactive elements meet the 44×44px minimum touch target.      */
+button,
+[role="button"],
+a,
+input[type="checkbox"],
+input[type="radio"],
+select {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+/* Inline links and icon-only buttons may be smaller — override as needed */
+nav a,
+.nav-link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* ── #455 Mobile: Bottom nav safe-area padding ──────────────────────────────── */
+/* Prevent content from being hidden behind the mobile bottom nav (h-16 = 4rem) */
+.has-bottom-nav {
+    padding-bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
 }

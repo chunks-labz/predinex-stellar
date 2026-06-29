@@ -1,26 +1,42 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchCallReadOnlyFunction, cvToValue } from '@stacks/transactions';
 import { getPoolCount } from '../../app/lib/enhanced-stacks-api';
 import { __resetRuntimeConfigForTests } from '../../app/lib/runtime-config';
 
-vi.mock('@stacks/transactions', async () => {
-  const actual = await vi.importActual('@stacks/transactions');
-  return {
-    ...actual,
-    fetchCallReadOnlyFunction: vi.fn(),
-    cvToValue: vi.fn(),
-  };
-});
+// Compatibility-only coverage for the legacy Stacks transport selection path.
+// Keep this isolated from the Soroban-shaped adapter suites.
 
-describe('market discovery network selection', () => {
+const {
+  mockFetchCallReadOnlyFunction,
+  mockCvToValue,
+  mockStacksMainnet,
+  mockStacksTestnet,
+} = vi.hoisted(() => ({
+  mockFetchCallReadOnlyFunction: vi.fn(),
+  mockCvToValue: vi.fn(),
+  mockStacksMainnet: { client: { baseUrl: 'https://mainnet.invalid' } },
+  mockStacksTestnet: { client: { baseUrl: 'https://testnet.invalid' } },
+}));
+
+vi.mock('@stacks/network', () => ({
+  STACKS_MAINNET: mockStacksMainnet,
+  STACKS_TESTNET: mockStacksTestnet,
+}));
+
+vi.mock('@stacks/transactions', () => ({
+  fetchCallReadOnlyFunction: mockFetchCallReadOnlyFunction,
+  cvToValue: mockCvToValue,
+  uintCV: vi.fn((value: unknown) => ({ __mockUintCV: value })),
+}));
+
+describe('market discovery network selection compatibility', () => {
   const originalEnv = process.env;
 
   beforeEach(() => {
     vi.clearAllMocks();
     __resetRuntimeConfigForTests();
     process.env = { ...originalEnv };
-    vi.mocked(fetchCallReadOnlyFunction).mockResolvedValue({} as any);
-    vi.mocked(cvToValue).mockReturnValue(0);
+    vi.mocked(mockFetchCallReadOnlyFunction).mockResolvedValue({} as any);
+    vi.mocked(mockCvToValue).mockReturnValue(0);
   });
 
   it('targets testnet when NEXT_PUBLIC_NETWORK=testnet', async () => {
@@ -28,7 +44,7 @@ describe('market discovery network selection', () => {
 
     await getPoolCount();
 
-    expect(fetchCallReadOnlyFunction).toHaveBeenCalledWith(
+    expect(mockFetchCallReadOnlyFunction).toHaveBeenCalledWith(
       expect.objectContaining({
         network: expect.objectContaining({
           client: expect.objectContaining({
@@ -44,7 +60,7 @@ describe('market discovery network selection', () => {
 
     await getPoolCount();
 
-    expect(fetchCallReadOnlyFunction).toHaveBeenCalledWith(
+    expect(mockFetchCallReadOnlyFunction).toHaveBeenCalledWith(
       expect.objectContaining({
         network: expect.objectContaining({
           client: expect.objectContaining({
@@ -55,4 +71,3 @@ describe('market discovery network selection', () => {
     );
   });
 });
-

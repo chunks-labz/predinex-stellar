@@ -92,3 +92,18 @@ export interface ClaimTransaction {
   txId?: string;
   error?: string;
 }
+
+export interface TransactionReceiptData {
+  txId: string;
+  network: string;
+  ledgerSequence?: number;
+  ledgerTimestamp?: number;
+  marketId?: number;
+  marketTitle?: string;
+  type: 'create' | 'bet' | 'claim' | 'settle' | 'cancel' | 'void';
+  amount?: number;
+  outcome?: string;
+  status: 'pending' | 'success' | 'failed';
+  error?: string;
+  timestamp: number;
+}

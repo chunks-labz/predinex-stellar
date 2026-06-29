@@ -1,0 +1,457 @@
+//! # Wave Pool Contract
+//!
+//! On-chain pool management with cumulative volume tracking for frontends.
+//! Every `place_bet` increments the pool's lifetime volume and the total
+//! contract volume. Both persist through settlement and claims. Two read
+//! methods expose volume data without an off-chain indexer.
+//!
+//! ## Design Decisions
+//! - Uses checked arithmetic to prevent overflow on both per-pool and total volumes.
+//! - Storage keys are typed via the `DataKey` enum and `Symbol` for safety.
+//! - Events are emitted for all state-changing operations.
+//! - Errors are explicit, covering all failure modes.
+//! - Logging at appropriate levels for observability.
+//! - Strict input validation on all public functions.
+//! - Storage operations are optimized to minimize reads/writes.
+
+#![no_std]
+
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, log, BytesN, Env, Map,
+};
+
+// ---------------------------------------------------------------------------
+// Error types
+// ---------------------------------------------------------------------------
+
+/// Contract-specific errors with descriptive messages.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum PoolError {
+    /// The requested pool does not exist.
+    PoolNotFound = 1,
+    /// The bet amount must be strictly positive.
+    InvalidBetAmount = 2,
+    /// Overflow occurred while updating cumulative volume.
+    VolumeOverflow = 3,
+    /// The pool is already settled.
+    PoolSettled = 4,
+    /// A pool with this ID already exists.
+    PoolAlreadyExists = 5,
+    /// Insufficient storage balance or other system error.
+    StorageError = 6,
+}
+
+impl PoolError {
+    /// Returns a human-readable error message.
+    pub fn message(&self) -> &'static str {
+        match self {
+            PoolError::PoolNotFound => "Pool not found",
+            PoolError::InvalidBetAmount => "Bet amount must be positive",
+            PoolError::VolumeOverflow => "Volume overflow detected",
+            PoolError::PoolSettled => "Pool already settled",
+            PoolError::PoolAlreadyExists => "Pool already exists",
+            PoolError::StorageError => "Storage operation failed",
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Data types
+// ---------------------------------------------------------------------------
+
+/// Identifier for a pool (32‑byte hash).
+pub type PoolId = BytesN<32>;
+
+/// Represents a single betting pool.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Pool {
+    /// Total volume bet into this pool over its lifetime.
+    /// Persists after settlement.
+    pub cumulative_volume: i128,
+    /// Whether the pool is settled. Volume is preserved after settlement.
+    pub settled: bool,
+}
+
+impl Pool {
+    /// Create a new empty pool.
+    pub fn new() -> Self {
+        Self {
+            cumulative_volume: 0i128,
+            settled: false,
+        }
+    }
+
+    /// Increment cumulative volume with overflow protection.
+    ///
+    /// # Arguments
+    /// * `amount` - The amount to add to the cumulative volume
+    ///
+    /// # Returns
+    /// The new cumulative volume or `PoolError::VolumeOverflow` on overflow
+    pub fn add_volume(&mut self, amount: i128) -> Result<i128, PoolError> {
+        self.cumulative_volume = self
+            .cumulative_volume
+            .checked_add(amount)
+            .ok_or(PoolError::VolumeOverflow)?;
+        Ok(self.cumulative_volume)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Storage keys
+// ---------------------------------------------------------------------------
+
+/// Type-safe storage keys to avoid symbol collisions.
+#[contracttype]
+pub enum DataKey {
+    /// Map from PoolId to Pool data.
+    Pools,
+    /// Total cumulative volume across all pools.
+    TotalVolume,
+    // The following are reserved for future extensions:
+    // Admin, Paused, etc.
+}
+
+// ---------------------------------------------------------------------------
+// Contract
+// ---------------------------------------------------------------------------
+
+/// Main contract structure.
+#[contract]
+pub struct WavePool;
+
+#[contractimpl]
+impl WavePool {
+    // ---------------------------------------------------------------
+    // Internal helpers
+    // ---------------------------------------------------------------
+
+    /// Load the pools map from storage, returning a new empty map if absent.
+    fn load_pools(env: &Env) -> Map<PoolId, Pool> {
+        env.storage()
+            .instance()
+            .get(&DataKey::Pools)
+            .unwrap_or_else(|| Map::new(env))
+    }
+
+    /// Save the pools map to storage.
+    fn save_pools(env: &Env, pools: &Map<PoolId, Pool>) -> Result<(), PoolError> {
+        env.storage()
+            .instance()
+            .set(&DataKey::Pools, pools)
+            .map_err(|_| PoolError::StorageError)
+    }
+
+    /// Load a single pool by ID, returning `None` if not found.
+    fn load_pool(env: &Env, pool_id: &PoolId) -> Option<Pool> {
+        Self::load_pools(env).get(pool_id.clone())
+    }
+
+    /// Save a single pool back into the map.
+    fn save_pool(env: &Env, pool_id: PoolId, pool: Pool) -> Result<(), PoolError> {
+        let mut pools = Self::load_pools(env);
+        pools.set(pool_id.clone(), pool);
+        Self::save_pools(env, &pools)
+    }
+
+    /// Load the total cumulative volume across all pools.
+    /// Returns 0 if not set.
+    fn load_total_volume(env: &Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalVolume)
+            .unwrap_or(0i128)
+    }
+
+    /// Save the total cumulative volume.
+    fn save_total_volume(env: &Env, volume: i128) -> Result<(), PoolError> {
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalVolume, &volume)
+            .map_err(|_| PoolError::StorageError)
+    }
+
+    // ---------------------------------------------------------------
+    // Write operations
+    // ---------------------------------------------------------------
+
+    /// Create a new empty pool.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_id` - Unique identifier for the pool.
+    ///
+    /// # Errors
+    ///
+    /// - `PoolAlreadyExists` if a pool with the same ID already exists.
+    /// - `StorageError` if storage operations fail.
+    pub fn create_pool(env: Env, pool_id: PoolId) -> Result<(), PoolError> {
+        if Self::load_pool(&env, &pool_id).is_some() {
+            log!(&env, "Pool creation failed: already exists", pool_id);
+            return Err(PoolError::PoolAlreadyExists);
+        }
+
+        let pool = Pool::new();
+        Self::save_pool(&env, pool_id.clone(), pool)?;
+
+        log!(&env, "Pool created: id={:?}", pool_id);
+        env.events().publish(("pool_created",), (pool_id,));
+
+        Ok(())
+    }
+
+    /// Place a bet into an existing pool.
+    ///
+    /// Updates both the pool's cumulative volume and the total contract volume.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_id` - Identifier of the pool.
+    /// * `amount` - Bet amount in smallest units (must be > 0).
+    ///
+    /// # Returns
+    ///
+    /// The new cumulative volume of the pool.
+    ///
+    /// # Errors
+    ///
+    /// - `PoolNotFound` if the pool does not exist.
+    /// - `InvalidBetAmount` if `amount` is not positive.
+    /// - `VolumeOverflow` if adding the amount would overflow `i128` (pool or total).
+    /// - `StorageError` if storage operations fail.
+    ///
+    /// # Events
+    ///
+    /// Emits `bet_placed` with `(pool_id, amount, new_volume)`.
+    pub fn place_bet(env: Env, pool_id: PoolId, amount: i128) -> Result<i128, PoolError> {
+        if amount <= 0 {
+            log!(&env, "Invalid bet amount: {}", amount);
+            return Err(PoolError::InvalidBetAmount);
+        }
+
+        let mut pool = Self::load_pool(&env, &pool_id).ok_or_else(|| {
+            log!(&env, "Pool not found: {:?}", pool_id);
+            PoolError::PoolNotFound
+        })?;
+
+        let new_volume = pool.add_volume(amount)?;
+
+        // Update total volume
+        let total = Self::load_total_volume(&env);
+        let new_total = total
+            .checked_add(amount)
+            .ok_or(PoolError::VolumeOverflow)?;
+
+        Self::save_pool(&env, pool_id.clone(), pool)?;
+        Self::save_total_volume(&env, new_total)?;
+
+        log!(
+            &env,
+            "Bet placed: pool={:?}, amount={}, pool_volume={}, total_volume={}",
+            pool_id,
+            amount,
+            new_volume,
+            new_total
+        );
+        env.events().publish(
+            ("bet_placed",),
+            (pool_id, amount, new_volume),
+        );
+
+        Ok(new_volume)
+    }
+
+    /// Settle a pool (mark as settled). Cumulative volume is preserved.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_id` - Identifier of the pool to settle.
+    ///
+    /// # Errors
+    ///
+    /// - `PoolNotFound` if the pool does not exist.
+    /// - `PoolSettled` if already settled.
+    /// - `StorageError` if storage operations fail.
+    pub fn settle_pool(env: Env, pool_id: PoolId) -> Result<(), PoolError> {
+        let mut pool = Self::load_pool(&env, &pool_id).ok_or(PoolError::PoolNotFound)?;
+
+        if pool.settled {
+            log!(&env, "Pool already settled: {:?}", pool_id);
+            return Err(PoolError::PoolSettled);
+        }
+
+        pool.settled = true;
+        Self::save_pool(&env, pool_id.clone(), pool)?;
+
+        log!(&env, "Pool settled: id={:?}", pool_id);
+        env.events().publish(("pool_settled",), (pool_id,));
+
+        Ok(())
+    }
+
+    // ---------------------------------------------------------------
+    // Read operations
+    // ---------------------------------------------------------------
+
+    /// Return the cumulative volume of a specific pool.
+    ///
+    /// # Arguments
+    ///
+    /// * `pool_id` - Identifier of the pool.
+    ///
+    /// # Errors
+    ///
+    /// - `PoolNotFound` if the pool does not exist.
+    pub fn get_pool_volume(env: Env, pool_id: PoolId) -> Result<i128, PoolError> {
+        let pool = Self::load_pool(&env, &pool_id).ok_or(PoolError::PoolNotFound)?;
+        Ok(pool.cumulative_volume)
+    }
+
+    /// Return the total cumulative volume across all pools.
+    ///
+    /// This is the sum of all `cumulative_volume` values across every pool
+    /// that has ever been created. Updated atomically with each `place_bet`.
+    pub fn get_total_contract_volume(env: Env) -> i128 {
+        Self::load_total_volume(&env)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use soroban_sdk::{testutils::BytesN, Env};
+
+    #[test]
+    fn test_create_pool_and_place_bet() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[0u8; 32]);
+        client.create_pool(&pool_id);
+
+        let volume = client.place_bet(&pool_id, &100);
+        assert_eq!(volume, 100);
+
+        let pool_volume = client.get_pool_volume(&pool_id);
+        assert_eq!(pool_volume, 100);
+
+        let total_volume = client.get_total_contract_volume();
+        assert_eq!(total_volume, 100);
+    }
+
+    #[test]
+    fn test_volume_persists_after_settlement() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[1u8; 32]);
+        client.create_pool(&pool_id);
+        client.place_bet(&pool_id, &200);
+        client.settle_pool(&pool_id);
+
+        let volume = client.get_pool_volume(&pool_id);
+        assert_eq!(volume, 200);
+    }
+
+    #[test]
+    fn test_multiple_pools_and_total_volume() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_a = BytesN::from_array(&env, &[2u8; 32]);
+        let pool_b = BytesN::from_array(&env, &[3u8; 32]);
+
+        client.create_pool(&pool_a);
+        client.create_pool(&pool_b);
+
+        client.place_bet(&pool_a, &50);
+        client.place_bet(&pool_b, &150);
+
+        assert_eq!(client.get_total_contract_volume(), 200);
+    }
+
+    #[test]
+    fn test_overflow_safety() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[4u8; 32]);
+        client.create_pool(&pool_id);
+
+        // Attempt to overflow i128
+        let max_positive = i128::MAX;
+        let result = client.place_bet(&pool_id, &max_positive);
+        assert_eq!(result, max_positive);
+
+        let result = client.try_place_bet(&pool_id, &1);
+        assert_eq!(result, Err(PoolError::VolumeOverflow));
+    }
+
+    #[test]
+    fn test_invalid_bet_amount() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[5u8; 32]);
+        client.create_pool(&pool_id);
+
+        let result = client.try_place_bet(&pool_id, &0);
+        assert_eq!(result, Err(PoolError::InvalidBetAmount));
+
+        let result = client.try_place_bet(&pool_id, &-1);
+        assert_eq!(result, Err(PoolError::InvalidBetAmount));
+    }
+
+    #[test]
+    fn test_nonexistent_pool() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[6u8; 32]);
+        let result = client.try_place_bet(&pool_id, &100);
+        assert_eq!(result, Err(PoolError::PoolNotFound));
+
+        let result = client.try_get_pool_volume(&pool_id);
+        assert_eq!(result, Err(PoolError::PoolNotFound));
+    }
+
+    #[test]
+    fn test_duplicate_pool() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[7u8; 32]);
+        client.create_pool(&pool_id);
+
+        let result = client.try_create_pool(&pool_id);
+        assert_eq!(result, Err(PoolError::PoolAlreadyExists));
+    }
+
+    #[test]
+    fn test_settle_already_settled() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, WavePool);
+        let client = WavePoolClient::new(&env, &contract_id);
+
+        let pool_id = BytesN::from_array(&env, &[8u8; 32]);
+        client.create_pool(&pool_id);
+        client.settle_pool(&pool_id);
+
+        let result = client.try_settle_pool(&pool_id);
+        assert_eq!(result, Err(PoolError::PoolSettled));
+    }
+}

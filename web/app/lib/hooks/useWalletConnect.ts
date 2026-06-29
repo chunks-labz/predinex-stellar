@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useWallet } from '../../components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useMemo } from 'react';
 
 export interface WalletContextType {

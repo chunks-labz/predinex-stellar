@@ -1,82 +1,43 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import {
-  Dispute,
-  DisputeVote,
-  DisputeStats,
-  DisputeConfig,
-  DEFAULT_DISPUTE_CONFIG,
-  calculateDisputeBond,
-  isDisputeEligible,
-  canVote,
-  resolveDispute,
-  calculateVotingPower,
-} from '../dispute-system';
 
+/**
+ * Legacy dispute helper.
+ *
+ * The current Predinex Soroban contract exposes a frozen/disputed lifecycle
+ * for pool state, but it does not support a full on-chain community dispute
+ * voting mechanism. This hook preserves compatibility for UI state while the
+ * contract-level dispute resolution contract is developed.
+ */
 export function useDisputes() {
-  const [config, setConfig] = useState<DisputeConfig>(DEFAULT_DISPUTE_CONFIG);
-  const [disputes, setDisputes] = useState<Dispute[]>([]);
-  const [votes, setVotes] = useState<DisputeVote[]>([]);
+  const [disputes, setDisputes] = useState<any[]>([]);
+  const [votes, setVotes] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const createDispute = useCallback(
-    (
-      poolId: number,
-      disputer: string,
-      reason: string,
-      poolValue: number,
-      evidence?: string
-    ) => {
-      try {
-        const existingDisputes = disputes.filter(d => d.poolId === poolId).length;
-
-        if (!isDisputeEligible(poolValue, existingDisputes, config)) {
-          throw new Error('Dispute not eligible for this pool');
-        }
-
-        const bond = calculateDisputeBond(poolValue, config);
-        const dispute: Dispute = {
-          id: `dispute-${Date.now()}`,
-          poolId,
-          disputer,
-          reason,
-          evidence,
-          bond,
-          status: 'active',
-          createdAt: Date.now(),
-          votingDeadline: Date.now() + config.votingWindowBlocks * 60000, // Simplified
-        };
-
-        setDisputes(prev => [...prev, dispute]);
-        return dispute;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to create dispute';
-        setError(message);
-        throw err;
-      }
-    },
-    [disputes, config]
-  );
-
+  /**
+   * Client-side vote stub.
+   *
+   * This function does not call an on-chain dispute voting contract because the
+   * current Predinex contract does not expose vote submission.
+   * Future on-chain integration should replace this with a contract call to the
+   * configured dispute contract principal and function.
+   */
   const addVote = useCallback(
-    (disputeId: string, voter: string, vote: boolean, voterBalance: number) => {
+    async (disputeId: string, voter: string, vote: boolean, voterBalance: number) => {
+      setIsLoading(true);
       try {
-        if (!canVote(voterBalance, config)) {
+        if (voterBalance <= 0) {
           throw new Error('Insufficient balance to vote');
         }
 
-        const dispute = disputes.find(d => d.id === disputeId);
-        if (!dispute) throw new Error('Dispute not found');
-
-        const votingPower = calculateVotingPower(voterBalance);
-        const voteRecord: DisputeVote = {
+        const voteRecord = {
           id: `vote-${Date.now()}`,
           disputeId,
           voter,
           vote,
-          votingPower,
+          votingPower: Math.max(1, Math.floor(voterBalance / 10000000)),
           votedAt: Date.now(),
         };
 
@@ -86,15 +47,15 @@ export function useDisputes() {
         const message = err instanceof Error ? err.message : 'Failed to add vote';
         setError(message);
         throw err;
+      } finally {
+        setIsLoading(false);
       }
     },
-    [disputes, config]
+    []
   );
 
   const getDisputeVotes = useCallback(
-    (disputeId: string) => {
-      return votes.filter(v => v.disputeId === disputeId);
-    },
+    (disputeId: string) => votes.filter(v => v.disputeId === disputeId),
     [votes]
   );
 
@@ -114,94 +75,26 @@ export function useDisputes() {
     [getDisputeVotes]
   );
 
-  const resolveDisputeVoting = useCallback(
-    (disputeId: string) => {
-      try {
-        const dispute = disputes.find(d => d.id === disputeId);
-        if (!dispute) throw new Error('Dispute not found');
-
-        const stats = getDisputeStats(disputeId);
-        const upheld = resolveDispute(stats.votesFor, stats.votesAgainst);
-
-        setDisputes(prev =>
-          prev.map(d =>
-            d.id === disputeId
-              ? {
-                  ...d,
-                  status: 'resolved',
-                  resolution: upheld,
-                  resolvedAt: Date.now(),
-                }
-              : d
-          )
-        );
-
-        return upheld;
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Failed to resolve dispute';
-        setError(message);
-        throw err;
-      }
-    },
-    [disputes, getDisputeStats]
-  );
-
-  const getPoolDisputes = useCallback(
-    (poolId: number) => {
-      return disputes.filter(d => d.poolId === poolId);
-    },
-    [disputes]
-  );
-
-  const getOverallStats = useCallback((): DisputeStats => {
-    const totalDisputes = disputes.length;
-    const activeDisputes = disputes.filter(d => d.status === 'active' || d.status === 'voting').length;
-    const resolvedDisputes = disputes.filter(d => d.status === 'resolved').length;
-    const upheldDisputes = disputes.filter(d => d.resolution === true).length;
-    const rejectedDisputes = disputes.filter(d => d.resolution === false).length;
-    const totalBondLocked = disputes
-      .filter(d => d.status !== 'resolved')
-      .reduce((sum, d) => sum + d.bond, 0);
-    const totalBondReleased = disputes
-      .filter(d => d.status === 'resolved')
-      .reduce((sum, d) => sum + d.bond, 0);
-
-    return {
-      totalDisputes,
-      activeDisputes,
-      resolvedDisputes,
-      upheldDisputes,
-      rejectedDisputes,
-      totalBondLocked,
-      totalBondReleased,
-    };
-  }, [disputes]);
-
-  const updateConfig = useCallback((newConfig: Partial<DisputeConfig>) => {
-    setConfig(prev => ({ ...prev, ...newConfig }));
-  }, []);
-
   const hasUserVoted = useCallback(
-    (disputeId: string, voter: string) => {
-      return votes.some(v => v.disputeId === disputeId && v.voter === voter);
-    },
+    (disputeId: string, voter: string) =>
+      votes.some(v => v.disputeId === disputeId && v.voter === voter),
     [votes]
   );
 
+  const getPoolDisputes = useCallback(
+    (poolId: number) => disputes.filter(d => d.poolId === poolId),
+    [disputes]
+  );
+
   return {
-    config,
     disputes,
     votes,
     isLoading,
     error,
-    createDispute,
     addVote,
     getDisputeVotes,
     getDisputeStats,
-    resolveDisputeVoting,
     getPoolDisputes,
-    getOverallStats,
-    updateConfig,
     hasUserVoted,
   };
 }

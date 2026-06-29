@@ -113,19 +113,36 @@ Predinex Stellar follows a phased approach to bring a premium betting experience
 
 ### Phase 2: Frontend Migration (IN PROGRESS)
 - 🔄 Stellar SDK integration.
-- 🔄 Freighter wallet support.
+- 🔄 Wallet and network support are tracked in the canonical [wallet and network support page](./web/docs/WALLET_NETWORK_SUPPORT.md).
 - ⏳ Real-time market tracking on Stellar.
 
 ## 🤝 Contributing & Releases
 
-We welcome contributions! Please see our development guides for more information:
+We welcome contributions! Please read the [Contributing Guide](./CONTRIBUTING.md) first — it covers local setup, running checks, documentation standards, and the issue/PR workflow.
+
+Additional development guides:
 - [Local End-to-End Runbook](./docs/local-runbook.md) — build the contract, deploy to testnet, and wire the web app from a clean checkout
+- [Contract API Reference](./docs/contract-api.md) — every public function, data types, auth requirements, fee model, and events
+- [Deployment Guide](./docs/deployment-guide.md) — build WASM, deploy to testnet/pubnet, initialize, and verify
 - [Frontend Development](./web/DEVELOPMENT.md)
 - [Release Process](./RELEASE.md)
 
 ## 🛠️ CI/CD Pipeline
 
 The project uses GitHub Actions to ensure code quality and prevent regressions. The workflow runs on every push and pull request to `main`.
+
+### Preview Deployments
+
+Pull requests automatically generate preview deployments for the web app, making it easy to review UI changes:
+
+- 🚀 **Automatic**: Every PR with web changes gets a live preview
+- 🔗 **Shareable**: Preview URLs are posted as PR comments
+- 🔒 **Safe**: Previews use testnet configuration only
+- ⚡ **Fast**: Deployments complete in ~2 minutes
+
+**Setup Guide**: See [Preview Deployment Quick Start](./docs/PREVIEW_SETUP_QUICKSTART.md) for 5-minute setup instructions.
+
+**Full Documentation**: [Preview Deployments Guide](./docs/preview-deployments.md)
 
 ### Local Verification
 

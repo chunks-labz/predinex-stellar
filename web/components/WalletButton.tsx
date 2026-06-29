@@ -1,15 +1,15 @@
 'use client';
 
-import { useWallet } from '../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { Wallet } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useToast } from '../providers/ToastProvider';
 import { formatDisplayAddress } from '../app/lib/address-display';
 import {
   classifyConnectivityIssue,
-  getConnectivityMessage,
   withTimeout,
 } from '../app/lib/network-errors';
+import { connectivityErrorToast, showToastPayload } from '../lib/toast-messages';
 
 interface WalletButtonProps {
   className?: string;

@@ -16,8 +16,8 @@ export default function StatusBadge({ status, className }: StatusBadgeProps) {
     return (
         <span
             className={`px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase border ${isActive
-                    ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                    : 'bg-muted text-muted-foreground border-border'
+                    ? 'bg-green-500/20 text-green-200 border-green-400/40'
+                    : 'bg-muted/80 text-foreground border-border'
                 } ${className || ''}`}
             aria-label={`Market status: ${status}`}
         >

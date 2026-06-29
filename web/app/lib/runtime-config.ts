@@ -1,6 +1,5 @@
 import { WALLETCONNECT_CONFIG } from './walletconnect-config';
 import { NETWORK_CONFIG as ANALYTICS_NETWORK_CONFIG } from './analytics/config';
-import { validateContractId } from './validators';
 
 export type SupportedNetwork = 'mainnet' | 'testnet';
 
@@ -31,21 +30,36 @@ export type SorobanConfig = {
   contractId: string;
 };
 
+export type WebhookSettings = {
+  /** Global webhook URL for all pools */
+  url: string;
+  /** Shared secret for HMAC signature verification */
+  secret: string;
+  /** Whether global webhook is enabled */
+  enabled: boolean;
+};
+
+export type PoolWebhookSettings = {
+  /** Per-pool webhook URL */
+  url: string;
+  /** Per-pool secret for HMAC signature */
+  secret: string;
+  /** Whether per-pool webhook is enabled */
+  enabled: boolean;
+};
+
 export type RuntimeConfig = {
   network: SupportedNetwork;
   contract: ContractConfig;
   api: StacksApiConfig;
   soroban: SorobanConfig;
+  /** Global webhook configuration */
+  webhook?: WebhookSettings;
+  /** Per-pool webhook configurations (poolId -> settings) */
+  poolWebhooks?: Record<number, PoolWebhookSettings>;
 };
 
-function getRequiredEnv(name: string): string {
-  const env =
-    typeof process !== 'undefined' && process.env ? process.env[name] : undefined;
-  if (!env) {
-    throw new Error(`Missing required config: ${name}. Set ${name} to 'mainnet' or 'testnet'.`);
-  }
-  return env;
-}
+const DEFAULT_NETWORK: SupportedNetwork = 'testnet';
 
 function parseNetwork(raw: string): SupportedNetwork {
   const v = raw.trim().toLowerCase();
@@ -53,17 +67,56 @@ function parseNetwork(raw: string): SupportedNetwork {
   throw new Error(`Invalid config NEXT_PUBLIC_NETWORK='${raw}'. Expected 'mainnet' or 'testnet'.`);
 }
 
-function parseContractId(contractId: string): { address: string; name: string; id: string } {
-  const id = contractId.trim();
-  const lastDot = id.lastIndexOf('.');
-  if (lastDot <= 0 || lastDot >= id.length - 1) {
+function parseContractId(contractAddress: string): { address: string; name: string; id: string } {
+  const trimmed = contractAddress.trim();
+  const separatorIndex = trimmed.indexOf('.');
+
+  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
     throw new Error(
-      `Invalid contract id '${contractId}'. Expected '<address>.<contractName>' format.`
+      `Invalid contract id '${trimmed}'. Expected '<address>.<name>' coordinates for Stacks reads/writes.`
     );
   }
-  const address = id.slice(0, lastDot);
-  const name = id.slice(lastDot + 1);
-  return { address, name, id };
+
+  const address = trimmed.slice(0, separatorIndex).trim();
+  const name = trimmed.slice(separatorIndex + 1).trim();
+  return { address, name, id: `${address}.${name}` };
+}
+
+function getOptionalEnv(name: string): string | undefined {
+  const env =
+    typeof process !== 'undefined' && process.env ? process.env[name]?.trim() : undefined;
+  return env ? env : undefined;
+}
+
+function resolveContractConfig(network: SupportedNetwork): ContractConfig {
+  const envAddress = getOptionalEnv('NEXT_PUBLIC_CONTRACT_ADDRESS');
+  const envName = getOptionalEnv('NEXT_PUBLIC_CONTRACT_NAME');
+
+  if (envAddress || envName) {
+    if (!envAddress || !envName) {
+      throw new Error(
+        'NEXT_PUBLIC_CONTRACT_ADDRESS and NEXT_PUBLIC_CONTRACT_NAME must both be set when overriding contract coordinates.'
+      );
+    }
+
+    return {
+      address: envAddress,
+      name: envName,
+      id: `${envAddress}.${envName}`,
+    };
+  }
+
+  type AnalyticsNetworkKey = keyof typeof ANALYTICS_NETWORK_CONFIG;
+  const analyticsKey: AnalyticsNetworkKey = network === 'mainnet' ? 'MAINNET' : 'TESTNET';
+  const contractIdFromAnalytics = ANALYTICS_NETWORK_CONFIG[analyticsKey]?.CONTRACT_ADDRESS;
+
+  if (!contractIdFromAnalytics || typeof contractIdFromAnalytics !== 'string') {
+    throw new Error(
+      `Missing contract id for network '${network}'. Expected it in analytics NETWORK_CONFIG[${analyticsKey}].CONTRACT_ADDRESS.`
+    );
+  }
+
+  return parseContractId(contractIdFromAnalytics);
 }
 
 let cachedConfig: RuntimeConfig | null = null;
@@ -71,14 +124,14 @@ let cachedConfig: RuntimeConfig | null = null;
 /**
  * Typed runtime config (contract, network selection, API endpoints).
  *
- * Fail-fast behavior:
- * - Throws if `NEXT_PUBLIC_NETWORK` is missing or invalid.
+ * Behavior:
+ * - Defaults to `testnet` when `NEXT_PUBLIC_NETWORK` is not set.
  * - Throws if derived contract/API configuration cannot be resolved.
  */
 export function getRuntimeConfig(): RuntimeConfig {
   if (cachedConfig) return cachedConfig;
 
-  const network = parseNetwork(getRequiredEnv('NEXT_PUBLIC_NETWORK'));
+  const network = parseNetwork(getOptionalEnv('NEXT_PUBLIC_NETWORK') ?? DEFAULT_NETWORK);
 
   const walletNet = WALLETCONNECT_CONFIG.networks[network];
   if (!walletNet?.coreApiUrl || !walletNet?.explorerUrl || !walletNet?.rpcUrl) {
@@ -90,24 +143,10 @@ export function getRuntimeConfig(): RuntimeConfig {
     throw new Error(`Missing Soroban RPC URLs for network '${network}' in wallet configuration.`);
   }
 
-  // Soroban contract ID — prefer explicit env var, fall back to analytics config
+  // Soroban contract ID — used by the Stellar event/read path.
   const sorobanContractId =
     (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
-
-  const analyticsKey = network === 'mainnet' ? 'MAINNET' : 'TESTNET';
-  const contractIdFromAnalytics = (ANALYTICS_NETWORK_CONFIG as any)?.[analyticsKey]?.CONTRACT_ADDRESS;
-  if (!contractIdFromAnalytics || typeof contractIdFromAnalytics !== 'string') {
-    throw new Error(
-      `Missing contract id for network '${network}'. Expected it in analytics NETWORK_CONFIG[${analyticsKey}].CONTRACT_ADDRESS.`
-    );
-  }
-
-  const contractValidation = validateContractId(contractIdFromAnalytics, network);
-  if (!contractValidation.valid) {
-    throw new Error(`Invalid contract configuration: ${contractValidation.error}`);
-  }
-
-  const contract = parseContractId(contractIdFromAnalytics);
+  const contract = resolveContractConfig(network);
 
   cachedConfig = {
     network,
@@ -122,9 +161,28 @@ export function getRuntimeConfig(): RuntimeConfig {
       explorerUrl: sorobanNet.explorerUrl,
       contractId: sorobanContractId,
     },
+    // Webhook configuration from environment
+    webhook: parseWebhookConfig(),
   };
 
   return cachedConfig;
+}
+
+function parseWebhookConfig(): WebhookSettings | undefined {
+  const url = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_URL;
+  const secret = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_SECRET;
+  const enabled = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_ENABLED === 'true';
+  
+  if (!url || !secret) {
+    // Return undefined if not configured (webhook disabled by default)
+    return undefined;
+  }
+  
+  return {
+    url,
+    secret,
+    enabled,
+  };
 }
 
 /**
