@@ -135,7 +135,7 @@ impl PredinexContract {
         let mut i = start;
         while i < end {
             let b = buf[i];
-            let lower = if b >= b'A' && b <= b'Z' { b + 32 } else { b };
+            let lower = if b.is_ascii_uppercase() { b + 32 } else { b };
             result.push_back(lower);
             i += 1;
         }
@@ -186,8 +186,10 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::PoolCounter, &(pool_id + 1));
 
-        env.events()
-            .publish((Symbol::new(&env, "create_pool"), pool_id), (creator, Symbol::new(&env, "Open")));
+        env.events().publish(
+            (Symbol::new(&env, "create_pool"), pool_id),
+            (creator, Symbol::new(&env, "Open")),
+        );
 
         pool_id
     }
@@ -542,10 +544,8 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::FreezeAdmin, &freeze_admin);
 
-        env.events().publish(
-            (Symbol::new(&env, "freeze_admin_set"),),
-            freeze_admin,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "freeze_admin_set"),), freeze_admin);
     }
 
     /// Freeze a pool, blocking new bets and claim payouts.
