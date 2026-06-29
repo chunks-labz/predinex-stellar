@@ -26,7 +26,7 @@
     "@stacks/connect": "^8.2.6",
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.3.0",
-    "@stellar/stellar-sdk": "15.1.0",
+    "@stellar/stellar-sdk": "16.0.1",
     "@tanstack/react-query": "^5.101.2",
     "clsx": "^2.1.1",
     "lit-element": "^4.2.2",
