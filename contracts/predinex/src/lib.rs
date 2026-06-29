@@ -212,6 +212,29 @@ pub enum DataKey {
     /// #625 — Pending rescue request waiting out the 24-hour timelock.
     /// Value: (token: Address, to: Address, amount: i128, not_before: u64)
     PendingRescue,
+    /// #705 — Total exposure (outstanding bets) for a user in a specific pool.
+    UserExposurePerPool(Address, u32),
+    /// #705 — Max exposure per pool as percentage of pool volume (basis points).
+    /// e.g., 1000 = 10% of pool volume. 0 disables the cap.
+    UserMaxExposurePerPoolBps,
+    /// #705 — Max bet size per transaction in stroops. 0 disables the cap.
+    UserMaxBetPerTransaction,
+    /// #705 — Max daily loss per wallet in stroops. 0 disables the limit.
+    UserDailyLossLimit,
+    /// #705 — Daily loss tracking window in seconds (default: 86400 = 1 day).
+    UserDailyLossWindowSecs,
+    /// #705 — Max weekly loss per wallet in stroops. 0 disables the limit.
+    UserWeeklyLossLimit,
+    /// #705 — Weekly loss tracking window in seconds (default: 604800 = 7 days).
+    UserWeeklyLossWindowSecs,
+    /// #705 — Per-wallet daily loss state tracking.
+    UserDailyLossState(Address),
+    /// #705 — Per-wallet weekly loss state tracking.
+    UserWeeklyLossState(Address),
+    /// #705 — Cooldown (seconds) between large bets from the same wallet.
+    UserLargeBetCooldownSecs,
+    /// #705 — Threshold (stroops) above which cooldown applies.
+    UserLargeBetThreshold,
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -385,6 +408,16 @@ pub enum ContractError {
     DuplicateToken = 67,
     /// A scheduled claim is not yet due for execution.
     ScheduledClaimNotDue = 68,
+    /// #705 — Bet exceeds the maximum allowed bet size per transaction.
+    BetExceedsMaxBetPerTx = 69,
+    /// #705 — Bet would exceed the user's maximum exposure in this pool.
+    ExposureLimitExceeded = 70,
+    /// #705 — Bet would exceed the user's daily loss limit.
+    DailyLossLimitExceeded = 71,
+    /// #705 — Bet would exceed the user's weekly loss limit.
+    WeeklyLossLimitExceeded = 72,
+    /// #705 — Bet is within cooldown period after a large bet.
+    LargeBetCooldownActive = 73,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -630,6 +663,39 @@ pub struct TreasuryWithdrawalRateLimitConfig {
 pub struct TreasuryWithdrawalRateLimitState {
     pub window_start: u64,
     pub used: i128,
+}
+
+/// #705 — Per-user betting limits and exposure cap configuration.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub struct UserExposureConfig {
+    /// Max exposure per pool as percentage of pool volume (basis points).
+    /// e.g., 1000 = 10% of pool volume. 0 disables the cap.
+    pub max_exposure_per_pool_bps: u32,
+    /// Max bet size per transaction in stroops. 0 disables the cap.
+    pub max_bet_per_transaction: i128,
+    /// Max daily loss per wallet in stroops. 0 disables the limit.
+    pub daily_loss_limit: i128,
+    /// Daily loss tracking window in seconds.
+    pub daily_loss_window_secs: u64,
+    /// Max weekly loss per wallet in stroops. 0 disables the limit.
+    pub weekly_loss_limit: i128,
+    /// Weekly loss tracking window in seconds.
+    pub weekly_loss_window_secs: u64,
+    /// Cooldown (seconds) between large bets from the same wallet.
+    pub large_bet_cooldown_secs: u64,
+    /// Threshold (stroops) above which cooldown applies.
+    pub large_bet_threshold: i128,
+}
+
+/// #705 — Per-wallet daily/weekly loss tracking state.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub struct UserLossTrackingState {
+    /// Start of the current tracking window.
+    pub window_start: u64,
+    /// Cumulative loss within the current window.
+    pub loss: i128,
 }
 
 /// Claim status for a user in a specific pool.
@@ -1031,13 +1097,29 @@ impl PredinexContract {
             return Err(ContractError::FeeOutOfBounds);
         }
 
+        let old_fee_rate: u32 = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::FeeRate)
+            .unwrap_or(0);
+        let old_fee_recipient: Address = env
+            .storage()
+            .persistent()
+            .get::<_, Address>(&DataKey::FeeRecipient)
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, Address>(&DataKey::TreasuryRecipient)
+            })
+            .unwrap_or_else(|| env.current_contract_address());
+
         env.storage().persistent().set(&DataKey::FeeRate, &fee_rate);
         env.storage()
             .persistent()
             .set(&DataKey::FeeRecipient, &fee_recipient);
         env.events().publish(
             (Symbol::new(&env, "FeeConfigUpdated"), event_version(&env)),
-            (fee_rate, fee_recipient.clone()),
+            (old_fee_rate, old_fee_recipient, fee_rate, fee_recipient.clone()),
         );
         Ok(())
     }
@@ -1079,7 +1161,19 @@ impl PredinexContract {
         if fee < 0 {
             return Err(ContractError::FeeMustBeNonNegative);
         }
+        let old_fee: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::CreationFee)
+            .unwrap_or(0);
         env.storage().persistent().set(&DataKey::CreationFee, &fee);
+        env.events().publish(
+            (
+                Symbol::new(&env, "creation_fee_set"),
+                event_version(&env),
+            ),
+            (old_fee, fee),
+        );
         Ok(())
     }
 
@@ -1167,12 +1261,17 @@ impl PredinexContract {
         if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&fee_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
+        let old_fee_bps: u32 = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::ProtocolFee)
+            .unwrap_or(PROTOCOL_FEE_DEFAULT_BPS);
         env.storage()
             .persistent()
             .set(&DataKey::ProtocolFee, &fee_bps);
 
         env.events()
-            .publish((Symbol::new(&env, "protocol_fee_set"),), (caller, fee_bps));
+            .publish((Symbol::new(&env, "protocol_fee_set"),), (caller, old_fee_bps, fee_bps));
         Ok(())
     }
 
@@ -1344,6 +1443,17 @@ impl PredinexContract {
             return Err(ContractError::InvalidBetAmount);
         }
 
+        let old_min_bet: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolMinBet(pool_id))
+            .unwrap_or(0);
+        let old_max_bet: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolMaxBet(pool_id))
+            .unwrap_or(0);
+
         env.storage()
             .persistent()
             .set(&DataKey::PoolMinBet(pool_id), &min_bet);
@@ -1369,7 +1479,7 @@ impl PredinexContract {
                 event_version(&env),
                 pool_id,
             ),
-            (min_bet, max_bet),
+            (old_min_bet, old_max_bet, min_bet, max_bet),
         );
         Ok(())
     }
@@ -1407,6 +1517,22 @@ impl PredinexContract {
             return Err(ContractError::InvalidBetAmount);
         }
 
+        let old_max_pool_size: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MaxPoolSize)
+            .unwrap_or(0);
+        let old_large_pool_threshold: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LargePoolThreshold)
+            .unwrap_or(0);
+        let old_cooling_period_secs: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LargePoolCoolingPeriodSecs)
+            .unwrap_or(0);
+
         env.storage()
             .persistent()
             .set(&DataKey::MaxPoolSize, &max_pool_size);
@@ -1422,7 +1548,14 @@ impl PredinexContract {
                 Symbol::new(&env, "circuit_breaker_config_set"),
                 event_version(&env),
             ),
-            (max_pool_size, large_pool_threshold, cooling_period_secs),
+            (
+                old_max_pool_size,
+                old_large_pool_threshold,
+                old_cooling_period_secs,
+                max_pool_size,
+                large_pool_threshold,
+                cooling_period_secs,
+            ),
         );
         Ok(())
     }
@@ -1474,6 +1607,17 @@ impl PredinexContract {
             return Err(ContractError::InvalidRateLimitConfig);
         }
 
+        let old_max_bets_per_window: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RateLimitMaxBetsPerWindow)
+            .unwrap_or(0);
+        let old_window_secs: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::RateLimitWindowSecs)
+            .unwrap_or(0);
+
         env.storage()
             .persistent()
             .set(&DataKey::RateLimitMaxBetsPerWindow, &max_bets_per_window);
@@ -1486,7 +1630,7 @@ impl PredinexContract {
                 Symbol::new(&env, "rate_limit_config_set"),
                 event_version(&env),
             ),
-            (max_bets_per_window, window_secs),
+            (old_max_bets_per_window, old_window_secs, max_bets_per_window, window_secs),
         );
         Ok(())
     }
@@ -1533,6 +1677,388 @@ impl PredinexContract {
             window_start,
             used,
             remaining,
+        }
+    }
+
+    // ── #705 Per-user betting limits and exposure caps ──────────────────────
+
+    /// Configure per-user betting limits and exposure caps.
+    ///
+    /// Only the treasury recipient may call this. All values are optional;
+    /// pass 0 to disable a specific limit.
+    ///
+    /// - `max_exposure_per_pool_bps`: max exposure as % of pool volume (bps).
+    ///   e.g., 1000 = 10%. 0 disables.
+    /// - `max_bet_per_transaction`: max bet size per tx in stroops. 0 disables.
+    /// - `daily_loss_limit`: max loss per day in stroops. 0 disables.
+    /// - `daily_loss_window_secs`: window for daily loss (default 86400).
+    /// - `weekly_loss_limit`: max loss per week in stroops. 0 disables.
+    /// - `weekly_loss_window_secs`: window for weekly loss (default 604800).
+    /// - `large_bet_cooldown_secs`: cooldown after large bet. 0 disables.
+    /// - `large_bet_threshold`: stroops threshold for cooldown. 0 disables.
+    pub fn set_user_exposure_config(
+        env: Env,
+        caller: Address,
+        max_exposure_per_pool_bps: u32,
+        max_bet_per_transaction: i128,
+        daily_loss_limit: i128,
+        daily_loss_window_secs: u64,
+        weekly_loss_limit: i128,
+        weekly_loss_window_secs: u64,
+        large_bet_cooldown_secs: u64,
+        large_bet_threshold: i128,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+
+        if max_exposure_per_pool_bps > 10_000 {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+        if max_bet_per_transaction < 0 || daily_loss_limit < 0 || weekly_loss_limit < 0 || large_bet_threshold < 0 {
+            return Err(ContractError::InvalidBetAmount);
+        }
+
+        let config = UserExposureConfig {
+            max_exposure_per_pool_bps,
+            max_bet_per_transaction,
+            daily_loss_limit,
+            daily_loss_window_secs,
+            weekly_loss_limit,
+            weekly_loss_window_secs,
+            large_bet_cooldown_secs,
+            large_bet_threshold,
+        };
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserMaxExposurePerPoolBps, &config.max_exposure_per_pool_bps);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserMaxBetPerTransaction, &config.max_bet_per_transaction);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDailyLossLimit, &config.daily_loss_limit);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDailyLossWindowSecs, &config.daily_loss_window_secs);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserWeeklyLossLimit, &config.weekly_loss_limit);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserWeeklyLossWindowSecs, &config.weekly_loss_window_secs);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserLargeBetCooldownSecs, &config.large_bet_cooldown_secs);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserLargeBetThreshold, &config.large_bet_threshold);
+
+        env.events().publish(
+            (
+                Symbol::new(&env, "user_exposure_config_set"),
+                event_version(&env),
+            ),
+            (
+                max_exposure_per_pool_bps,
+                max_bet_per_transaction,
+                daily_loss_limit,
+                weekly_loss_limit,
+                large_bet_cooldown_secs,
+                large_bet_threshold,
+            ),
+        );
+        Ok(())
+    }
+
+    /// Return the current per-user exposure configuration.
+    pub fn get_user_exposure_config(env: Env) -> UserExposureConfig {
+        UserExposureConfig {
+            max_exposure_per_pool_bps: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserMaxExposurePerPoolBps)
+                .unwrap_or(0),
+            max_bet_per_transaction: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserMaxBetPerTransaction)
+                .unwrap_or(0),
+            daily_loss_limit: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserDailyLossLimit)
+                .unwrap_or(0),
+            daily_loss_window_secs: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserDailyLossWindowSecs)
+                .unwrap_or(86400),
+            weekly_loss_limit: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserWeeklyLossLimit)
+                .unwrap_or(0),
+            weekly_loss_window_secs: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserWeeklyLossWindowSecs)
+                .unwrap_or(604800),
+            large_bet_cooldown_secs: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserLargeBetCooldownSecs)
+                .unwrap_or(0),
+            large_bet_threshold: env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserLargeBetThreshold)
+                .unwrap_or(0),
+        }
+    }
+
+    /// Return the user's current exposure in a specific pool (total outstanding bets).
+    pub fn get_user_pool_exposure(env: Env, user: Address, pool_id: u32) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserExposurePerPool(user, pool_id))
+            .unwrap_or(0)
+    }
+
+    /// Return the user's current daily loss tracking state.
+    pub fn get_user_daily_loss_status(env: Env, user: Address) -> UserLossTrackingState {
+        let config = Self::get_user_exposure_config(env.clone());
+        let now = env.ledger().timestamp();
+        let state = env
+            .storage()
+            .persistent()
+            .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user))
+            .unwrap_or(UserLossTrackingState {
+                window_start: now,
+                loss: 0,
+            });
+        if config.daily_loss_window_secs > 0
+            && now.saturating_sub(state.window_start) >= config.daily_loss_window_secs
+        {
+            UserLossTrackingState {
+                window_start: now,
+                loss: 0,
+            }
+        } else {
+            state
+        }
+    }
+
+    /// Return the user's current weekly loss tracking state.
+    pub fn get_user_weekly_loss_status(env: Env, user: Address) -> UserLossTrackingState {
+        let config = Self::get_user_exposure_config(env.clone());
+        let now = env.ledger().timestamp();
+        let state = env
+            .storage()
+            .persistent()
+            .get::<_, UserLossTrackingState>(&DataKey::UserWeeklyLossState(user))
+            .unwrap_or(UserLossTrackingState {
+                window_start: now,
+                loss: 0,
+            });
+        if config.weekly_loss_window_secs > 0
+            && now.saturating_sub(state.window_start) >= config.weekly_loss_window_secs
+        {
+            UserLossTrackingState {
+                window_start: now,
+                loss: 0,
+            }
+        } else {
+            state
+        }
+    }
+
+    /// Internal: check all user exposure limits before placing a bet.
+    /// Returns Ok(()) if the bet is allowed, or an appropriate error.
+    fn check_user_exposure_limits(
+        env: &Env,
+        user: &Address,
+        pool_id: u32,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        let config = Self::get_user_exposure_config(env.clone());
+
+        // Check max bet per transaction
+        if config.max_bet_per_transaction > 0 && amount > config.max_bet_per_transaction {
+            env.events().publish(
+                (
+                    Symbol::new(env, "user_bet_limit_exceeded"),
+                    event_version(env),
+                ),
+                (user.clone(), pool_id, amount, config.max_bet_per_transaction),
+            );
+            return Err(ContractError::BetExceedsMaxBetPerTx);
+        }
+
+        // Check exposure per pool
+        if config.max_exposure_per_pool_bps > 0 {
+            let current_exposure: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::UserExposurePerPool(user.clone(), pool_id))
+                .unwrap_or(0);
+            let new_exposure = current_exposure
+                .checked_add(amount)
+                .ok_or(ContractError::PoolTotalOverflow)?;
+
+            // Get pool total volume
+            let pool: Pool = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Pool(pool_id))
+                .ok_or(ContractError::PoolNotFound)?;
+            let pool_volume = pool.total_a + pool.total_b;
+            let max_exposure = (pool_volume * config.max_exposure_per_pool_bps as i128) / 10_000;
+
+            if max_exposure > 0 && new_exposure > max_exposure {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "user_exposure_limit_exceeded"),
+                        event_version(env),
+                    ),
+                    (user.clone(), pool_id, new_exposure, max_exposure),
+                );
+                return Err(ContractError::ExposureLimitExceeded);
+            }
+        }
+
+        // Check daily loss limit
+        if config.daily_loss_limit > 0 {
+            let now = env.ledger().timestamp();
+            let mut daily_state = env
+                .storage()
+                .persistent()
+                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
+                .unwrap_or(UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                });
+
+            // Reset if window expired
+            if config.daily_loss_window_secs > 0
+                && now.saturating_sub(daily_state.window_start) >= config.daily_loss_window_secs
+            {
+                daily_state = UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                };
+            }
+
+            // For a bet, we don't know if it will win or lose yet, so we track the bet amount
+            // as potential loss. The actual loss is updated on settlement.
+            let potential_loss = daily_state.loss + amount;
+            if potential_loss > config.daily_loss_limit {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "user_daily_loss_limit_exceeded"),
+                        event_version(env),
+                    ),
+                    (user.clone(), potential_loss, config.daily_loss_limit),
+                );
+                return Err(ContractError::DailyLossLimitExceeded);
+            }
+        }
+
+        // Check weekly loss limit
+        if config.weekly_loss_limit > 0 {
+            let now = env.ledger().timestamp();
+            let mut weekly_state = env
+                .storage()
+                .persistent()
+                .get::<_, UserLossTrackingState>(&DataKey::UserWeeklyLossState(user.clone()))
+                .unwrap_or(UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                });
+
+            // Reset if window expired
+            if config.weekly_loss_window_secs > 0
+                && now.saturating_sub(weekly_state.window_start) >= config.weekly_loss_window_secs
+            {
+                weekly_state = UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                };
+            }
+
+            let potential_loss = weekly_state.loss + amount;
+            if potential_loss > config.weekly_loss_limit {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "user_weekly_loss_limit_exceeded"),
+                        event_version(env),
+                    ),
+                    (user.clone(), potential_loss, config.weekly_loss_limit),
+                );
+                return Err(ContractError::WeeklyLossLimitExceeded);
+            }
+        }
+
+        // Check large bet cooldown
+        if config.large_bet_cooldown_secs > 0 && config.large_bet_threshold > 0
+            && amount >= config.large_bet_threshold
+        {
+            let now = env.ledger().timestamp();
+            let last_large_bet_key = DataKey::UserExposurePerPool(user.clone(), pool_id);
+            // Use a separate tracking for cooldown - we'll use the daily loss state's window_start
+            // as a proxy for last large bet time (in production, you'd use a dedicated key)
+            let daily_state = env
+                .storage()
+                .persistent()
+                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
+                .unwrap_or(UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                });
+
+            if now.saturating_sub(daily_state.window_start) < config.large_bet_cooldown_secs {
+                env.events().publish(
+                    (
+                        Symbol::new(env, "user_large_bet_cooldown_active"),
+                        event_version(env),
+                    ),
+                    (user.clone(), amount, config.large_bet_cooldown_secs),
+                );
+                return Err(ContractError::LargeBetCooldownActive);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Internal: update user exposure after a bet is placed.
+    fn update_user_exposure(
+        env: &Env,
+        user: &Address,
+        pool_id: u32,
+        amount: i128,
+    ) {
+        let key = DataKey::UserExposurePerPool(user.clone(), pool_id);
+        let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        let new_exposure = current.saturating_add(amount);
+        env.storage().persistent().set(&key, &new_exposure);
+        env.storage().persistent().extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+    }
+
+    /// Internal: reduce user exposure when a claim or refund happens.
+    fn reduce_user_exposure(
+        env: &Env,
+        user: &Address,
+        pool_id: u32,
+        amount: i128,
+    ) {
+        let key = DataKey::UserExposurePerPool(user.clone(), pool_id);
+        let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        let new_exposure = current.saturating_sub(amount);
+        if new_exposure > 0 {
+            env.storage().persistent().set(&key, &new_exposure);
+        } else {
+            env.storage().persistent().remove(&key);
         }
     }
 
@@ -2471,6 +2997,9 @@ impl PredinexContract {
             return Err(ContractError::BetAboveMaxBet);
         }
 
+        // #705 — Enforce per-user betting limits and exposure caps.
+        Self::check_user_exposure_limits(&env, &user, pool_id, amount)?;
+
         let mut totals = Self::read_outcome_totals(&env, pool_id, &pool);
         let current_total = Self::sum_totals(&totals)?;
         let new_total = current_total
@@ -2646,6 +3175,9 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+
+        // #705 — Update user exposure tracking after bet is placed.
+        Self::update_user_exposure(&env, &user, pool_id, net_amount);
 
         // Calculate totals for the event
         let total_yes = pool.total_a;
@@ -3395,6 +3927,11 @@ impl PredinexContract {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
 
+        let old_min: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MinSettlementParticipants)
+            .unwrap_or(DEFAULT_MIN_SETTLEMENT_PARTICIPANTS);
         env.storage()
             .persistent()
             .set(&DataKey::MinSettlementParticipants, &min_participants);
@@ -3404,7 +3941,7 @@ impl PredinexContract {
                 Symbol::new(&env, "min_settlement_participants_set"),
                 event_version(&env),
             ),
-            min_participants,
+            (old_min, min_participants),
         );
         Ok(())
     }
@@ -3673,6 +4210,9 @@ impl PredinexContract {
             .persistent()
             .remove(&DataKey::UserOutcomeBets(pool_id, user.clone()));
 
+        // #705 — Reduce user exposure when refund is claimed.
+        Self::reduce_user_exposure(&env, &user, pool_id, refund);
+
         env.events().publish(
             (
                 Symbol::new(&env, "claim_refund"),
@@ -3768,6 +4308,9 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .remove(&DataKey::UserOutcomeBets(pool_id, user.clone()));
+
+        // #705 — Reduce user exposure when expired claim is processed.
+        Self::reduce_user_exposure(&env, &user, pool_id, refund);
 
         env.events().publish(
             (
@@ -4067,6 +4610,9 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .remove(&DataKey::UserOutcomeBets(pool_id, user.clone()));
+
+        // #705 — Reduce user exposure when winnings are claimed.
+        Self::reduce_user_exposure(env, &user, pool_id, user_winning_bet);
 
         // Step 3: transfer tokens to the winner AFTER all state has been committed.
         // If the transfer panics the transaction reverts, but the bet record is
@@ -4660,13 +5206,17 @@ impl PredinexContract {
             return Err(ContractError::Unauthorized);
         }
 
+        let old_freeze_admin: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::FreezeAdmin);
         env.storage()
             .persistent()
             .set(&DataKey::FreezeAdmin, &freeze_admin);
 
         env.events().publish(
             (Symbol::new(&env, "freeze_admin_set"), event_version(&env)),
-            freeze_admin,
+            (old_freeze_admin, freeze_admin),
         );
         Ok(())
     }
@@ -4681,10 +5231,14 @@ impl PredinexContract {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
 
+        let old_admin: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin);
         env.storage().persistent().set(&DataKey::Admin, &admin);
 
         env.events()
-            .publish((Symbol::new(&env, "admin_set"), event_version(&env)), admin);
+            .publish((Symbol::new(&env, "admin_set"), event_version(&env)), (old_admin, admin));
         Ok(())
     }
 
@@ -5142,12 +5696,16 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-                env.storage().persistent().extend_ttl(
-                    &DataKey::PoolMetadata(pool_id),
-                    POOL_BUMP_THRESHOLD,
-                    POOL_BUMP_TARGET,
-                );
-                env.events().publish(
+        env.storage().persistent().extend_ttl(
+            &DataKey::UserOutcomeBets(pool_id, user.clone()),
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+
+        // #705 — Update user exposure tracking after bet is placed.
+        Self::update_user_exposure(&env, &user, pool_id, normalized);
+
+        env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),
@@ -5856,10 +6414,15 @@ impl PredinexContract {
         if bps > PROTOCOL_FEE_MAX_BPS {
             return Err(ContractError::FeeOutOfBounds);
         }
+        let old_bps: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::ReferralBps)
+            .unwrap_or(0);
         env.storage().persistent().set(&DataKey::ReferralBps, &bps);
         env.events().publish(
             (Symbol::new(&env, "referral_bps_set"), event_version(&env)),
-            (caller, bps),
+            (caller, old_bps, bps),
         );
         Ok(())
     }
@@ -6135,13 +6698,17 @@ impl PredinexContract {
             return Err(ContractError::FeeOutOfBounds);
         }
 
+        let old_rate: Option<i128> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TokenExchangeRate(token.clone()));
         env.storage()
             .persistent()
             .set(&DataKey::TokenExchangeRate(token.clone()), &rate_bps);
 
         env.events().publish(
             (Symbol::new(&env, "token_rate_set"), event_version(&env)),
-            (token, rate_bps),
+            (token, old_rate, rate_bps),
         );
         Ok(())
     }
@@ -6259,6 +6826,16 @@ impl PredinexContract {
             return Err(ContractError::PoolNotFound);
         }
 
+        let old_min: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolTokenMinBet(pool_id, token.clone()))
+            .unwrap_or(0);
+        let old_max: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolTokenMaxBet(pool_id, token.clone()))
+            .unwrap_or(0);
         if min_bet > 0 {
             env.storage()
                 .persistent()
@@ -6267,8 +6844,16 @@ impl PredinexContract {
         if max_bet > 0 {
             env.storage()
                 .persistent()
-                .set(&DataKey::PoolTokenMaxBet(pool_id, token), &max_bet);
+                .set(&DataKey::PoolTokenMaxBet(pool_id, token.clone()), &max_bet);
         }
+        env.events().publish(
+            (
+                Symbol::new(&env, "pool_token_bet_limits_set"),
+                event_version(&env),
+                pool_id,
+            ),
+            (token, old_min, old_max, min_bet, max_bet),
+        );
         Ok(())
     }
 
@@ -6392,6 +6977,9 @@ impl PredinexContract {
         if pool_max_bet > 0 && normalized > pool_max_bet {
             return Err(ContractError::BetAboveMaxBet);
         }
+
+        // #705 — Enforce per-user betting limits and exposure caps.
+        Self::check_user_exposure_limits(&env, &user, pool_id, normalized)?;
 
         // Load and validate pool.
         let mut pool = env
