@@ -1,7 +1,7 @@
 'use client';
 
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
-import { useAppKitAccount } from '@reown/appkit/react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 import { createScopedLogger } from '@/app/lib/logger';
@@ -9,18 +9,14 @@ import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('NetworkMismatchWarning');
 
 /**
- * A warning banner that appears when the connected wallet is on the wrong network.
- * Provides a button to switch to the supported network.
+ * Warning banner shown when the connected Freighter wallet is on the wrong network.
  */
 export function NetworkMismatchWarning() {
-  const { isConnected } = useAppKitAccount();
+  const { isConnected } = useWallet();
   const { isMismatch, expectedNetworkName, currentNetworkName, switchNetwork } = useNetworkMismatch();
   const [isSwitching, setIsSwitching] = useState(false);
 
-  // Only show if connected and there's a mismatch
-  if (!isConnected || !isMismatch) {
-    return null;
-  }
+  if (!isConnected || !isMismatch) return null;
 
   const handleSwitch = async () => {
     setIsSwitching(true);
@@ -39,8 +35,9 @@ export function NetworkMismatchWarning() {
         <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-500">
           <AlertTriangle className="w-5 h-5 shrink-0" />
           <p className="text-sm font-medium">
-            Network Mismatch: Your wallet is on <span className="font-bold">{currentNetworkName}</span>, 
-            but this app requires <span className="font-bold">{expectedNetworkName}</span>.
+            Network Mismatch: Your wallet is on{' '}
+            <span className="font-bold">{currentNetworkName}</span>, but this app requires{' '}
+            <span className="font-bold">{expectedNetworkName}</span>.
           </p>
         </div>
         <button
@@ -48,11 +45,7 @@ export function NetworkMismatchWarning() {
           disabled={isSwitching}
           className="flex items-center gap-2 bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-1.5 rounded-full text-xs font-bold transition-all disabled:opacity-50 shadow-sm whitespace-nowrap"
         >
-          {isSwitching ? (
-            <RefreshCw className="w-3 h-3 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3 h-3" />
-          )}
+          <RefreshCw className={`w-3 h-3 ${isSwitching ? 'animate-spin' : ''}`} />
           Switch to {expectedNetworkName}
         </button>
       </div>

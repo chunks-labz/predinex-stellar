@@ -118,7 +118,16 @@ export default function Navbar() {
                                     <Wallet className={ICON_CLASS.sm + " text-primary"} />
                                 </button>
                             </div>
-                        ) : null}
+                        ) : (
+                            <button
+                                onClick={connect}
+                                className="hidden md:flex items-center gap-2 bg-primary/10 hover:bg-primary/20 text-primary px-4 py-2 rounded-full border border-primary/20 transition-colors font-medium text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                                aria-label="Connect Wallet"
+                            >
+                                <Wallet className={ICON_CLASS.sm} />
+                                Connect Wallet
+                            </button>
+                        )}
 
                         {/* Mobile Menu Toggle - Show only when not connected */}
                         {!isConnected && (
@@ -276,6 +285,15 @@ export default function Navbar() {
                                         {t('nav.signOut')}
                                     </button>
                                 </>
+                            )}
+                            {!isConnected && (
+                                <button
+                                    onClick={() => { connect(); closeMenu(); }}
+                                    className="w-full flex items-center gap-2 px-3 py-2 text-base font-medium text-primary hover:bg-primary/10 rounded-lg transition-colors"
+                                >
+                                    <Wallet className="w-5 h-5" />
+                                    Connect Wallet
+                                </button>
                             )}
                             <Link
                                 href="/analytics"
