@@ -5236,7 +5236,7 @@ impl PredinexContract {
                 event_version(&env),
                 template_id,
             ),
-            caller,
+            template.title,
         );
         Ok(template_id)
     }
@@ -5298,7 +5298,7 @@ impl PredinexContract {
                 event_version(&env),
                 template_id,
             ),
-            caller,
+            saved.title,
         );
         Ok(())
     }
@@ -5326,7 +5326,7 @@ impl PredinexContract {
                 event_version(&env),
                 template_id,
             ),
-            caller,
+            (),
         );
         Ok(())
     }
