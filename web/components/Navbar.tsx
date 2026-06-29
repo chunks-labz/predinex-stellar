@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LogOut, Menu, X, Wallet, Moon, Sun, Radio, Home, Zap, Settings } from "lucide-react";
+import { LogOut, Menu, X, Wallet, Moon, Sun, Radio, Home, Zap, Settings, Bell } from "lucide-react";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useTheme } from '@/lib/theme';
 import { useI18n } from '@/app/lib/i18n';
@@ -11,6 +11,8 @@ import { ICON_CLASS } from "@/app/lib/constants";
 import { WalletAddressCopyButton } from '@/components/WalletAddressCopyButton';
 import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
+import { useNotifications } from '@/app/lib/hooks/useNotifications';
+import NotificationDropdown from '@/components/NotificationDropdown';
 
 export default function Navbar() {
     const pathname = usePathname();
@@ -20,6 +22,8 @@ export default function Navbar() {
     const { t } = useI18n();
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isMounted, setIsMounted] = useState(false);
+    const [isNotifOpen, setIsNotifOpen] = useState(false);
+    const { unreadCount } = useNotifications(address);
 
     useEffect(() => {
         setIsMounted(true);
@@ -28,6 +32,7 @@ export default function Navbar() {
     const isActive = (href: string) => pathname === href;
 
     const closeMenu = () => setIsMenuOpen(false);
+    const closeNotif = useCallback(() => setIsNotifOpen(false), []);
 
     return (
         <div className="fixed top-0 w-full z-50 flex flex-col">
@@ -84,6 +89,26 @@ export default function Navbar() {
 
                         {/* User Info & Connect Button - Desktop */}
                         <div className="hidden md:flex items-center gap-4">
+                        {/* Notification bell */}
+                        <div className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsNotifOpen((o) => !o)}
+                                className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-full border border-primary/20 transition-all hover:scale-110 active:scale-95 relative"
+                                aria-label={`Notifications${unreadCount > 0 ? `, ${unreadCount} unread` : ''}`}
+                            >
+                                <Bell className={ICON_CLASS.sm} />
+                                {unreadCount > 0 && (
+                                    <span
+                                        aria-hidden="true"
+                                        className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-primary text-[10px] font-bold text-primary-foreground flex items-center justify-center"
+                                    >
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </span>
+                                )}
+                            </button>
+                            <NotificationDropdown open={isNotifOpen} onClose={closeNotif} />
+                        </div>
                         <button
                             onClick={toggleTheme}
                             className="p-2 bg-primary/10 hover:bg-primary/20 text-primary rounded-full border border-primary/20 transition-all hover:scale-110 active:scale-95"

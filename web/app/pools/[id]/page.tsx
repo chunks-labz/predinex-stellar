@@ -12,8 +12,9 @@ import CountdownTimer from '@/components/CountdownTimer';
 import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
 import { blocksToSeconds } from "../../lib/countdown-utils";
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
-import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet } from "lucide-react";
+import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, BellOff, Bell } from "lucide-react";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
+import { usePoolSubscription } from "../../lib/hooks/usePoolSubscription";
 
 function LoadingSkeleton() {
     return (
@@ -48,6 +49,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
+    const { isSubscribed, toggle: toggleSubscription } = usePoolSubscription();
 
     const fetchPool = useCallback(async () => {
         try {
@@ -191,11 +193,31 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <h1 className="text-3xl font-bold">{pool.title}</h1>
                             <p className="text-muted-foreground mt-1">{pool.description}</p>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                            pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'
-                        }`}>
-                            {pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active'}
-                        </span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <button
+                                type="button"
+                                onClick={() => toggleSubscription(poolId)}
+                                aria-pressed={isSubscribed(poolId)}
+                                aria-label={isSubscribed(poolId) ? 'Unsubscribe from this pool' : 'Subscribe to this pool'}
+                                title={isSubscribed(poolId) ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
+                                    isSubscribed(poolId)
+                                        ? 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'
+                                        : 'bg-muted/40 border-border text-muted-foreground hover:text-primary hover:border-primary/30'
+                                }`}
+                            >
+                                {isSubscribed(poolId) ? (
+                                    <><BellOff className="h-4 w-4" /> Subscribed</>
+                                ) : (
+                                    <><Bell className="h-4 w-4" /> Subscribe</>
+                                )}
+                            </button>
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                                pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'
+                            }`}>
+                                {pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active'}
+                            </span>
+                        </div>
                     </div>
 
                     {/* Stats */}
