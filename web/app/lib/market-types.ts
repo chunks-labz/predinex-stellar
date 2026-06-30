@@ -38,6 +38,12 @@ export interface ProcessedMarket {
   disputed?: boolean;
   /** #721 — Optional cover image URL stored in extended pool metadata. */
   coverImage?: string;
+  /** #745 — Pool category (crypto, sports, weather, etc). */
+  category?: string;
+  /** #745 — Comma-separated tags for pool discovery. */
+  tags?: string;
+  /** #748 — Mirrored on chains (e.g. "Polygon, BSC"). */
+  mirroredChains?: string[];
 }
 
 export interface MarketFilters {

@@ -18,7 +18,10 @@ import type { ProcessedMarket } from '@/app/lib/market-types';
 import { readMarketListCache, warmMarketListCache } from '@/app/lib/market-list-cache';
 import {
   POOL_STATUS_OPTIONS,
+  POOL_CATEGORIES,
   countPoolsByStatus,
+  countPoolsByCategory,
+  getAllUniqueTags,
   derivePoolStatus,
   filterPools,
   hasActivePoolFilters,
@@ -27,6 +30,7 @@ import {
   type PoolLike,
   type PoolListStatus,
   type PoolStatusFilter,
+  type PoolCategory,
 } from '@/app/lib/pool-list-filtering';
 
 const STATUS_BADGE: Record<PoolListStatus, string> = {
@@ -105,28 +109,31 @@ function PoolsContent() {
   }, [load]);
 
   const syncFiltersToUrl = useCallback(
-    (next: { search: string; status: PoolStatusFilter }) => {
-      const nextQuery = poolFiltersToParams(next).toString();
+    (next: Partial<{ search: string; status: PoolStatusFilter; categories: PoolCategory[]; tags: string[]; crossChainOnly: boolean }>) => {
+      const fullFilters = { ...filters, ...next };
+      const nextQuery = poolFiltersToParams(fullFilters).toString();
       const nextUrl = nextQuery ? `${pathname}?${nextQuery}` : pathname;
       const currentUrl = queryKey ? `${pathname}?${queryKey}` : pathname;
       if (nextUrl !== currentUrl) {
         router.replace(nextUrl, { scroll: false });
       }
     },
-    [pathname, queryKey, router],
+    [pathname, queryKey, router, filters],
   );
 
   const setStatus = useCallback(
-    (status: PoolStatusFilter) => syncFiltersToUrl({ search: filters.search, status }),
-    [filters.search, syncFiltersToUrl],
+    (status: PoolStatusFilter) => syncFiltersToUrl({ status }),
+    [syncFiltersToUrl],
   );
 
   const commitSearch = useCallback(
-    (search: string) => syncFiltersToUrl({ search, status: filters.status }),
-    [filters.status, syncFiltersToUrl],
+    (search: string) => syncFiltersToUrl({ search }),
+    [syncFiltersToUrl],
   );
 
   const counts = useMemo(() => countPoolsByStatus(markets), [markets]);
+  const categoryCounts = useMemo(() => countPoolsByCategory(markets), [markets]);
+  const uniqueTags = useMemo(() => getAllUniqueTags(markets), [markets]);
   const visiblePools = useMemo(() => filterPools(markets, filters), [markets, filters]);
   const filtersActive = hasActivePoolFilters(filters);
 
@@ -134,6 +141,21 @@ function PoolsContent() {
     setSearchInput('');
     if (filtersActive) router.replace(pathname, { scroll: false });
   }, [filtersActive, pathname, router]);
+
+  const setCategories = useCallback(
+    (categories: PoolCategory[]) => syncFiltersToUrl({ categories }),
+    [syncFiltersToUrl],
+  );
+
+  const setTags = useCallback(
+    (tags: string[]) => syncFiltersToUrl({ tags }),
+    [syncFiltersToUrl],
+  );
+
+  const setCrossChainOnly = useCallback(
+    (crossChainOnly: boolean) => syncFiltersToUrl({ crossChainOnly }),
+    [syncFiltersToUrl],
+  );
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -156,55 +178,130 @@ function PoolsContent() {
 
         {/* Filter bar */}
         <div
-          className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-center"
+          className="mb-8 flex flex-col gap-4"
           data-testid="pool-filter-bar"
         >
-          <div className="flex-1">
-            <label htmlFor="pool-search" className="sr-only">
-              Search pools by title or description
-            </label>
-            <input
-              id="pool-search"
-              type="search"
-              value={searchInput}
-              placeholder="Search by title or description…"
-              onChange={(e) => {
-                setSearchInput(e.target.value);
-                commitSearch(e.target.value);
-              }}
-              className="w-full rounded-lg border border-border/50 bg-card px-4 py-2 text-sm outline-none focus:border-primary"
-              data-testid="pool-search-input"
-            />
+          {/* Search and status row */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+            <div className="flex-1">
+              <label htmlFor="pool-search" className="sr-only">
+                Search pools by title or description
+              </label>
+              <input
+                id="pool-search"
+                type="search"
+                value={searchInput}
+                placeholder="Search by title or description…"
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  commitSearch(e.target.value);
+                }}
+                className="w-full rounded-lg border border-border/50 bg-card px-4 py-2 text-sm outline-none focus:border-primary"
+                data-testid="pool-search-input"
+              />
+            </div>
+            <div>
+              <label htmlFor="pool-status" className="sr-only">
+                Filter pools by status
+              </label>
+              <select
+                id="pool-status"
+                value={filters.status}
+                onChange={(e) => setStatus(e.target.value as PoolStatusFilter)}
+                className="w-full rounded-lg border border-border/50 bg-card px-4 py-2 text-sm outline-none focus:border-primary sm:w-48"
+                data-testid="pool-status-select"
+              >
+                {POOL_STATUS_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                    {opt.value !== 'all' ? ` (${counts[opt.value]})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {filtersActive && (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded-lg border border-border/50 px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+                data-testid="pool-clear-filters"
+              >
+                Clear
+              </button>
+            )}
           </div>
-          <div>
-            <label htmlFor="pool-status" className="sr-only">
-              Filter pools by status
-            </label>
-            <select
-              id="pool-status"
-              value={filters.status}
-              onChange={(e) => setStatus(e.target.value as PoolStatusFilter)}
-              className="w-full rounded-lg border border-border/50 bg-card px-4 py-2 text-sm outline-none focus:border-primary sm:w-48"
-              data-testid="pool-status-select"
-            >
-              {POOL_STATUS_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                  {opt.value !== 'all' ? ` (${counts[opt.value]})` : ''}
-                </option>
+
+          {/* Category chips */}
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-muted-foreground">Categories</label>
+            <div className="flex flex-wrap gap-2">
+              {POOL_CATEGORIES.map((cat) => (
+                <button
+                  key={cat.value}
+                  onClick={() => {
+                    if (filters.categories.includes(cat.value)) {
+                      setCategories(filters.categories.filter(c => c !== cat.value));
+                    } else {
+                      setCategories([...filters.categories, cat.value]);
+                    }
+                  }}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${
+                    filters.categories.includes(cat.value)
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-muted/50 text-muted-foreground border-border/50 hover:border-border'
+                  } border`}
+                  data-testid={`category-filter-${cat.value}`}
+                >
+                  {cat.label} ({categoryCounts[cat.value]})
+                </button>
               ))}
-            </select>
+            </div>
           </div>
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="rounded-lg border border-border/50 px-4 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
-              data-testid="pool-clear-filters"
-            >
-              Clear
-            </button>
-          )}
+
+          {/* Tags filter and cross-chain toggle */}
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <div className="flex-1">
+              <label htmlFor="pool-tags" className="text-xs font-semibold text-muted-foreground block mb-2">
+                Tags
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {Array.from(uniqueTags)
+                  .slice(0, 10)
+                  .map((tag) => (
+                    <button
+                      key={tag}
+                      onClick={() => {
+                        if (filters.tags.includes(tag)) {
+                          setTags(filters.tags.filter(t => t !== tag));
+                        } else {
+                          setTags([...filters.tags, tag]);
+                        }
+                      }}
+                      className={`rounded-full px-2.5 py-1 text-xs transition-all ${
+                        filters.tags.includes(tag)
+                          ? 'bg-primary/20 text-primary border border-primary/40'
+                          : 'bg-muted/30 text-muted-foreground border border-border/30 hover:border-border'
+                      }`}
+                      data-testid={`tag-filter-${tag}`}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
+              </div>
+            </div>
+            <div className="flex items-end">
+              <label className="flex items-center gap-2 cursor-pointer text-sm">
+                <input
+                  type="checkbox"
+                  checked={filters.crossChainOnly}
+                  onChange={(e) => setCrossChainOnly(e.target.checked)}
+                  className="rounded border-border"
+                  data-testid="crosschain-toggle"
+                />
+                <span>Cross-chain only</span>
+              </label>
+            </div>
+          </div>
         </div>
 
         {/* Results */}
