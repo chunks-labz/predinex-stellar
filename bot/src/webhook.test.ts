@@ -1,0 +1,123 @@
+/**
+ * Unit tests for the webhook notifier.
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { BotConfig } from "./config.js";
+import type { SettlementAttempt } from "./types.js";
+
+const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: "Test SDF Network ; September 2015",
+  network: "testnet",
+  contractId: "C" + "A".repeat(55),
+  botSecretKey: "S" + "A".repeat(55),
+  pollIntervalMs: 300000,
+  batchSize: 100,
+  dryRun: false,
+  autoSettleEnabled: true,
+  defaultWinningOutcome: 0,
+  maxRetries: 3,
+  retryBaseDelayMs: 1000,
+  webhookUrl: "https://example.com/hook",
+  webhookSecret: "supersecret",
+  logLevel: "info",
+  ...overrides,
+});
+
+const mockSettlements: SettlementAttempt[] = [
+  {
+    poolId: 1,
+    winningOutcome: 0,
+    dryRun: false,
+    txHash: "abc123",
+    success: true,
+    attemptCount: 1,
+    durationMs: 500,
+  },
+  {
+    poolId: 2,
+    winningOutcome: 1,
+    dryRun: false,
+    success: false,
+    error: "PoolNotExpired",
+    attemptCount: 3,
+    durationMs: 2000,
+  },
+];
+
+describe("notify", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("does not call fetch when webhookUrl is null", async () => {
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig({ webhookUrl: null });
+    await notify(config, mockSettlements);
+    expect(vi.mocked(fetch)).not.toHaveBeenCalled();
+  });
+
+  it("POSTs JSON to the configured webhook URL", async () => {
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig();
+    await notify(config, mockSettlements);
+
+    expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
+    const [url, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://example.com/hook");
+    expect(options.method).toBe("POST");
+    expect((options.headers as Record<string, string>)["Content-Type"]).toBe(
+      "application/json",
+    );
+  });
+
+  it("includes HMAC signature when webhookSecret is set", async () => {
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig();
+    await notify(config, mockSettlements);
+
+    const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const headers = options.headers as Record<string, string>;
+    expect(headers["X-Predinex-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+  });
+
+  it("does not include signature when webhookSecret is null", async () => {
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig({ webhookSecret: null });
+    await notify(config, mockSettlements);
+
+    const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const headers = options.headers as Record<string, string>;
+    expect(headers["X-Predinex-Signature"]).toBeUndefined();
+  });
+
+  it("includes correct settlement summary in payload", async () => {
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig();
+    await notify(config, mockSettlements);
+
+    const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+
+    expect(body.event).toBe("settlement_cycle");
+    expect(body.summary.attempted).toBe(2);
+    expect(body.summary.succeeded).toBe(1);
+    expect(body.summary.failed).toBe(1);
+    expect(body.settlements).toHaveLength(2);
+  });
+
+  it("does not throw when fetch fails (fire-and-forget)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+    const { notify } = await import("./webhook.js");
+    const config = mockConfig();
+    // Should not throw
+    await expect(notify(config, mockSettlements)).resolves.toBeUndefined();
+  });
+});

@@ -1,0 +1,84 @@
+/**
+ * TypeScript types mirroring the Soroban contract data structures.
+ * See contracts/predinex/src/lib.rs for the canonical Rust definitions.
+ */
+
+/**
+ * Mirrors the on-chain PoolStatus enum.
+ * tag field matches the Soroban XDR enum variant name.
+ */
+export type PoolStatus =
+  | { tag: "Open" }
+  | { tag: "Settled"; values: [number] }
+  | { tag: "Voided" }
+  | { tag: "Frozen" }
+  | { tag: "Disputed" }
+  | { tag: "Cancelled" }
+  | { tag: "Scheduled"; values: [bigint] };
+
+/**
+ * Mirrors the on-chain Pool struct.
+ */
+export interface Pool {
+  creator: string;
+  title: string;
+  description: string;
+  outcome_a_name: string;
+  outcome_b_name: string;
+  total_a: bigint;
+  total_b: bigint;
+  participant_count: number;
+  settled: boolean;
+  winning_outcome: number | null;
+  created_at: bigint;
+  /** Unix timestamp (seconds) — pool expired when Date.now()/1000 >= expiry */
+  expiry: bigint;
+  deposit_deadline: bigint;
+  status: PoolStatus;
+  cumulative_volume: bigint;
+  template_id: number | null;
+}
+
+/**
+ * A pool that the bot has identified as eligible for settlement.
+ */
+export interface ExpiredPool {
+  poolId: number;
+  pool: Pool;
+  expiryTs: number; // epoch seconds
+}
+
+/**
+ * Matches PoolSettleRequest in the contract for batch settlement.
+ */
+export interface PoolSettleRequest {
+  pool_id: number;
+  winning_outcome: number;
+}
+
+/**
+ * Outcome of a single settle attempt.
+ */
+export interface SettlementAttempt {
+  poolId: number;
+  winningOutcome: number;
+  dryRun: boolean;
+  txHash?: string;
+  success: boolean;
+  error?: string;
+  attemptCount: number;
+  durationMs: number;
+}
+
+/**
+ * Summary of one full polling cycle.
+ */
+export interface CycleSummary {
+  cycleStartTs: number;
+  poolsScanned: number;
+  poolsExpiredUnsettled: number;
+  settlementsAttempted: number;
+  settlementsSucceeded: number;
+  settlementsFailed: number;
+  durationMs: number;
+}
