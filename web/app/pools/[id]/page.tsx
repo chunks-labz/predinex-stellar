@@ -16,6 +16,7 @@ import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import PoolExportButton from "../../../components/PoolExportButton";
 import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
+import { usePoolSubscription } from "../../lib/hooks/usePoolSubscription";
 
 function LoadingSkeleton() {
     return (
