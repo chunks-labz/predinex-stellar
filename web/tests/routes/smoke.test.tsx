@@ -270,6 +270,7 @@ vi.mock('@stacks/connect', () => ({
 
 import HomePage from '../../app/page';
 import MarketsPage from '../../app/markets/page';
+import PoolsPage from '../../app/pools/page';
 import PoolDetailPage from '../../app/markets/[id]/page';
 import CreatePage from '../../app/create/page';
 import DashboardPage from '../../app/dashboard/page';
@@ -311,6 +312,13 @@ describe('Route smoke tests', () => {
   it('/create renders without crashing', () => {
     renderWithProviders(<CreatePage />);
     expect(screen.getByRole('main')).toBeInTheDocument();
+  });
+
+  it('/pools renders the filtering list without crashing', () => {
+    renderWithProviders(<PoolsPage />);
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    // The status filter dropdown is part of the pools list filter bar.
+    expect(screen.getByTestId('pool-status-select')).toBeInTheDocument();
   });
 
   it('/dashboard renders without crashing', () => {

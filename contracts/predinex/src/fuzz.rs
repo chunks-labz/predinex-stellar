@@ -135,6 +135,7 @@ fn fuzz_create_pool_target() {
                 &outcome_b,
                 &duration,
                 &MIN_CREATOR_DEPOSIT,
+                &None::<u64>,
             )
         }));
 
@@ -188,6 +189,7 @@ fn fuzz_place_bet_target() {
         &String::from_str(&t.env, "B"),
         &86400,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     let user = Address::generate(&t.env);
@@ -276,6 +278,7 @@ fn fuzz_settle_pool_target() {
         &String::from_str(&t.env, "B"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     let scheduled_pool_id = t.client.schedule_pool(
@@ -308,6 +311,7 @@ fn fuzz_settle_pool_target() {
         &String::from_str(&t.env, "B"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     let user_a = Address::generate(&t.env);
     let user_b = Address::generate(&t.env);

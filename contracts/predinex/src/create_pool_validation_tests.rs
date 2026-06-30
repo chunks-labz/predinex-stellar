@@ -29,6 +29,7 @@ fn test_deadline_in_future_valid() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(result.is_ok());
 }
@@ -58,6 +59,7 @@ fn test_deadline_in_past_rejected() {
         &String::from_str(&env, "No"),
         &MIN_POOL_DURATION_SECS,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(result.is_ok());
 }
@@ -75,6 +77,7 @@ fn test_duplicate_outcomes_rejected() {
         &String::from_str(&env, "Yes"), // duplicate
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 }
@@ -90,6 +93,7 @@ fn test_duplicate_outcomes_case_insensitive_rejected() {
         &String::from_str(&env, "YES"), // same after normalization
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 }
@@ -105,6 +109,7 @@ fn test_distinct_outcomes_accepted() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(result.is_ok());
 }
@@ -122,6 +127,7 @@ fn test_amount_below_min_deposit_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &(MIN_CREATOR_DEPOSIT - 1),
+        &None::<u64>,
     );
     assert_eq!(result, Err(Ok(ContractError::InsufficientCreatorDeposit)));
 }
@@ -137,6 +143,7 @@ fn test_zero_amount_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &0,
+        &None::<u64>,
     );
     assert_eq!(result, Err(Ok(ContractError::InsufficientCreatorDeposit)));
 }
@@ -152,6 +159,7 @@ fn test_exact_min_deposit_accepted() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(result.is_ok());
 }
@@ -169,6 +177,7 @@ fn test_duration_exceeds_one_year_rejected() {
         &String::from_str(&env, "No"),
         &(MAX_POOL_DURATION_SECS + 1),
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert_eq!(result, Err(Ok(ContractError::DurationTooLong)));
 }
@@ -184,6 +193,7 @@ fn test_duration_exactly_one_year_accepted() {
         &String::from_str(&env, "No"),
         &MAX_POOL_DURATION_SECS,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(result.is_ok());
 }

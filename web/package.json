@@ -26,16 +26,17 @@
     "@stacks/connect": "^8.2.6",
     "@stacks/network": "^7.2.0",
     "@stacks/transactions": "^7.3.0",
-    "@stellar/stellar-sdk": "15.1.0",
-    "@tanstack/react-query": "^5.101.0",
+    "@stellar/stellar-sdk": "16.0.1",
+    "@tanstack/react-query": "^5.101.2",
     "clsx": "^2.1.1",
     "lit-element": "^4.2.2",
     "lit-html": "^3.3.3",
-    "lucide-react": "^1.21.0",
+    "lucide-react": "^1.22.0",
     "next": "16.2.9",
     "qrcode": "^1.5.4",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "recharts": "^2.15.3",
     "tailwind-merge": "^3.6.0",
     "viem": "^2.53.1"
   },
@@ -48,7 +49,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/node": "^25",
+    "@types/node": "^26",
     "@types/qrcode": "^1.5.5",
     "@types/react": "^19",
     "@types/react-dom": "^19",
@@ -64,7 +65,7 @@
     "tailwindcss": "^4",
     "typedoc": "^0.28.19",
     "typescript": "^6",
-    "typescript-eslint": "^8.62.0",
+    "typescript-eslint": "^8.62.1",
     "vitest": "^4.1.9"
   }
 }

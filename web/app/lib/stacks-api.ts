@@ -48,7 +48,7 @@ export interface Pool {
     settled: boolean;
     winningOutcome: number | undefined;
     expiry: number;
-    status: 'active' | 'settled' | 'expired';
+    status: 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
     /**
      * Number of unique participants who have bet in this pool.
      */

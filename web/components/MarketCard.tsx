@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff } from 'lucide-react';
+import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
 import { formatSTXAmount } from '@/app/lib/market-utils';
 import { blocksToSeconds } from '@/app/lib/countdown-utils';
@@ -29,6 +29,10 @@ export default function MarketCard({ market }: MarketCardProps) {
         return 'bg-blue-500/10 text-blue-500';
       case 'expired':
         return 'bg-red-500/10 text-red-500';
+      case 'frozen':
+        return 'bg-cyan-500/10 text-cyan-500';
+      case 'disputed':
+        return 'bg-orange-500/10 text-orange-500';
       default:
         return 'bg-gray-500/10 text-gray-500';
     }
@@ -42,6 +46,10 @@ export default function MarketCard({ market }: MarketCardProps) {
         return <CheckCircle className="w-3 h-3" />;
       case 'expired':
         return <XCircle className="w-3 h-3" />;
+      case 'frozen':
+        return <Snowflake className="w-3 h-3" />;
+      case 'disputed':
+        return <AlertTriangle className="w-3 h-3" />;
       default:
         return null;
     }
@@ -55,6 +63,10 @@ export default function MarketCard({ market }: MarketCardProps) {
         return 'Settled';
       case 'expired':
         return 'Expired';
+      case 'frozen':
+        return 'Frozen';
+      case 'disputed':
+        return 'Disputed';
       default:
         return 'Unknown';
     }
@@ -137,6 +149,14 @@ export default function MarketCard({ market }: MarketCardProps) {
           </label>
 
           {/* Title and Description */}
+          {market.coverImage && (
+            <img
+              src={market.coverImage}
+              alt=""
+              aria-hidden="true"
+              className="w-full h-28 object-cover rounded-lg mb-3"
+            />
+          )}
           <h3 className="text-lg sm:text-xl font-bold mb-2 group-hover:text-primary transition-colors line-clamp-2">
             {market.title}
           </h3>

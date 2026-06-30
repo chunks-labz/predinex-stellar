@@ -28,7 +28,7 @@ export interface ProcessedMarket {
   totalVolume: number;
   oddsA: number;
   oddsB: number;
-  status: 'active' | 'settled' | 'expired';
+  status: 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
   timeRemaining: number | null;
   createdAt: number;
   settledAt: number | null;
@@ -36,6 +36,8 @@ export interface ProcessedMarket {
   participantCount?: number;
   assetType?: string;
   disputed?: boolean;
+  /** #721 — Optional cover image URL stored in extended pool metadata. */
+  coverImage?: string;
 }
 
 export interface MarketFilters {
@@ -55,8 +57,8 @@ export interface PaginationState {
   totalPages: number;
 }
 
-export type MarketStatus = 'active' | 'settled' | 'expired';
-export type MarketStatusFilter = 'all' | 'open' | 'settled' | 'disputed';
+export type MarketStatus = 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
+export type MarketStatusFilter = 'all' | 'open' | 'settled' | 'disputed' | 'frozen';
 export type SortOption = 'newest' | 'ending-soon' | 'volume' | 'participants';
 export type TimeRangeFilter = 'all' | 'ending-24h' | 'ending-7d' | 'created-7d' | 'created-30d';
 export type StatusFilter = MarketStatusFilter;

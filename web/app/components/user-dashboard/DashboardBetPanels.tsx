@@ -6,16 +6,41 @@ interface DashboardBetPanelsProps {
   isLoading: boolean;
 }
 
+/** Skeleton rows that mirror the bet list layout shown once data arrives. */
+function BetRowsSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-3" role="status" aria-busy="true">
+      <span className="sr-only">Loading bets…</span>
+      {Array.from({ length: rows }).map((_, idx) => (
+        <div
+          key={idx}
+          className="flex justify-between items-start gap-2 p-4 bg-muted/50 rounded-lg animate-pulse"
+          aria-hidden="true"
+        >
+          <div className="flex-1 min-w-0 space-y-2">
+            <div className="h-4 w-3/4 bg-muted/60 rounded" />
+            <div className="h-3 w-1/3 bg-muted/40 rounded" />
+          </div>
+          <div className="text-right shrink-0 space-y-2">
+            <div className="h-4 w-20 bg-muted/60 rounded" />
+            <div className="h-3 w-14 bg-muted/40 rounded ml-auto" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardOverviewPanel({ bets, isLoading }: DashboardBetPanelsProps) {
   return (
     <div className="glass p-6 rounded-xl border border-border space-y-4">
       <h3 className="text-xl font-bold">Recent Activity</h3>
       {isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <BetRowsSkeleton />
       ) : bets.length === 0 ? (
         <p className="text-muted-foreground">No bets yet. Start betting to see your activity here.</p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 animate-fade-in">
           {bets.slice(0, 5).map((bet, idx) => (
             <div key={idx} className="flex justify-between items-start gap-2 p-4 bg-muted/50 rounded-lg">
               <div className="flex-1 min-w-0">
@@ -45,9 +70,9 @@ export function DashboardActiveBetsPanel({ bets, isLoading }: DashboardBetPanels
     <div className="glass p-6 rounded-xl border border-border space-y-4">
       <h3 className="text-xl font-bold">Active Bets</h3>
       {isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <BetRowsSkeleton />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 animate-fade-in">
           {active.map((bet, idx) => (
             <div
               key={idx}
@@ -77,9 +102,9 @@ export function DashboardHistoryPanel({ bets, isLoading }: DashboardBetPanelsPro
     <div className="glass p-6 rounded-xl border border-border space-y-4">
       <h3 className="text-xl font-bold">Betting History</h3>
       {isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <BetRowsSkeleton />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 animate-fade-in">
           {history.map((bet, idx) => (
             <div
               key={idx}

@@ -7,12 +7,14 @@ import { use, useEffect, useState, useCallback } from "react";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
+import type { PoolExtendedMetadata } from "../../lib/soroban-read-api";
 import Navbar from '@/components/Navbar';
 import CountdownTimer from '@/components/CountdownTimer';
 import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
 import { blocksToSeconds } from "../../lib/countdown-utils";
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
-import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, BellOff, Bell } from "lucide-react";
+import PoolExportButton from "../../../components/PoolExportButton";
+import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolSubscription } from "../../lib/hooks/usePoolSubscription";
 
@@ -49,7 +51,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
-    const { isSubscribed, toggle: toggleSubscription } = usePoolSubscription();
+    const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
 
     const fetchPool = useCallback(async () => {
         try {
@@ -93,6 +95,13 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         load();
         return () => { cancelled = true; };
     }, [fetchPool]);
+
+    // #721 — Fetch extended metadata once on mount (best-effort).
+    useEffect(() => {
+        predinexReadApi.getPoolExtMetadata(poolId)
+            .then(meta => { if (meta) setExtMetadata(meta); })
+            .catch(() => {});
+    }, [poolId]);
 
     useEffect(() => {
         fetchUserBet();
@@ -194,29 +203,18 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <p className="text-muted-foreground mt-1">{pool.description}</p>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
-                            <button
-                                type="button"
-                                onClick={() => toggleSubscription(poolId)}
-                                aria-pressed={isSubscribed(poolId)}
-                                aria-label={isSubscribed(poolId) ? 'Unsubscribe from this pool' : 'Subscribe to this pool'}
-                                title={isSubscribed(poolId) ? 'Unsubscribe from notifications' : 'Subscribe to notifications'}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-sm font-medium transition-colors ${
-                                    isSubscribed(poolId)
-                                        ? 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/20'
-                                        : 'bg-muted/40 border-border text-muted-foreground hover:text-primary hover:border-primary/30'
-                                }`}
-                            >
-                                {isSubscribed(poolId) ? (
-                                    <><BellOff className="h-4 w-4" /> Subscribed</>
-                                ) : (
-                                    <><Bell className="h-4 w-4" /> Subscribe</>
-                                )}
-                            </button>
                             <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
                                 pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'
                             }`}>
                                 {pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active'}
                             </span>
+                            {/* #722 — Export pool data */}
+                            <PoolExportButton
+                                pool={pool}
+                                poolId={poolId}
+                                isCreator={stxAddress === pool.creator}
+                                walletAddress={stxAddress}
+                            />
                         </div>
                     </div>
 
@@ -298,13 +296,66 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     </div>
 
+                    {/* #721 — Extended metadata */}
+                    {extMetadata && (extMetadata.resolutionCriteria || extMetadata.externalLinks || extMetadata.coverImage) && (
+                        <div className="bg-muted/30 p-4 rounded-xl mb-8 space-y-4">
+                            {extMetadata.coverImage && (
+                                <img
+                                    src={extMetadata.coverImage}
+                                    alt="Pool cover"
+                                    className="w-full h-40 object-cover rounded-lg"
+                                />
+                            )}
+                            {extMetadata.resolutionCriteria && (
+                                <div>
+                                    <h3 className="text-sm font-semibold mb-1">Resolution Criteria</h3>
+                                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{extMetadata.resolutionCriteria}</p>
+                                </div>
+                            )}
+                            {extMetadata.externalLinks && (
+                                <div>
+                                    <h3 className="text-sm font-semibold mb-1">Reference Links</h3>
+                                    <div className="flex flex-wrap gap-2">
+                                        {extMetadata.externalLinks.split('|').map((url, i) => {
+                                            const trimmed = url.trim();
+                                            return trimmed ? (
+                                                <a
+                                                    key={i}
+                                                    href={trimmed}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                                >
+                                                    <ExternalLink className="w-3 h-3" />
+                                                    {trimmed.replace(/^https?:\/\//, '').split('/')[0]}
+                                                </a>
+                                            ) : null;
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* User bet position */}
                     {userHasPosition && (
-                        <div className="mb-8 p-4 bg-primary/10 border border-primary/20 rounded-xl">
-                            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                                <Wallet className="w-4 h-4" />
-                                Your Position
-                            </h3>
+                        <div className="mb-8 p-4 bg-primary/10 border border-primary/20 rounded-xl print:border-black print:bg-white" id="bet-receipt">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <Wallet className="w-4 h-4" />
+                                    Your Position
+                                </h3>
+                                {/* #722 — Printable bet receipt */}
+                                <button
+                                    type="button"
+                                    onClick={() => window.print()}
+                                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors print:hidden"
+                                    aria-label="Print bet receipt"
+                                >
+                                    <Printer className="w-3 h-3" />
+                                    Print receipt
+                                </button>
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet!.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>

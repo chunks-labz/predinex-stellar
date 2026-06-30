@@ -14,6 +14,13 @@ import { MAX_POOL_DURATION_SECONDS as MAX_POOL_DURATION_SECS } from '@/app/lib/c
 export const MAX_TITLE_LENGTH = 100;
 export const MAX_DESCRIPTION_LENGTH = 1000;
 export const MAX_OUTCOME_LENGTH = 50;
+export const MIN_OUTCOMES = 2;
+export const MAX_OUTCOMES = 10;
+export const DEFAULT_PROTOCOL_FEE_BPS = 200;
+export const MAX_PROTOCOL_FEE_BPS = 1000;
+
+export type SettlementType = 'oracle' | 'twap' | 'manual';
+export const SETTLEMENT_TYPES: SettlementType[] = ['oracle', 'twap', 'manual'];
 export const MIN_POOL_DURATION_SECS = 300;
 export const MAX_DEPOSIT_AMOUNT = 1_000_000;
 export const MIN_DEPOSIT_AMOUNT = 0.1;
@@ -316,10 +323,83 @@ export function validatePoolForm(data: {
   };
 }
 
+export function validateDepositDeadline(
+  depositDeadline: number,
+  duration: number
+): { valid: boolean; error?: string } {
+  if (!Number.isFinite(depositDeadline) || depositDeadline <= 0) {
+    return { valid: false, error: 'Deposit deadline must be greater than 0 seconds' };
+  }
+  if (depositDeadline >= duration) {
+    return {
+      valid: false,
+      error: 'Deposit deadline must be shorter than the pool expiry duration',
+    };
+  }
+  if (depositDeadline < MIN_POOL_DURATION_SECS) {
+    return {
+      valid: false,
+      error: `Deposit deadline must be at least ${MIN_POOL_DURATION_SECS} seconds`,
+    };
+  }
+  return { valid: true };
+}
+
+export function validateProtocolFeeBps(
+  feeBps: number
+): { valid: boolean; error?: string } {
+  if (!Number.isFinite(feeBps)) {
+    return { valid: false, error: 'Protocol fee is required' };
+  }
+  if (feeBps < 0 || feeBps > MAX_PROTOCOL_FEE_BPS) {
+    return {
+      valid: false,
+      error: `Protocol fee must be between 0 and ${MAX_PROTOCOL_FEE_BPS} basis points`,
+    };
+  }
+  return { valid: true };
+}
+
+export function validateSettlementType(
+  value: string
+): { valid: boolean; error?: string } {
+  if (!SETTLEMENT_TYPES.includes(value as SettlementType)) {
+    return { valid: false, error: 'Select a valid settlement type' };
+  }
+  return { valid: true };
+}
+
+export function validateOutcomesList(
+  outcomes: string[]
+): { valid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  if (outcomes.length < MIN_OUTCOMES) {
+    errors.outcomes = `At least ${MIN_OUTCOMES} outcomes are required`;
+  }
+  if (outcomes.length > MAX_OUTCOMES) {
+    errors.outcomes = `No more than ${MAX_OUTCOMES} outcomes are allowed`;
+  }
+
+  const seen = new Set<string>();
+  outcomes.forEach((outcome, index) => {
+    const validation = validateOutcome(outcome);
+    if (!validation.valid) {
+      errors[`outcome_${index}`] = validation.error!;
+      return;
+    }
+    const key = outcome.trim().toLowerCase();
+    if (seen.has(key)) {
+      errors[`outcome_${index}`] = 'Outcome labels must be unique';
+      return;
+    }
+    seen.add(key);
+  });
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
 /**
- * Validate pool creation form
- * @param data Form data
- * @returns Validation result
+ * Validate pool creation form (legacy two-outcome wizard).
  */
 export function validatePoolCreationForm(data: {
   title: string;
@@ -345,7 +425,6 @@ export function validatePoolCreationForm(data: {
   const durationValidation = validateDuration(data.duration);
   if (!durationValidation.valid) errors.duration = durationValidation.error!;
 
-  // Check outcomes are different
   if (data.outcomeA.toLowerCase() === data.outcomeB.toLowerCase()) {
     errors.outcomeB = 'Outcomes must be different';
   }
@@ -356,7 +435,53 @@ export function validatePoolCreationForm(data: {
   };
 }
 
-type PoolCreationField = 'title' | 'description' | 'outcomeA' | 'outcomeB' | 'duration';
+export function validatePoolWizardForm(data: {
+  title: string;
+  description: string;
+  outcomes: string[];
+  duration: number;
+  depositDeadline: number;
+  protocolFeeBps: number;
+  settlementType: string;
+}): { valid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+
+  const titleValidation = validatePoolTitle(data.title);
+  if (!titleValidation.valid) errors.title = titleValidation.error!;
+
+  const descriptionValidation = validatePoolDescription(data.description);
+  if (!descriptionValidation.valid) errors.description = descriptionValidation.error!;
+
+  const outcomesValidation = validateOutcomesList(data.outcomes);
+  Object.assign(errors, outcomesValidation.errors);
+
+  const durationValidation = validateDuration(data.duration);
+  if (!durationValidation.valid) errors.duration = durationValidation.error!;
+
+  const depositValidation = validateDepositDeadline(data.depositDeadline, data.duration);
+  if (!depositValidation.valid) errors.depositDeadline = depositValidation.error!;
+
+  const feeValidation = validateProtocolFeeBps(data.protocolFeeBps);
+  if (!feeValidation.valid) errors.protocolFeeBps = feeValidation.error!;
+
+  const settlementValidation = validateSettlementType(data.settlementType);
+  if (!settlementValidation.valid) errors.settlementType = settlementValidation.error!;
+
+  return {
+    valid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
+type PoolCreationField =
+  | 'title'
+  | 'description'
+  | 'duration'
+  | 'depositDeadline'
+  | 'protocolFeeBps'
+  | 'settlementType'
+  | 'outcomeA'
+  | 'outcomeB';
 
 export function validateField(field: PoolCreationField | string, value: string): string | undefined {
   const result =
@@ -366,9 +491,18 @@ export function validateField(field: PoolCreationField | string, value: string):
         ? validatePoolDescription(value)
         : field === 'outcomeA' || field === 'outcomeB'
           ? validateOutcome(value)
-          : field === 'duration'
-            ? validateDuration(Number.parseInt(value, 10))
-            : { valid: true };
+        : field === 'duration'
+          ? validateDuration(Number.parseInt(value, 10))
+          : field === 'depositDeadline'
+            ? validateDepositDeadline(
+                Number.parseInt(value, 10),
+                Number.POSITIVE_INFINITY
+              )
+            : field === 'protocolFeeBps'
+              ? validateProtocolFeeBps(Number.parseInt(value, 10))
+              : field === 'settlementType'
+                ? validateSettlementType(value)
+                : { valid: true };
 
   return result.valid ? undefined : result.error;
 }
@@ -384,6 +518,9 @@ export function getHelpText(field: PoolCreationField | string): string {
   if (field === 'title') return 'Ask a clear, objective market question.';
   if (field === 'description') return 'Include context and resolution criteria.';
   if (field === 'outcomeA' || field === 'outcomeB') return 'Use a short outcome label.';
-  if (field === 'duration') return 'Duration is measured in seconds.';
+  if (field === 'duration') return 'Pool lifetime in seconds until expiry.';
+  if (field === 'depositDeadline') return 'Seconds after open when new deposits stop.';
+  if (field === 'protocolFeeBps') return 'Protocol fee in basis points (100 bps = 1%).';
+  if (field === 'settlementType') return 'How the winning outcome is determined.';
   return '';
 }

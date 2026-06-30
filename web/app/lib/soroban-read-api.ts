@@ -12,6 +12,9 @@
  */
 
 import { getRuntimeConfig } from './runtime-config';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('soroban-read-api');
 import type { Pool, UserBetData } from './stacks-api';
 
 // ---------------------------------------------------------------------------
@@ -509,6 +512,12 @@ function normalizePool(raw: RawSorobanPool | null, poolId: number): Pool | null 
       } else if (raw.status === 'Voided' || raw.status === 'Cancelled') {
         settled = true;
         status = 'settled';
+      } else if (raw.status === 'Frozen' || raw.status === 'frozen') {
+        settled = false;
+        status = 'frozen';
+      } else if (raw.status === 'Disputed' || raw.status === 'disputed') {
+        settled = true;
+        status = 'disputed';
       }
     } else if (typeof raw.status === 'object' && 'tag' in raw.status) {
       const tag = raw.status.tag;
@@ -518,8 +527,14 @@ function normalizePool(raw: RawSorobanPool | null, poolId: number): Pool | null 
       } else if (tag === 'Open') {
         settled = false;
         status = 'active';
-      } else if (tag === 'Voided' || tag === 'Cancelled' || tag === 'Frozen' || tag === 'Disputed') {
-        // These are terminal/frozen states - treat as settled for UI purposes
+      } else if (tag === 'Frozen') {
+        settled = false;
+        status = 'frozen';
+      } else if (tag === 'Disputed') {
+        settled = true;
+        status = 'disputed';
+      } else if (tag === 'Voided' || tag === 'Cancelled') {
+        // These are terminal states - treat as settled for UI purposes
         settled = true;
         status = 'settled';
       }
@@ -831,6 +846,52 @@ export async function getPoolCountFromSoroban(
 }
 
 /**
+ * Reads the freeze admin address via `get_freeze_admin`.
+ *
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns Freeze admin address string (`G...`), or null if not set or on RPC failure.
+ */
+export async function getFreezeAdminFromSoroban(
+  config?: SorobanReadConfig
+): Promise<string | null> {
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      return null;
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_freeze_admin',
+      []
+    );
+
+    if (rawResult === null) {
+      return null;
+    }
+
+    // rawResult could be an array if it's an Option<Address>
+    let addressVal: unknown = rawResult;
+    if (Array.isArray(rawResult)) {
+      if (rawResult.length === 0) return null;
+      addressVal = rawResult[0];
+    }
+
+    if (typeof addressVal === 'string' && addressVal.startsWith('G')) {
+      return addressVal;
+    }
+
+    return null;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    log.error('Failed to fetch freeze admin from Soroban:', error);
+    return null;
+  }
+}
+
+/**
  * Get Soroban configuration from runtime config.
  */
 function getSorobanConfig(): SorobanReadConfig {
@@ -866,3 +927,39 @@ export const sorobanReadApi = {
 
 /** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */
 export type { Pool, UserBetData };
+
+// ---------------------------------------------------------------------------
+// #721 — Extended pool metadata
+// ---------------------------------------------------------------------------
+
+/** Decoded extended pool metadata from `get_pool_ext_metadata`. */
+export interface PoolExtendedMetadata {
+  resolutionCriteria?: string;
+  externalLinks?: string;
+  coverImage?: string;
+}
+
+/**
+ * Read optional extended metadata for a pool via `get_pool_ext_metadata`.
+ * Returns null when no metadata is stored or the read fails.
+ */
+export async function getPoolExtMetadataFromSoroban(
+  poolId: number,
+  config?: SorobanReadConfig,
+): Promise<PoolExtendedMetadata | null> {
+  const cfg = config ?? getSorobanConfig();
+  if (!cfg.contractId) return null;
+  try {
+    const rawResult = await simulateContractRead(cfg.rpcUrl, cfg.contractId, 'get_pool_ext_metadata', [poolId]);
+    if (rawResult === null || typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      resolutionCriteria: typeof raw['resolution_criteria'] === 'string' ? raw['resolution_criteria'] : undefined,
+      externalLinks: typeof raw['external_links'] === 'string' ? raw['external_links'] : undefined,
+      coverImage: typeof raw['cover_image'] === 'string' ? raw['cover_image'] : undefined,
+    };
+  } catch (e) {
+    log.error('Failed to fetch pool ext metadata from Soroban:', e);
+    return null;
+  }
+}

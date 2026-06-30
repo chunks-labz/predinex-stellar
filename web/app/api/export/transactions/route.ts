@@ -4,6 +4,29 @@ import type { ActivityItem } from '@/app/lib/stacks-api';
 
 export const runtime = 'nodejs';
 
+// ---------------------------------------------------------------------------
+// #722 — Rate limiter: max 10 exports per hour per address.
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_MAX = 10;
+const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
+
+function checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {
+  const now = Date.now();
+  const entry = rateLimitStore.get(key);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    rateLimitStore.set(key, { count: 1, windowStart: now });
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
+  }
+  if (entry.count >= RATE_LIMIT_MAX) {
+    return { allowed: false, remaining: 0, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
+  }
+  entry.count += 1;
+  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
+}
+
+// ---------------------------------------------------------------------------
+
 const CSV_HEADER = 'Date,Pool ID,Question,Outcome,Amount,Result,Payout';
 
 function toResult(type: ActivityItem['type']): string {
@@ -60,6 +83,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'address is required' }, { status: 400 });
   }
 
+  // #722 — Rate limit.
+  const rl = checkRateLimit(address);
+  const rlHeaders = {
+    'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
+    'X-RateLimit-Remaining': String(rl.remaining),
+    'X-RateLimit-Reset': String(Math.ceil(rl.resetAt / 1000)),
+  };
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Export rate limit exceeded. Maximum 10 exports per hour.' },
+      { status: 429, headers: rlHeaders },
+    );
+  }
+
   const from = searchParams.get('from') ?? '';
   const to = searchParams.get('to') ?? '';
   const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
@@ -74,11 +111,12 @@ export async function GET(req: NextRequest) {
   const paginated = filtered.slice(start, start + pageSize);
 
   const csv = itemsToCsv(paginated);
-  const filename = `transactions_${window.from}_${window.to}.csv`;
+  const filename = `predinex-transactions_${window.from}_${window.to}.csv`;
 
   return new NextResponse(csv, {
     status: 200,
     headers: {
+      ...rlHeaders,
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'X-Total-Count': String(filtered.length),

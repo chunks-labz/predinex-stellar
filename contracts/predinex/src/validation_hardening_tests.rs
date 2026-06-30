@@ -42,6 +42,7 @@ fn create_pool(ctx: &TestCtx<'_>) -> u32 {
         &String::from_str(&ctx.env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 
@@ -150,6 +151,7 @@ fn scheduled_claim_execution_is_capped_at_ten() {
             &String::from_str(&ctx.env, "No"),
             &3600,
             &MIN_CREATOR_DEPOSIT,
+            &None::<u64>,
         );
         let amount = 100 + i as i128;
         ctx.client

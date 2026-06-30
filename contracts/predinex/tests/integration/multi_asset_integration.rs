@@ -102,6 +102,7 @@ fn make_ma_pool(ctx: &MaCtx, creator: &Address) -> u32 {
         &3_600u64,
         &allowed,
         &None,
+        &None::<u64>,
     )
 }
 
@@ -180,6 +181,7 @@ fn ma1b_pool_creation_fails_without_exchange_rate() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &None::<u64>,
     );
 
     assert_eq!(

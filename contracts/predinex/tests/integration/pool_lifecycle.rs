@@ -60,6 +60,7 @@ fn make_pool(ctx: &Ctx, creator: &Address) -> u32 {
         &String::from_str(&ctx.env, "No"),
         &3_600u64,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 
