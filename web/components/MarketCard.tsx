@@ -72,19 +72,18 @@ export default function MarketCard({ market }: MarketCardProps) {
     }
   };
 
-
   return (
-    <Link href={`/markets/${market.poolId}`} aria-label={`View market: ${market.title}`}>
-      <div className="glass p-4 sm:p-6 rounded-xl hover:border-primary/50 transition-all duration-200 cursor-pointer group h-full flex flex-col justify-between hover:shadow-lg hover:shadow-primary/10">
+    <Link href={`/markets/${market.poolId}`} aria-label={`View market: ${market.title}`} className="block h-full min-w-0">
+      <div className="glass p-4 sm:p-6 rounded-xl hover:border-primary/50 transition-all duration-200 cursor-pointer group h-full flex flex-col justify-between hover:shadow-lg hover:shadow-primary/10 overflow-x-hidden min-w-0">
         {/* Header */}
-        <div>
+        <div className="min-w-0">
           <div className="flex justify-between items-start mb-4">
-            <span className="text-xs font-mono text-muted-foreground">
+            <span className="text-xs font-mono text-muted-foreground truncate">
               #POOL-{market.poolId}
             </span>
             <div className="flex items-center gap-2">
               <span
-                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 ${getStatusColor(market.status)}`}
+                className={`px-2 py-1 rounded text-xs font-medium flex items-center gap-1 shrink-0 ${getStatusColor(market.status)}`}
                 aria-label={`Status: ${getStatusText(market.status)}`}
               >
                 {getStatusIcon(market.status)}
@@ -101,24 +100,24 @@ export default function MarketCard({ market }: MarketCardProps) {
                   e.stopPropagation();
                   toggleFavorite(market.poolId);
                 }}
-                className={`p-2 rounded-lg border transition-colors ${
+                className={`h-11 w-11 flex items-center justify-center rounded-lg border transition-colors shrink-0 ${
                   favorite
                     ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400 hover:bg-yellow-400/15'
                     : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
               >
                 {favorite ? (
-                  <Star className="w-4 h-4" fill="currentColor" strokeWidth={2} aria-hidden="true" />
+                  <Star className="w-5 h-5" fill="currentColor" strokeWidth={2} aria-hidden="true" />
                 ) : (
-                  <StarOff className="w-4 h-4" aria-hidden="true" />
+                  <StarOff className="w-5 h-5" aria-hidden="true" />
                 )}
               </button>
             </div>
           </div>
 
-          {/* Compare selection (per pool) */}
+          {/* Compare selection */}
           <label
-            className={`flex items-center gap-2 mb-3 text-xs ${
+            className={`flex items-center gap-2 mb-3 min-h-[44px] text-xs ${
               compareDisabled ? 'text-muted-foreground/60 cursor-not-allowed' : 'text-muted-foreground cursor-pointer'
             }`}
             onClick={(e) => e.stopPropagation()}
@@ -137,9 +136,9 @@ export default function MarketCard({ market }: MarketCardProps) {
                   ? `Remove pool #${market.poolId} from comparison`
                   : `Add pool #${market.poolId} to comparison`
               }
-              className="h-4 w-4 rounded border-border/70 text-primary focus:ring-primary"
+              className="h-6 w-6 rounded border-border/70 text-primary focus:ring-primary cursor-pointer shrink-0"
             />
-            <span>
+            <span className="truncate">
               {isCompared
                 ? 'In comparison'
                 : compareDisabled
@@ -157,7 +156,7 @@ export default function MarketCard({ market }: MarketCardProps) {
               className="w-full h-28 object-cover rounded-lg mb-3"
             />
           )}
-          <h3 className="text-lg sm:text-xl font-bold mb-2 group-hover:text-primary transition-colors line-clamp-2">
+          <h3 className="text-lg sm:text-xl font-bold mb-2 group-hover:text-primary transition-colors line-clamp-2 break-words">
             {market.title}
           </h3>
           <p className="text-sm text-muted-foreground mb-4 sm:mb-6 line-clamp-3">
@@ -166,18 +165,18 @@ export default function MarketCard({ market }: MarketCardProps) {
         </div>
 
         {/* Market Info */}
-        <div className="space-y-4">
+        <div className="space-y-4 shrink-0">
           {/* Outcomes */}
           <div className="space-y-2">
-            <div className="flex justify-between items-center text-sm p-3 bg-muted/30 rounded-lg">
-              <div className="flex items-center gap-2">
-                <span className="font-medium text-green-400">{market.outcomeA}</span>
-                <span className="text-xs text-muted-foreground">({market.oddsA}%)</span>
+            <div className="flex justify-between items-center text-sm p-3 bg-muted/30 rounded-lg min-w-0">
+              <div className="flex items-center gap-2 truncate min-w-0">
+                <span className="font-medium text-green-400 truncate">{market.outcomeA}</span>
+                <span className="text-xs text-muted-foreground shrink-0">({market.oddsA}%)</span>
               </div>
-              <span className="text-muted-foreground text-xs" aria-hidden="true">vs</span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">({market.oddsB}%)</span>
-                <span className="font-medium text-red-400">{market.outcomeB}</span>
+              <span className="text-muted-foreground text-xs shrink-0 px-2" aria-hidden="true">vs</span>
+              <div className="flex items-center gap-2 truncate min-w-0 justify-end">
+                <span className="text-xs text-muted-foreground shrink-0">({market.oddsB}%)</span>
+                <span className="font-medium text-red-400 truncate">{market.outcomeB}</span>
               </div>
             </div>
 
@@ -202,11 +201,11 @@ export default function MarketCard({ market }: MarketCardProps) {
 
           {/* Stats */}
           <div className="flex justify-between items-center text-sm">
-            <div className="flex items-center gap-1 text-muted-foreground">
-              <TrendingUp className="w-4 h-4" aria-hidden="true" />
-              <span>{formatSTXAmount(market.totalVolume)}</span>
+            <div className="flex items-center gap-1 text-muted-foreground truncate min-w-0">
+              <TrendingUp className="w-4 h-4 shrink-0" aria-hidden="true" />
+              <span className="truncate">{formatSTXAmount(market.totalVolume)}</span>
             </div>
-            <div className="flex items-center gap-1 text-muted-foreground">
+            <div className="flex items-center gap-1 text-muted-foreground shrink-0">
               <CountdownTimer
                 secondsRemaining={
                   market.status === 'expired' ? null : blocksToSeconds(market.timeRemaining)
@@ -218,9 +217,9 @@ export default function MarketCard({ market }: MarketCardProps) {
           </div>
 
           {/* Creator info */}
-          <div className="flex items-center gap-1 text-xs text-muted-foreground pt-2 border-t border-muted/20">
-            <Users className="w-3 h-3" aria-hidden="true" />
-            <span>Created by {formatDisplayAddress(market.creator)}</span>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground pt-2 border-t border-muted/20 truncate">
+            <Users className="w-3 h-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">Created by {formatDisplayAddress(market.creator)}</span>
           </div>
         </div>
       </div>
