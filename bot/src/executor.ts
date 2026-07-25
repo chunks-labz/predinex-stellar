@@ -21,8 +21,10 @@ import {
   Keypair,
   nativeToScVal,
   rpc,
+  scValToNative,
   Transaction,
   TransactionBuilder,
+  xdr,
 } from "@stellar/stellar-sdk";
 import type { BotConfig } from "./config.js";
 import type { SettlementAttempt } from "./types.js";
@@ -40,15 +42,44 @@ export interface SettleCandidate {
 }
 
 /**
+ * Mirrors the contract's SettleResult struct returned by settle_pools.
+ * Each entry represents the outcome for a single pool in the batch.
+ */
+export interface PoolSettleResult {
+  pool_id: number;
+  success: boolean;
+}
+
+/**
+ * Decode a raw ScVal return value into an array of PoolSettleResult.
+ * Returns null if decoding fails.
+ */
+function decodeSettleResults(
+  scVal: xdr.ScVal | undefined,
+): PoolSettleResult[] | null {
+  if (scVal === undefined) return null;
+  try {
+    const raw = scValToNative(scVal);
+    if (!Array.isArray(raw)) return null;
+    return raw.map((r: Record<string, unknown>) => ({
+      pool_id: Number(r.pool_id ?? 0),
+      success: Boolean(r.success),
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Signs and submits the assembled Soroban transaction.
- * Returns the final transaction hash.
+ * Returns the final transaction hash and the confirmed return value.
  */
 async function submitTransaction(
   server: rpc.Server,
   assembledTx: Transaction,
   keypair: Keypair,
   config: BotConfig,
-): Promise<string> {
+): Promise<{ hash: string; returnValue: unknown }> {
   assembledTx.sign(keypair);
   const submission = await server.sendTransaction(assembledTx);
 
@@ -66,7 +97,7 @@ async function submitTransaction(
     const txResult = await server.getTransaction(hash);
 
     if (txResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
-      return hash;
+      return { hash, returnValue: txResult.returnValue };
     }
     if (txResult.status === rpc.Api.GetTransactionStatus.FAILED) {
       throw new Error(`Transaction failed on-chain: ${hash}`);
@@ -81,7 +112,7 @@ async function submitTransaction(
 
 /**
  * Builds and submits a single settle_pools batch.
- * Returns the tx hash on success.
+ * Returns the tx hash and per-pool results decoded from the contract return value.
  */
 async function submitSettleBatch(
   server: rpc.Server,
@@ -90,7 +121,7 @@ async function submitSettleBatch(
   keypair: Keypair,
   candidates: SettleCandidate[],
   config: BotConfig,
-): Promise<string> {
+): Promise<{ txHash: string; poolResults: PoolSettleResult[] }> {
   const callerAddress = keypair.publicKey();
   const sourceAccount = await server.getAccount(callerAddress);
   const contract = new Contract(contractId);
@@ -130,7 +161,36 @@ async function submitSettleBatch(
   // Assemble with the resource estimate embedded
   const assembledTx = rpc.assembleTransaction(tx, simulation).build();
 
-  return submitTransaction(server, assembledTx, keypair, config);
+  const { hash, returnValue } = await submitTransaction(
+    server,
+    assembledTx,
+    keypair,
+    config,
+  );
+
+  // Decode per-pool settlement results from the contract's Vec<SettleResult>
+  // The return value is an array of { pool_id: u32, success: bool }
+  // Priority: confirmed tx returnValue → simulation retval → assume all succeeded
+  let poolResults = decodeSettleResults(
+    returnValue as xdr.ScVal | undefined,
+  );
+
+  if (!poolResults) {
+    logger.warn(
+      "Failed to decode transaction return value, falling back to simulation retval",
+    );
+    poolResults = decodeSettleResults(simulation.result?.retval as xdr.ScVal | undefined);
+  }
+
+  if (!poolResults) {
+    // If even simulation decoding fails, assume all succeeded (existing behavior)
+    poolResults = candidates.map((c) => ({
+      pool_id: c.poolId,
+      success: true,
+    }));
+  }
+
+  return { txHash: hash, poolResults };
 }
 
 /**
@@ -206,7 +266,7 @@ export class Executor {
       const { networkPassphrase, contractId, maxRetries, retryBaseDelayMs } =
         this.config;
 
-      txHash = await withRetry(
+      const submitResult = await withRetry(
         async () => {
           attemptCount++;
           return submitSettleBatch(
@@ -232,22 +292,36 @@ export class Executor {
         },
       );
 
+      txHash = submitResult.txHash;
+
+      // Build a lookup of per-pool results from the contract return value
+      const poolResultMap = new Map(
+        submitResult.poolResults.map((r) => [r.pool_id, r.success]),
+      );
+
       logger.info("settle_pools batch succeeded", {
         txHash,
         poolIds: batch.map((c) => c.poolId),
+        perPoolResults: submitResult.poolResults,
         attemptCount,
         durationMs: Date.now() - startMs,
       });
 
-      return batch.map((c) => ({
-        poolId: c.poolId,
-        winningOutcome: c.winningOutcome,
-        dryRun: false,
-        txHash,
-        success: true,
-        attemptCount,
-        durationMs: Date.now() - startMs,
-      }));
+      return batch.map((c) => {
+        const poolSuccess = poolResultMap.get(c.poolId) ?? false;
+        return {
+          poolId: c.poolId,
+          winningOutcome: c.winningOutcome,
+          dryRun: false,
+          txHash,
+          success: poolSuccess,
+          error: poolSuccess
+            ? undefined
+            : `Pool ${c.poolId} settlement failed on-chain`,
+          attemptCount,
+          durationMs: Date.now() - startMs,
+        };
+      });
     } catch (err) {
       lastError = String(err);
       logger.error("settle_pools batch failed", {
