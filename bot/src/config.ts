@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Bot configuration loaded from environment variables.
  *
  * All required variables are validated at startup. The process exits
@@ -198,7 +198,20 @@ export function loadConfig(): BotConfig {
   );
 
   const webhookUrl = process.env["WEBHOOK_URL"]?.trim() || null;
+  if (webhookUrl !== null) {
+    try {
+      new URL(webhookUrl);
+    } catch {
+      console.error(`[config] WEBHOOK_URL="${webhookUrl}" is not a valid URL`);
+      process.exit(1);
+    }
+  }
+
   const webhookSecret = process.env["WEBHOOK_SECRET"]?.trim() || null;
+  if (webhookSecret !== null && webhookSecret.length < 16) {
+    console.error(`[config] WEBHOOK_SECRET must be at least 16 characters long`);
+    process.exit(1);
+  }
   const logLevel = parseLogLevel(optionalEnv("LOG_LEVEL", "info"));
 
   const healthCheckEnabled =
