@@ -239,6 +239,8 @@ pub enum DataKey {
     LpFeeAllocationBps,
     /// #714 — Per-pool accumulated LP reward pool (unclaimed fees).
     LpRewardPool(u32),
+    /// #807 — Rounding remainder from fee-per-share updates (scaled: amount * LP_PRECISION + prior dust).
+    LpRewardDust(u32),
     /// #714 — Optional time-locked LP stake for bonus multiplier.
     LpStake(u32, Address),
     /// #714 — Bonus multiplier for time-locked LP staking (basis points, 10000 = 1x).
@@ -8686,15 +8688,21 @@ impl PredinexContract {
         if total_shares == 0 { return Err(ContractError::InsufficientLpShares); }
         let token_address: Address = env.storage().persistent().get(&DataKey::Token).ok_or(ContractError::NotInitialized)?;
         token::Client::new(&env, &token_address).transfer(&caller, &env.current_contract_address(), &amount);
-        let fee_per_share_delta = amount.checked_mul(LP_PRECISION).ok_or(ContractError::PoolTotalOverflow)? / total_shares;
+        let scaled_amount = amount.checked_mul(LP_PRECISION).ok_or(ContractError::PoolTotalOverflow)?;
+        let dust: i128 = env.storage().persistent().get(&DataKey::LpRewardDust(pool_id)).unwrap_or(0);
+        let total_scaled = scaled_amount.checked_add(dust).ok_or(ContractError::PoolTotalOverflow)?;
+        let fee_per_share_delta = total_scaled / total_shares;
+        let new_dust = total_scaled % total_shares;
         let current_fps: i128 = env.storage().persistent().get(&DataKey::LpFeePerShare(pool_id)).unwrap_or(0);
         let new_fps = current_fps.checked_add(fee_per_share_delta).ok_or(ContractError::PoolTotalOverflow)?;
         let reward_pool: i128 = env.storage().persistent().get(&DataKey::LpRewardPool(pool_id)).unwrap_or(0);
         let new_reward_pool = reward_pool.checked_add(amount).ok_or(ContractError::PoolTotalOverflow)?;
         env.storage().persistent().set(&DataKey::LpFeePerShare(pool_id), &new_fps);
         env.storage().persistent().set(&DataKey::LpRewardPool(pool_id), &new_reward_pool);
+        env.storage().persistent().set(&DataKey::LpRewardDust(pool_id), &new_dust);
         env.storage().persistent().extend_ttl(&DataKey::LpFeePerShare(pool_id), POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
         env.storage().persistent().extend_ttl(&DataKey::LpRewardPool(pool_id), POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        env.storage().persistent().extend_ttl(&DataKey::LpRewardDust(pool_id), POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
         env.events().publish((Symbol::new(&env, "lp_rewards_distributed"), event_version(&env), pool_id), amount);
         Ok(())
     }
