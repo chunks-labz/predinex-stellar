@@ -4392,7 +4392,6 @@ impl PredinexContract {
         winning_outcome: u32,
     ) -> Result<(), ContractError> {
         Self::require_not_paused(env)?;
-        Self::require_admin(env, caller)?;
 
         let mut pool = env
             .storage()
@@ -4400,7 +4399,23 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let source = SettlementSource::Admin;
+        let admin = Self::get_admin(env.clone());
+        let is_admin = admin.is_some() && admin.as_ref().unwrap() == caller;
+        let is_creator = pool.creator == *caller;
+        let delegated_settler = Self::get_delegated_settler(env.clone(), pool_id);
+        let is_delegated = delegated_settler.is_some() && delegated_settler.as_ref().unwrap() == caller;
+
+        if !is_admin && !is_creator && !is_delegated {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let source = if is_admin {
+            SettlementSource::Admin
+        } else if is_creator {
+            SettlementSource::Creator
+        } else {
+            SettlementSource::Delegated
+        };
 
         if pool.status != PoolStatus::Open {
             return Err(ContractError::PoolAlreadySettled);
@@ -4846,6 +4861,7 @@ impl PredinexContract {
                 let refund = user_bet.total_bet;
                 if refund > 0 {
                     token_client.transfer(&env.current_contract_address(), &bettor, &refund);
+                    Self::reduce_user_exposure(&env, &bettor, pool_id, refund);
                     total_refunded = total_refunded.checked_add(refund).unwrap_or(total_refunded);
                 }
                 env.storage()
@@ -8532,7 +8548,7 @@ impl PredinexContract {
 
         env.events().publish(
             (Symbol::new(&env, "lp_deposit"), event_version(&env), pool_id, user),
-            LpDepositEvent { user: _pool.creator.clone(), pool_id, amount, shares_minted: shares_to_mint },
+            LpDepositEvent { user: user.clone(), pool_id, amount, shares_minted: shares_to_mint },
         );
         Ok(shares_to_mint)
     }
@@ -8584,7 +8600,7 @@ impl PredinexContract {
 
         env.events().publish(
             (Symbol::new(&env, "lp_withdraw"), event_version(&env), pool_id, user),
-            LpWithdrawEvent { user: _pool.creator.clone(), pool_id, amount: withdraw_amount, shares_burned: shares },
+            LpWithdrawEvent { user: user.clone(), pool_id, amount: withdraw_amount, shares_burned: shares },
         );
         Ok(withdraw_amount)
     }
