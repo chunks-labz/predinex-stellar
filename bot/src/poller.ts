@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Polling orchestrator.
  *
  * Runs a periodic loop that:
@@ -33,7 +33,7 @@
  */
 
 import type { BotConfig } from "./config.js";
-import type { CycleSummary, SettlementAttempt, SettlementCycleContext } from "./types.js";
+import type { CycleSummary, PollerMetrics, SettlementAttempt, SettlementCycleContext } from "./types.js";
 import type { Pool } from "./types.js";
 import { ContractClient } from "./contract-client.js";
 import { Executor } from "./executor.js";
@@ -87,6 +87,12 @@ export class Poller {
   private readonly instanceId: string;
   /** Pool IDs that failed in a previous cycle -- tracked for escalation logging */
   private readonly persistentFailures = new Map<number, number>();
+  /** Epoch ms of the last cycle that successfully settled at least one pool */
+  private lastSettlementTs: number | null = null;
+  /** Cumulative count of failed settlement attempts and unhandled cycle errors */
+  private errorCount = 0;
+  /** Number of expired-but-unsettled pools found in the most recent cycle */
+  private pendingPoolsCount = 0;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -136,6 +142,7 @@ export class Poller {
 
       if (poolsExpiredUnsettled === 0) {
         logger.info("No expired unsettled pools found");
+        this.pendingPoolsCount = 0;
         return {
           cycleStartTs: cycleStart,
           poolsScanned,
@@ -184,6 +191,7 @@ export class Poller {
             : "AUTO_SETTLE_ENABLED=false",
         });
 
+        this.pendingPoolsCount = poolsExpiredUnsettled;
         return {
           cycleStartTs: cycleStart,
           poolsScanned,
@@ -201,6 +209,8 @@ export class Poller {
 
       settlementsSucceeded = results.filter((r) => r.success).length;
       settlementsFailed = results.filter((r) => !r.success).length;
+      this.errorCount += settlementsFailed;
+      this.pendingPoolsCount = poolsExpiredUnsettled - settlementsSucceeded;
 
       // ── Step 4: track persistent failures ───────────────────────────────
       for (const result of results) {
@@ -231,6 +241,7 @@ export class Poller {
       // ── Step 5: notify ───────────────────────────────────────────────────
       const successfulSettlements = results.filter((r) => r.success);
       if (successfulSettlements.length > 0) {
+        this.lastSettlementTs = Date.now();
         const cycleContext: SettlementCycleContext = {
           cycleNumber: this.cycleCount,
           instanceId: this.instanceId,
@@ -249,6 +260,7 @@ export class Poller {
         durationMs: Date.now() - cycleStart,
       });
     } catch (err) {
+      this.errorCount += 1;
       logger.error("Settlement cycle encountered unhandled error", {
         cycle: this.cycleCount,
         error: String(err),
@@ -316,5 +328,29 @@ export class Poller {
       clearTimeout(this._sleepTimer);
       this._sleepTimer = null;
     }
+  }
+
+  /**
+   * Delegates to the contract client to verify the Stellar RPC endpoint
+   * is reachable. Used by the health check server's readiness probe.
+   */
+  async checkReadiness(): ReturnType<ContractClient["checkRpcHealth"]> {
+    return this.client.checkRpcHealth();
+  }
+
+  /**
+   * Returns a snapshot of current runtime metrics for the health check
+   * server's `/health/metrics` endpoint.
+   */
+  getMetrics(): PollerMetrics {
+    return {
+      running: this.running,
+      cycleCount: this.cycleCount,
+      lastSettlementAt: this.lastSettlementTs
+        ? new Date(this.lastSettlementTs).toISOString()
+        : null,
+      pendingPoolsCount: this.pendingPoolsCount,
+      errorCount: this.errorCount,
+    };
   }
 }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Read-only Soroban contract client.
  *
  * Uses simulateTransaction to call view functions:
@@ -210,6 +210,24 @@ export class ContractClient {
     }
 
     return expired;
+  }
+
+  /**
+   * Checks whether the underlying Stellar RPC endpoint is reachable and
+   * healthy. Used by the health check server's readiness probe.
+   *
+   * Returns `{ healthy: true, latestLedger }` on success, or
+   * `{ healthy: false, error }` if the RPC call fails or times out.
+   */
+  async checkRpcHealth(): Promise
+    { healthy: true; latestLedger: number } | { healthy: false; error: string }
+  > {
+    try {
+      const health = await this.server.getHealth();
+      return { healthy: true, latestLedger: health.latestLedger };
+    } catch (err) {
+      return { healthy: false, error: String(err) };
+    }
   }
 }
 

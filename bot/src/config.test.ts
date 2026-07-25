@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Unit tests for the config loader.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -33,6 +33,8 @@ describe("loadConfig", () => {
     delete process.env["MAX_RETRIES"];
     delete process.env["RETRY_BASE_DELAY_MS"];
     delete process.env["DEFAULT_WINNING_OUTCOME"];
+    delete process.env["HEALTH_CHECK_ENABLED"];
+    delete process.env["HEALTH_CHECK_PORT"];
   });
 
   it("applies correct defaults for optional variables", async () => {
@@ -49,6 +51,22 @@ describe("loadConfig", () => {
     expect(config.logLevel).toBe("info");
     expect(config.webhookUrl).toBeNull();
     expect(config.webhookSecret).toBeNull();
+    expect(config.healthCheckEnabled).toBe(true);
+    expect(config.healthCheckPort).toBe(3000);
+  });
+
+  it("parses HEALTH_CHECK_ENABLED=false correctly", async () => {
+    process.env["HEALTH_CHECK_ENABLED"] = "false";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.healthCheckEnabled).toBe(false);
+  });
+
+  it("parses a custom HEALTH_CHECK_PORT correctly", async () => {
+    process.env["HEALTH_CHECK_PORT"] = "8080";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.healthCheckPort).toBe(8080);
   });
 
   it("parses DRY_RUN=true correctly", async () => {
