@@ -50,6 +50,7 @@ async function submitTransaction(
   server: rpc.Server,
   assembledTx: Transaction,
   keypair: Keypair,
+  config: BotConfig,
 ): Promise<string> {
   assembledTx.sign(keypair);
   const submission = await server.sendTransaction(assembledTx);
@@ -63,8 +64,8 @@ async function submitTransaction(
   const hash = submission.hash;
 
   // Poll for finality (Stellar has ~5s block time)
-  for (let poll = 0; poll < 30; poll++) {
-    await new Promise((r) => setTimeout(r, 3000));
+  for (let poll = 0; poll < config.txPollMaxAttempts; poll++) {
+    await new Promise((r) => setTimeout(r, config.txPollIntervalMs));
     const txResult = await server.getTransaction(hash);
 
     if (txResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
@@ -131,7 +132,7 @@ async function submitSettleBatch(
   // Assemble with the resource estimate embedded
   const assembledTx = rpc.assembleTransaction(tx, simulation).build();
 
-  return submitTransaction(server, assembledTx, keypair);
+  return submitTransaction(server, assembledTx, keypair, this.config);
 }
 
 /**
