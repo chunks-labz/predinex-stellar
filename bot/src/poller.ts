@@ -18,18 +18,26 @@
  *     integrates an oracle before enabling auto-settle).
  *
  *   AUTO_SETTLE_ENABLED=true
- *     The bot settles using DEFAULT_WINNING_OUTCOME for every pool.
- *     This is suitable when:
- *       - The contract has a built-in oracle already writing the winner, OR
- *       - You are running a protocol-controlled market where a specific
- *         outcome is always authoritative (e.g., "resolved by admin"), OR
- *       - You have patched resolveWinningOutcome() below with your own logic.
+ *     The bot resolves each pool's winning outcome via a three-step chain:
+ *
+ *       1. External oracle API (ORACLE_URL)
+ *          GET {ORACLE_URL}/resolve/{poolId}
+ *          Returns { "outcome": 0 | 1 } to settle, { "outcome": null } to skip.
+ *          HTTP errors or malformed responses fall through to step 2.
+ *
+ *       2. On-chain winning_outcome field
+ *          If an admin has already written the outcome to the pool on-chain,
+ *          it is used directly.
+ *
+ *       3. Default fallback (ORACLE_FALLBACK_TO_DEFAULT=true only)
+ *          Falls back to DEFAULT_WINNING_OUTCOME. Intentionally opt-in to
+ *          prevent silent mis-settlement in production.
+ *
+ *       4. Skip — pool is logged for manual settlement.
  *
  *   Custom oracle integration
- *     Replace the resolveWinningOutcome() function body with a call to your
- *     off-chain oracle or API. The function receives the full Pool object so
- *     you can use pool.title / pool.outcome_a_name / pool.outcome_b_name to
- *     look up the correct outcome.
+ *     Set ORACLE_URL to point at your resolution service.
+ *     Optionally set ORACLE_SECRET for Bearer-token authentication.
  */
 
 import type { BotConfig } from "./config.js";
@@ -43,35 +51,210 @@ import { notify } from "./webhook.js";
 // ─── Oracle hook ─────────────────────────────────────────────────────────────
 
 /**
+ * Response shape expected from the external oracle endpoint.
+ *
+ * GET {oracleUrl}/resolve/{poolId}
+ *   Headers: Authorization: Bearer {oracleSecret}  (if configured)
+ *
+ * Expected JSON body:
+ *   { "outcome": 0 }   // 0 = outcome_a wins, 1 = outcome_b wins
+ *   { "outcome": null } // pool not yet resolvable — skip it
+ *
+ * Any HTTP error (non-2xx) or unexpected body shape causes the oracle leg
+ * to be skipped and the next fallback to be tried.
+ */
+interface OracleResponse {
+  outcome: number | null;
+}
+
+/**
+ * Validate that an unknown value is a valid outcome index (0 or 1).
+ */
+function isValidOutcome(value: unknown): value is number {
+  return value === 0 || value === 1;
+}
+
+/**
+ * Call the external oracle API to resolve a pool's winning outcome.
+ *
+ * Returns:
+ *   - A number (0 or 1) if the oracle resolved successfully.
+ *   - null if the oracle explicitly deferred resolution ("outcome": null).
+ *   - undefined if the call failed or the response was malformed — caller
+ *     should try the next fallback.
+ */
+async function queryOracle(
+  oracleUrl: string,
+  oracleSecret: string | null,
+  poolId: number,
+  pool: Pool,
+): Promise<number | null | undefined> {
+  const url = `${oracleUrl.replace(/\/$/, "")}/resolve/${poolId}`;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (oracleSecret) {
+    headers["Authorization"] = `Bearer ${oracleSecret}`;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(url, { headers });
+  } catch (err) {
+    logger.warn("Oracle request failed (network error) — will try fallback", {
+      poolId,
+      url,
+      error: String(err),
+    });
+    return undefined; // signal: try next fallback
+  }
+
+  if (!response.ok) {
+    logger.warn("Oracle returned non-2xx status — will try fallback", {
+      poolId,
+      url,
+      status: response.status,
+    });
+    return undefined;
+  }
+
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (err) {
+    logger.warn("Oracle response is not valid JSON — will try fallback", {
+      poolId,
+      url,
+      error: String(err),
+    });
+    return undefined;
+  }
+
+  if (
+    body === null ||
+    typeof body !== "object" ||
+    !("outcome" in (body as object))
+  ) {
+    logger.warn("Oracle response missing 'outcome' field — will try fallback", {
+      poolId,
+      url,
+      body,
+    });
+    return undefined;
+  }
+
+  const { outcome } = body as OracleResponse;
+
+  if (outcome === null) {
+    // Oracle deliberately deferred — not yet resolvable
+    logger.info("Oracle deferred resolution for pool", {
+      poolId,
+      title: pool.title,
+    });
+    return null;
+  }
+
+  if (!isValidOutcome(outcome)) {
+    logger.warn("Oracle returned invalid outcome value — will try fallback", {
+      poolId,
+      url,
+      outcome,
+    });
+    return undefined;
+  }
+
+  logger.info("Oracle resolved pool outcome", {
+    poolId,
+    outcome,
+    outcomeLabel: outcome === 0 ? pool.outcome_a_name : pool.outcome_b_name,
+  });
+
+  return outcome;
+}
+
+/**
  * Determine the winning outcome index for an expired pool.
  *
- * Override this function to plug in your own oracle, data source, or
- * decision logic. The default implementation returns config.defaultWinningOutcome.
+ * Resolution is attempted in order:
+ *
+ *   1. External oracle API (if ORACLE_URL is set)
+ *      GET {ORACLE_URL}/resolve/{poolId}
+ *        → returns { outcome: 0 | 1 }  to settle
+ *        → returns { outcome: null }   to skip (not yet resolvable)
+ *        → HTTP error / bad body       falls through to step 2
+ *
+ *   2. On-chain winning_outcome field
+ *      If the pool already has a winning_outcome written on-chain (e.g.
+ *      by an admin or oracle contract), use it directly.
+ *
+ *   3. Default fallback (only when ORACLE_FALLBACK_TO_DEFAULT=true)
+ *      Falls back to config.defaultWinningOutcome.
+ *      This is intentionally opt-in to prevent silent mis-settlement in
+ *      production environments that have not yet wired a real oracle.
+ *
+ *   4. Return null → pool is skipped and logged for manual settlement.
  *
  * Return null to skip settling this pool (the bot will log it as needing
  * manual settlement).
  */
-async function resolveWinningOutcome(
+export async function resolveWinningOutcome(
   poolId: number,
   pool: Pool,
   config: BotConfig,
 ): Promise<number | null> {
-  // ── CUSTOM ORACLE LOGIC HERE ──────────────────────────────────────────────
-  //
-  // Example: call an external API
-  //   const res = await fetch(`https://oracle.example.com/resolve/${poolId}`);
-  //   const { outcome } = await res.json();
-  //   return outcome;  // 0 or 1
-  //
-  // Example: check pool title for known patterns
-  //   if (pool.title.toLowerCase().includes("btc > 100k")) { ... }
-  //
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Step 1: external oracle ───────────────────────────────────────────────
+  if (config.oracleUrl) {
+    const oracleResult = await queryOracle(
+      config.oracleUrl,
+      config.oracleSecret,
+      poolId,
+      pool,
+    );
 
-  void poolId;
-  void pool;
+    if (oracleResult !== undefined) {
+      // undefined = oracle failed / skipped; null or number = intentional answer
+      return oracleResult;
+    }
+    // fall through to on-chain check
+  }
 
-  return config.defaultWinningOutcome;
+  // ── Step 2: on-chain winning_outcome ─────────────────────────────────────
+  // Pools in Open status won't normally have this set, but it costs nothing
+  // to check (an admin might have written it via a separate mechanism).
+  if (isValidOutcome(pool.winning_outcome)) {
+    logger.info("Using on-chain winning_outcome for pool", {
+      poolId,
+      outcome: pool.winning_outcome,
+    });
+    return pool.winning_outcome;
+  }
+
+  // ── Step 3: explicit default fallback ────────────────────────────────────
+  if (config.oracleFallbackToDefault) {
+    logger.warn(
+      "Could not resolve outcome from oracle or on-chain — using DEFAULT_WINNING_OUTCOME (ORACLE_FALLBACK_TO_DEFAULT=true)",
+      {
+        poolId,
+        title: pool.title,
+        defaultWinningOutcome: config.defaultWinningOutcome,
+      },
+    );
+    return config.defaultWinningOutcome;
+  }
+
+  // ── Step 4: skip ─────────────────────────────────────────────────────────
+  logger.warn(
+    "Could not resolve winning outcome — skipping pool (set ORACLE_URL or ORACLE_FALLBACK_TO_DEFAULT=true to enable auto-settlement)",
+    {
+      poolId,
+      title: pool.title,
+      outcome_a: pool.outcome_a_name,
+      outcome_b: pool.outcome_b_name,
+    },
+  );
+  return null;
 }
 
 // ─── Poller ───────────────────────────────────────────────────────────────────
