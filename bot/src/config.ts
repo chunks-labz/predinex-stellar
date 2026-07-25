@@ -32,6 +32,10 @@ export interface BotConfig {
   autoSettleEnabled: boolean;
   defaultWinningOutcome: number;
 
+  // Transaction polling
+  txPollIntervalMs: number;
+  txPollMaxAttempts: number;
+
   // Retry
   maxRetries: number;
   retryBaseDelayMs: number;
@@ -141,6 +145,15 @@ export function loadConfig(): BotConfig {
     process.exit(1);
   }
 
+  const txPollIntervalMs = parsePositiveInt(
+    optionalEnv("TX_POLL_INTERVAL_MS", "3000"),
+    "TX_POLL_INTERVAL_MS",
+  );
+  const txPollMaxAttempts = parsePositiveInt(
+    optionalEnv("TX_POLL_MAX_ATTEMPTS", "30"),
+    "TX_POLL_MAX_ATTEMPTS",
+  );
+
   const maxRetries = parsePositiveInt(
     optionalEnv("MAX_RETRIES", "3"),
     "MAX_RETRIES",
@@ -165,6 +178,8 @@ export function loadConfig(): BotConfig {
     dryRun,
     autoSettleEnabled,
     defaultWinningOutcome,
+    txPollIntervalMs,
+    txPollMaxAttempts,
     maxRetries,
     retryBaseDelayMs,
     webhookUrl,

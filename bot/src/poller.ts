@@ -82,6 +82,7 @@ export class Poller {
   private readonly config: BotConfig;
   private running = false;
   private cycleCount = 0;
+  private _sleepTimer: ReturnType<typeof setTimeout> | null = null;
   /** Unique instance identifier for multi-instance debugging */
   private readonly instanceId: string;
   /** Pool IDs that failed in a previous cycle -- tracked for escalation logging */
@@ -294,12 +295,10 @@ export class Poller {
         sleepMs: this.config.pollIntervalMs,
       });
       await new Promise<void>((resolve) => {
-        const timer = setTimeout(() => {
+        this._sleepTimer = setTimeout(() => {
+          this._sleepTimer = null;
           resolve();
         }, this.config.pollIntervalMs);
-
-        // Allow the timer to be cleared by stop()
-        (this as unknown as Record<string, unknown>)["_sleepTimer"] = timer;
       });
     }
 
@@ -308,7 +307,9 @@ export class Poller {
 
   stop(): void {
     this.running = false;
-    const timer = (this as unknown as Record<string, unknown>)["_sleepTimer"];
-    if (timer) clearTimeout(timer as ReturnType<typeof setTimeout>);
+    if (this._sleepTimer) {
+      clearTimeout(this._sleepTimer);
+      this._sleepTimer = null;
+    }
   }
 }
