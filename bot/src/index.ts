@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Predinex Settlement Bot — Entry Point
  *
  * Usage:
@@ -12,6 +12,7 @@
 import { loadConfig } from "./config.js";
 import { setLogLevel, logger } from "./logger.js";
 import { Poller } from "./poller.js";
+import { HealthServer } from "./health.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -27,6 +28,9 @@ async function main(): Promise<void> {
     batchSize: config.batchSize,
     maxRetries: config.maxRetries,
     webhook: config.webhookUrl ? "configured" : "disabled",
+    healthCheck: config.healthCheckEnabled
+      ? `enabled on port ${config.healthCheckPort}`
+      : "disabled",
   });
 
   if (config.dryRun) {
@@ -44,6 +48,14 @@ async function main(): Promise<void> {
 
   const poller = new Poller(config);
 
+  let healthServer: HealthServer | null = null;
+  if (config.healthCheckEnabled) {
+    healthServer = new HealthServer(poller, config.healthCheckPort);
+    await healthServer.start();
+  } else {
+    logger.info("Health check server disabled (HEALTH_CHECK_ENABLED=false)");
+  }
+
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   let shuttingDown = false;
   const shutdown = (signal: string) => {
@@ -51,6 +63,7 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info(`Received ${signal}, shutting down gracefully…`);
     poller.stop();
+    void healthServer?.stop();
   };
 
   process.on("SIGINT", () => shutdown("SIGINT"));

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TypeScript types mirroring the Soroban contract data structures.
  * See contracts/predinex/src/lib.rs for the canonical Rust definitions.
  */
@@ -81,6 +81,22 @@ export interface CycleSummary {
   settlementsSucceeded: number;
   settlementsFailed: number;
   durationMs: number;
+}
+
+/**
+ * Runtime metrics exposed by the Poller for the health check server.
+ */
+export interface PollerMetrics {
+  /** Whether the poll loop is currently running. */
+  running: boolean;
+  /** Total number of poll cycles completed since startup. */
+  cycleCount: number;
+  /** ISO 8601 timestamp of the last cycle that settled at least one pool, or null if none yet. */
+  lastSettlementAt: string | null;
+  /** Number of expired-but-unsettled pools observed in the most recent cycle. */
+  pendingPoolsCount: number;
+  /** Cumulative count of failed settlement attempts and unhandled cycle errors. */
+  errorCount: number;
 }
 
 /**
