@@ -2662,14 +2662,29 @@ fn test_set_volume_fee_tiers_event_and_clear() {
     );
     client.set_volume_fee_tiers(&token_admin, &tiers);
 
-    // The event emitted by set_volume_fee_tiers is fee_tiers_updated. Read it
-    // before any further contract call (the event buffer reflects the most
-    // recent invocation only).
+    // The event emitted by set_volume_fee_tiers is volume_fee_tiers_set. Read
+    // it before any further contract call (the event buffer reflects the
+    // most recent invocation only).
     let events = env.events().all();
     let last_event = events.events().last().expect("must emit an event");
     let name: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 0)).unwrap();
-    assert_eq!(name, soroban_sdk::Symbol::new(&env, "fee_tiers_updated"));
+    let version: soroban_sdk::Symbol =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 1)).unwrap();
+    assert_eq!(name, soroban_sdk::Symbol::new(&env, "volume_fee_tiers_set"));
+    assert_eq!(version, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+
+    let data_val: Val = match &last_event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+            Env,
+            soroban_sdk::xdr::ScVal,
+        >>::try_from_val(&env, &v0.data)
+        .unwrap(),
+    };
+    let payload: (Address, soroban_sdk::Vec<FeeTier>) =
+        soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap();
+    assert_eq!(payload.0, token_admin);
+    assert_eq!(payload.1, tiers);
 
     assert_eq!(client.get_volume_fee_tiers().len(), 1);
 
@@ -2677,6 +2692,45 @@ fn test_set_volume_fee_tiers_event_and_clear() {
     let empty = soroban_sdk::Vec::<FeeTier>::new(&env);
     client.set_volume_fee_tiers(&token_admin, &empty);
     assert!(client.get_volume_fee_tiers().is_empty());
+}
+
+/// set_protocol_fee emits a versioned protocol_fee_set event with the old
+/// and new fee values.
+#[test]
+fn test_set_protocol_fee_emits_versioned_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
+
+    client.set_protocol_fee(&token_admin, &300);
+
+    let events = env.events().all();
+    let last_event = events.events().last().expect("must emit an event");
+    let name: soroban_sdk::Symbol =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 0)).unwrap();
+    let version: soroban_sdk::Symbol =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 1)).unwrap();
+    assert_eq!(name, soroban_sdk::Symbol::new(&env, "protocol_fee_set"));
+    assert_eq!(version, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+
+    let data_val: Val = match &last_event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+            Env,
+            soroban_sdk::xdr::ScVal,
+        >>::try_from_val(&env, &v0.data)
+        .unwrap(),
+    };
+    let payload: (Address, u32, u32) =
+        soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap();
+    assert_eq!(payload.0, token_admin);
+    assert_eq!(payload.1, PROTOCOL_FEE_DEFAULT_BPS);
+    assert_eq!(payload.2, 300);
 }
 
 /// More than MAX_FEE_TIERS (5) tiers is rejected.

@@ -1488,8 +1488,10 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::ProtocolFee, &fee_bps);
 
-        env.events()
-            .publish((Symbol::new(&env, "protocol_fee_set"),), (caller, old_fee_bps, fee_bps));
+        env.events().publish(
+            (Symbol::new(&env, "protocol_fee_set"), event_version(&env)),
+            (caller, old_fee_bps, fee_bps),
+        );
         Ok(())
     }
 
@@ -1526,7 +1528,8 @@ impl PredinexContract {
     /// * strictly ascending `volume_threshold` (no duplicates, defined order)
     /// * every `fee_bps` within `[PROTOCOL_FEE_MIN_BPS, PROTOCOL_FEE_MAX_BPS]`
     ///
-    /// Emits `fee_tiers_updated` with the number of tiers now configured.
+    /// Emits `volume_fee_tiers_set` with the caller and the full set of tiers
+    /// now configured (empty when tiers were cleared).
     pub fn set_volume_fee_tiers(
         env: Env,
         caller: Address,
@@ -1570,8 +1573,8 @@ impl PredinexContract {
         }
 
         env.events().publish(
-            (Symbol::new(&env, "fee_tiers_updated"), event_version(&env)),
-            tiers.len(),
+            (Symbol::new(&env, "volume_fee_tiers_set"), event_version(&env)),
+            (caller, tiers),
         );
         Ok(())
     }
