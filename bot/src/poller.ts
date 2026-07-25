@@ -109,6 +109,7 @@ export class Poller {
       instance: this.instanceId,
       dryRun: this.config.dryRun,
       autoSettle: this.config.autoSettleEnabled,
+      settleBatchSize: this.config.settleBatchSize,
     });
 
     let poolsScanned = 0;

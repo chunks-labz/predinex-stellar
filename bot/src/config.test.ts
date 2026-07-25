@@ -27,6 +27,7 @@ describe("loadConfig", () => {
     delete process.env["AUTO_SETTLE_ENABLED"];
     delete process.env["POLL_INTERVAL_MS"];
     delete process.env["BATCH_SIZE"];
+    delete process.env["SETTLE_BATCH_SIZE"];
     delete process.env["LOG_LEVEL"];
     delete process.env["WEBHOOK_URL"];
     delete process.env["WEBHOOK_SECRET"];
@@ -41,6 +42,7 @@ describe("loadConfig", () => {
 
     expect(config.pollIntervalMs).toBe(300000);
     expect(config.batchSize).toBe(100);
+    expect(config.settleBatchSize).toBe(20);
     expect(config.dryRun).toBe(false);
     expect(config.autoSettleEnabled).toBe(false);
     expect(config.defaultWinningOutcome).toBe(0);
@@ -92,5 +94,24 @@ describe("loadConfig", () => {
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.batchSize).toBe(100);
+  });
+
+  it("parses SETTLE_BATCH_SIZE within allowed range", async () => {
+    process.env["SETTLE_BATCH_SIZE"] = "10";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.settleBatchSize).toBe(10);
+  });
+
+  it("exits when SETTLE_BATCH_SIZE is out of range", async () => {
+    process.env["SETTLE_BATCH_SIZE"] = "51";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
   });
 });

@@ -27,6 +27,9 @@ export interface BotConfig {
   pollIntervalMs: number;
   batchSize: number;
 
+  /** Max pools per settle_pools transaction (1–50). */
+  settleBatchSize: number;
+
   // Settlement
   dryRun: boolean;
   autoSettleEnabled: boolean;
@@ -66,6 +69,17 @@ function parsePositiveInt(value: string, name: string): number {
   if (isNaN(n) || n <= 0) {
     console.error(
       `[config] Environment variable ${name}="${value}" must be a positive integer`,
+    );
+    process.exit(1);
+  }
+  return n;
+}
+
+function parseSettleBatchSize(value: string): number {
+  const n = parseInt(value, 10);
+  if (isNaN(n) || n < 1 || n > 50) {
+    console.error(
+      `[config] SETTLE_BATCH_SIZE="${value}" must be an integer between 1 and 50`,
     );
     process.exit(1);
   }
@@ -131,6 +145,10 @@ export function loadConfig(): BotConfig {
     );
   }
 
+  const settleBatchSize = parseSettleBatchSize(
+    optionalEnv("SETTLE_BATCH_SIZE", "20"),
+  );
+
   const dryRun = optionalEnv("DRY_RUN", "false").toLowerCase() === "true";
   const autoSettleEnabled =
     optionalEnv("AUTO_SETTLE_ENABLED", "false").toLowerCase() === "true";
@@ -175,6 +193,7 @@ export function loadConfig(): BotConfig {
     botSecretKey,
     pollIntervalMs,
     batchSize: Math.min(batchSize, 100),
+    settleBatchSize,
     dryRun,
     autoSettleEnabled,
     defaultWinningOutcome,

@@ -13,6 +13,7 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   botSecretKey: "S" + "A".repeat(55),
   pollIntervalMs: 300000,
   batchSize: 100,
+  settleBatchSize: 20,
   dryRun: false,
   autoSettleEnabled: true,
   defaultWinningOutcome: 0,

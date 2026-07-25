@@ -5,9 +5,8 @@
  * The bot wallet must be the contract admin.
  *
  * Gas efficiency:
- *   - Uses settle_pools() to batch up to 20 pools per transaction.
- *   - One transaction covers 20 pools; larger sets are split across
- *     multiple sequential transactions.
+ *   - Uses settle_pools() with batch size from SETTLE_BATCH_SIZE (default 20).
+ *   - Larger candidate sets are split across multiple sequential transactions.
  *
  * Idempotency:
  *   - The contract rejects already-settled pools with PoolAlreadySettled.
@@ -30,8 +29,6 @@ import type { SettlementAttempt } from "./types.js";
 import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
 
-/** Soroban contract batch limit for settle_pools */
-const BATCH_SETTLE_LIMIT = 20;
 /** Base transaction fee in stroops */
 const BASE_FEE = "1000";
 /** Seconds before transaction expires */
@@ -92,6 +89,7 @@ async function submitSettleBatch(
   contractId: string,
   keypair: Keypair,
   candidates: SettleCandidate[],
+  config: BotConfig,
 ): Promise<string> {
   const callerAddress = keypair.publicKey();
   const sourceAccount = await server.getAccount(callerAddress);
@@ -132,12 +130,12 @@ async function submitSettleBatch(
   // Assemble with the resource estimate embedded
   const assembledTx = rpc.assembleTransaction(tx, simulation).build();
 
-  return submitTransaction(server, assembledTx, keypair, this.config);
+  return submitTransaction(server, assembledTx, keypair, config);
 }
 
 /**
  * The main settlement executor.
- * Batches candidates into groups of ≤20 and submits each group.
+ * Batches candidates into groups of ≤ settleBatchSize and submits each group.
  */
 export class Executor {
   private readonly server: rpc.Server;
@@ -152,7 +150,7 @@ export class Executor {
 
   /**
    * Settle a list of expired pools.
-   * Batches up to 20 per transaction.
+   * Batches up to settleBatchSize per transaction.
    * Returns one SettlementAttempt per pool.
    */
   async settleAll(candidates: SettleCandidate[]): Promise<SettlementAttempt[]> {
@@ -160,9 +158,10 @@ export class Executor {
 
     const results: SettlementAttempt[] = [];
 
-    // Split into batches of BATCH_SETTLE_LIMIT
-    for (let i = 0; i < candidates.length; i += BATCH_SETTLE_LIMIT) {
-      const batch = candidates.slice(i, i + BATCH_SETTLE_LIMIT);
+    const settleBatchSize = this.config.settleBatchSize;
+
+    for (let i = 0; i < candidates.length; i += settleBatchSize) {
+      const batch = candidates.slice(i, i + settleBatchSize);
 
       logger.info("Submitting settle_pools batch", {
         batchSize: batch.length,
@@ -178,7 +177,7 @@ export class Executor {
   }
 
   /**
-   * Settle a single batch of ≤20 pools.
+   * Settle a single batch of ≤ settleBatchSize pools.
    */
   private async settleBatch(
     batch: SettleCandidate[],
@@ -216,6 +215,7 @@ export class Executor {
             contractId,
             this.keypair,
             batch,
+            this.config,
           );
         },
         {
