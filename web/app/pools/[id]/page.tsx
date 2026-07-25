@@ -203,9 +203,17 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                             <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                                pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'
+                                pool.settled ? 'bg-zinc-800 text-zinc-400'
+                                    : pool.status === 'expired' ? 'bg-yellow-500/10 text-yellow-500'
+                                    : pool.status === 'frozen' ? 'bg-blue-500/10 text-blue-500'
+                                    : pool.status === 'disputed' ? 'bg-orange-500/10 text-orange-500'
+                                    : 'bg-green-500/10 text-green-500'
                             }`}>
-                                {pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active'}
+                                {pool.settled ? 'Settled'
+                                    : pool.status === 'expired' ? 'Expired'
+                                    : pool.status === 'frozen' ? 'Frozen'
+                                    : pool.status === 'disputed' ? 'Disputed'
+                                    : 'Active'}
                             </span>
                             {/* #722 — Export pool data */}
                             <PoolExportButton
@@ -246,7 +254,8 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     </div>
 
-                    {/* Odds display */}
+                    {/* Odds display — only meaningful while the pool is active */}
+                    {pool.status === 'active' && !pool.settled && (
                     <div className="mb-8">
                         <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
                         <div className="flex h-4 rounded-full overflow-hidden">
@@ -264,6 +273,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
                         </div>
                     </div>
+                    )}
 
                     {/* Pool Details */}
                     <div className="bg-muted/30 p-4 rounded-xl mb-8">
@@ -405,10 +415,34 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     )}
 
+                    {/* Status banners for non-active / non-settled pools */}
                     {pool.status === 'expired' && !pool.settled && (
                         <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
                             <p className="text-sm text-yellow-400">
                                 This pool has expired and is awaiting settlement.
+                            </p>
+                        </div>
+                    )}
+                    {pool.status === 'frozen' && !pool.settled && (
+                        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                            <p className="text-sm text-blue-400">
+                                This pool is frozen and not accepting new bets.
+                            </p>
+                        </div>
+                    )}
+                    {pool.status === 'disputed' && !pool.settled && (
+                        <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                            <p className="text-sm text-orange-400">
+                                This pool is under dispute. Settlement is paused pending resolution.
+                            </p>
+                        </div>
+                    )}
+                    {pool.settled && (
+                        <div className="mt-6 p-4 bg-muted/30 border border-border rounded-xl">
+                            <p className="text-sm text-muted-foreground">
+                                This pool has been settled. {pool.winningOutcome !== undefined && pool.winningOutcome !== null
+                                    ? `Winning outcome: ${pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}.`
+                                    : ''}
                             </p>
                         </div>
                     )}

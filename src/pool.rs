@@ -384,3 +384,108 @@ impl Pool {
         Ok(default_fee)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn setup_test(env: &Env) -> Address {
+        env.mock_all_auths();
+        let creator = Address::generate(env);
+        Pool::initialize(env.clone(), 30);
+        // Simulate that the invoker during initialize was the creator by
+        // storing the creator key directly. In a real test harness the
+        // initialize call would be made through a client with `creator` as
+        // the invoker. Here we write the key manually for testing purposes.
+        env.storage().instance().set(&DataKey::Initialized, &true);
+        env.storage().instance().set(&DataKey::DefaultBps, &30u32);
+        env.storage().instance().set(&DataKey::FeeTiers, &Vec::new(env));
+        env.storage().instance().set(&DataKey::Creator, &creator);
+        creator
+    }
+
+    #[test]
+    fn test_set_fee_manager_creator_succeeds() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+
+        // Creator can set fee manager
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &creator,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_fee_manager",
+                args: (&Some(creator.clone()),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_fee_manager(env.clone(), Some(creator.clone()));
+        assert!(result.is_ok(), "Creator should be able to set fee manager");
+    }
+
+    #[test]
+    fn test_set_fee_manager_unauthorized() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+        let unauthorized = Address::generate(&env);
+
+        // Unauthorized user tries to set fee manager
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &unauthorized,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_fee_manager",
+                args: (&Some(unauthorized.clone()),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_fee_manager(env.clone(), Some(unauthorized));
+        assert_eq!(result, Err(PoolError::Unauthorized));
+    }
+
+    #[test]
+    fn test_set_volume_fee_tiers_creator_succeeds() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+
+        let tiers = Vec::new(&env);
+
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &creator,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_volume_fee_tiers",
+                args: (&tiers,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_volume_fee_tiers(env.clone(), tiers);
+        assert!(result.is_ok(), "Creator should be able to set fee tiers");
+    }
+
+    #[test]
+    fn test_set_volume_fee_tiers_unauthorized() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+        let unauthorized = Address::generate(&env);
+
+        let tiers = Vec::new(&env);
+
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &unauthorized,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_volume_fee_tiers",
+                args: (&tiers,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_volume_fee_tiers(env.clone(), tiers);
+        assert_eq!(result, Err(PoolError::Unauthorized));
+    }
+}

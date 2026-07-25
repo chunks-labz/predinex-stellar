@@ -82,3 +82,16 @@ export interface CycleSummary {
   settlementsFailed: number;
   durationMs: number;
 }
+
+/**
+ * Context passed from the poller into the webhook so orchestrators can
+ * correlate settlements with on-chain events and identify bot instances.
+ */
+export interface SettlementCycleContext {
+  /** Monotonically increasing cycle counter (starts at 1). */
+  cycleNumber: number;
+  /** Short identifier for this bot instance (derived from the secret key). */
+  instanceId: string;
+  /** ISO 8601 timestamp of when the settlement cycle completed. */
+  settlementTimestamp: string;
+}

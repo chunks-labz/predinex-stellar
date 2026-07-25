@@ -214,31 +214,46 @@ export class ContractClient {
 }
 
 /**
+ * Discriminated union result from normalizeStatus indicating which branch parsed the value.
+ */
+export type NormalizedStatus = Pool["status"] & { source: "string" | "tag" | "keyed" | "unknown_fallback" };
+
+/**
  * Normalize the status field from scValToNative's enum representation.
  * scValToNative returns enums as either a string ("Open") or an object
  * ({ "Settled": [0] } or { tag: "Settled", values: [0] }).
+ *
+ * Returns a discriminated union with a `source` field so callers can
+ * distinguish known-good parses from the unknown-fallback path.
  */
-function normalizeStatus(raw: unknown): Pool["status"] {
+function normalizeStatus(raw: unknown): NormalizedStatus {
   if (typeof raw === "string") {
-    return { tag: raw } as Pool["status"];
+    return { tag: raw, source: "string" } as NormalizedStatus;
   }
 
   if (raw && typeof raw === "object") {
     // Handle { tag: "Settled", values: [0] } form
     if ("tag" in raw) {
-      return raw as Pool["status"];
+      return { ...raw, source: "tag" } as NormalizedStatus;
     }
 
     // Handle { "Open": [] } or { "Settled": [0] } form
     const key = Object.keys(raw as object)[0];
-    if (!key) return { tag: "Open" };
+    if (!key) {
+      logger.warn("normalizeStatus: empty object keys, falling back to Open", { raw });
+      return { tag: "Open", source: "unknown_fallback" };
+    }
 
     const values = (raw as Record<string, unknown>)[key];
     if (Array.isArray(values) && values.length > 0) {
-      return { tag: key, values } as Pool["status"];
+      return { tag: key, values, source: "keyed" } as NormalizedStatus;
     }
-    return { tag: key } as Pool["status"];
+    return { tag: key, source: "keyed" } as NormalizedStatus;
   }
 
-  return { tag: "Open" };
+  logger.warn("normalizeStatus: unrecognised shape, falling back to Open", {
+    raw,
+    type: typeof raw,
+  });
+  return { tag: "Open", source: "unknown_fallback" };
 }

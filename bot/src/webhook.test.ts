@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { BotConfig } from "./config.js";
-import type { SettlementAttempt } from "./types.js";
+import type { SettlementAttempt, SettlementCycleContext } from "./types.js";
 
 const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   rpcUrl: "https://soroban-testnet.stellar.org",
@@ -23,6 +23,12 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   logLevel: "info",
   ...overrides,
 });
+
+const mockCycleContext: SettlementCycleContext = {
+  cycleNumber: 42,
+  instanceId: "SAAAAAAA...",
+  settlementTimestamp: "2026-07-24T12:00:00.000Z",
+};
 
 const mockSettlements: SettlementAttempt[] = [
   {
@@ -60,14 +66,14 @@ describe("notify", () => {
   it("does not call fetch when webhookUrl is null", async () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig({ webhookUrl: null });
-    await notify(config, mockSettlements);
+    await notify(config, mockSettlements, mockCycleContext);
     expect(vi.mocked(fetch)).not.toHaveBeenCalled();
   });
 
   it("POSTs JSON to the configured webhook URL", async () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig();
-    await notify(config, mockSettlements);
+    await notify(config, mockSettlements, mockCycleContext);
 
     expect(vi.mocked(fetch)).toHaveBeenCalledOnce();
     const [url, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
@@ -81,7 +87,7 @@ describe("notify", () => {
   it("includes HMAC signature when webhookSecret is set", async () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig();
-    await notify(config, mockSettlements);
+    await notify(config, mockSettlements, mockCycleContext);
 
     const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     const headers = options.headers as Record<string, string>;
@@ -91,7 +97,7 @@ describe("notify", () => {
   it("does not include signature when webhookSecret is null", async () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig({ webhookSecret: null });
-    await notify(config, mockSettlements);
+    await notify(config, mockSettlements, mockCycleContext);
 
     const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     const headers = options.headers as Record<string, string>;
@@ -101,12 +107,15 @@ describe("notify", () => {
   it("includes correct settlement summary in payload", async () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig();
-    await notify(config, mockSettlements);
+    await notify(config, mockSettlements, mockCycleContext);
 
     const [, options] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
     const body = JSON.parse(options.body as string);
 
     expect(body.event).toBe("settlement_cycle");
+    expect(body.cycleNumber).toBe(42);
+    expect(body.instanceId).toBe("SAAAAAAA...");
+    expect(body.settlementTimestamp).toBe("2026-07-24T12:00:00.000Z");
     expect(body.summary.attempted).toBe(2);
     expect(body.summary.succeeded).toBe(1);
     expect(body.summary.failed).toBe(1);
@@ -118,6 +127,6 @@ describe("notify", () => {
     const { notify } = await import("./webhook.js");
     const config = mockConfig();
     // Should not throw
-    await expect(notify(config, mockSettlements)).resolves.toBeUndefined();
+    await expect(notify(config, mockSettlements, mockCycleContext)).resolves.toBeUndefined();
   });
 });

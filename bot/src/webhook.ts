@@ -22,7 +22,7 @@
 
 import { createHmac } from "crypto";
 import type { BotConfig } from "./config.js";
-import type { SettlementAttempt } from "./types.js";
+import type { SettlementAttempt, SettlementCycleContext } from "./types.js";
 import { logger } from "./logger.js";
 
 export interface WebhookPayload {
@@ -31,12 +31,20 @@ export interface WebhookPayload {
   network: string;
   contractId: string;
   dryRun: boolean;
+  /** Which poller cycle produced this settlement. */
+  cycleNumber: number;
+  /** Which bot instance settled these pools. */
+  instanceId: string;
+  /** ISO 8601 timestamp of when settlement completed. */
+  settlementTimestamp: string;
   settlements: Array<{
     poolId: number;
     winningOutcome: number;
     txHash?: string;
     success: boolean;
     error?: string;
+    /** Estimated gas used from simulation, if available. */
+    gasUsed?: number;
   }>;
   summary: {
     attempted: number;
@@ -62,6 +70,7 @@ function buildSignature(body: string, secret: string): string {
 export async function notify(
   config: BotConfig,
   settlements: SettlementAttempt[],
+  cycleContext: SettlementCycleContext,
 ): Promise<void> {
   if (!config.webhookUrl) return;
 
@@ -71,6 +80,9 @@ export async function notify(
     network: config.network,
     contractId: config.contractId,
     dryRun: config.dryRun,
+    cycleNumber: cycleContext.cycleNumber,
+    instanceId: cycleContext.instanceId,
+    settlementTimestamp: cycleContext.settlementTimestamp,
     settlements: settlements.map((s) => ({
       poolId: s.poolId,
       winningOutcome: s.winningOutcome,

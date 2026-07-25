@@ -33,7 +33,7 @@
  */
 
 import type { BotConfig } from "./config.js";
-import type { CycleSummary, SettlementAttempt } from "./types.js";
+import type { CycleSummary, SettlementAttempt, SettlementCycleContext } from "./types.js";
 import type { Pool } from "./types.js";
 import { ContractClient } from "./contract-client.js";
 import { Executor } from "./executor.js";
@@ -230,7 +230,12 @@ export class Poller {
       // ── Step 5: notify ───────────────────────────────────────────────────
       const successfulSettlements = results.filter((r) => r.success);
       if (successfulSettlements.length > 0) {
-        await notify(this.config, successfulSettlements);
+        const cycleContext: SettlementCycleContext = {
+          cycleNumber: this.cycleCount,
+          instanceId: this.instanceId,
+          settlementTimestamp: new Date().toISOString(),
+        };
+        await notify(this.config, successfulSettlements, cycleContext);
       }
 
       logger.info("Settlement cycle complete", {

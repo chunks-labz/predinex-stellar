@@ -261,8 +261,18 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                 title={pool.title}
                                 text={`Check out this prediction market: ${pool.title}`}
                             />
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'}`}>
-                                {pool.settled ? 'Settled' : 'Active'}
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                pool.settled ? 'bg-zinc-800 text-zinc-400'
+                                    : pool.status === 'expired' ? 'bg-yellow-500/10 text-yellow-500'
+                                    : pool.status === 'frozen' ? 'bg-blue-500/10 text-blue-500'
+                                    : pool.status === 'disputed' ? 'bg-orange-500/10 text-orange-500'
+                                    : 'bg-green-500/10 text-green-500'
+                            }`}>
+                                {pool.settled ? 'Settled'
+                                    : pool.status === 'expired' ? 'Expired'
+                                    : pool.status === 'frozen' ? 'Frozen'
+                                    : pool.status === 'disputed' ? 'Disputed'
+                                    : 'Active'}
                             </span>
                         </div>
                     </div>
@@ -370,6 +380,24 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                 userAddress={stxAddress}
                                 onClaimSuccess={refreshPoolData}
                             />
+                        </div>
+                    ) : pool.status === 'expired' ? (
+                        <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                            <p className="text-sm text-yellow-400">
+                                Betting is closed. This pool has expired and is awaiting settlement.
+                            </p>
+                        </div>
+                    ) : pool.status === 'frozen' ? (
+                        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                            <p className="text-sm text-blue-400">
+                                Betting is closed. This pool is frozen.
+                            </p>
+                        </div>
+                    ) : pool.status === 'disputed' ? (
+                        <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                            <p className="text-sm text-orange-400">
+                                Betting is paused. This pool is under dispute and awaiting resolution.
+                            </p>
                         </div>
                     ) : (
                         <div className="relative">
