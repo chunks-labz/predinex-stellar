@@ -36,6 +36,9 @@ describe("loadConfig", () => {
     delete process.env["DEFAULT_WINNING_OUTCOME"];
     delete process.env["HEALTH_CHECK_ENABLED"];
     delete process.env["HEALTH_CHECK_PORT"];
+    delete process.env["ORACLE_URL"];
+    delete process.env["ORACLE_SECRET"];
+    delete process.env["ORACLE_FALLBACK_TO_DEFAULT"];
   });
 
   it("applies correct defaults for optional variables", async () => {
@@ -87,11 +90,11 @@ describe("loadConfig", () => {
 
   it("parses webhook URL and secret", async () => {
     process.env["WEBHOOK_URL"] = "https://example.com/hooks";
-    process.env["WEBHOOK_SECRET"] = "mysecret";
+    process.env["WEBHOOK_SECRET"] = "mysecret-is-16-chars";
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.webhookUrl).toBe("https://example.com/hooks");
-    expect(config.webhookSecret).toBe("mysecret");
+    expect(config.webhookSecret).toBe("mysecret-is-16-chars");
   });
 
   it("selects testnet passphrase for testnet network", async () => {
@@ -133,7 +136,85 @@ describe("loadConfig", () => {
     await expect(() => loadConfig()).toThrow("exit 1");
   });
 
-  // ── Oracle config fields ──────────────────────────────────────────────────
+  // ── Webhook URL validation ────────────────────────────────────────────────
+
+  it("exits when WEBHOOK_URL is not a valid URL", async () => {
+    process.env["WEBHOOK_URL"] = "not-a-url";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
+  });
+
+  it("exits when WEBHOOK_URL is missing protocol", async () => {
+    process.env["WEBHOOK_URL"] = "example.com/hooks";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
+  });
+
+  it("accepts a valid WEBHOOK_URL with protocol and host", async () => {
+    process.env["WEBHOOK_URL"] = "https://hooks.example.com/webhook";
+    process.env["WEBHOOK_SECRET"] = "mysecret-is-16-chars";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.webhookUrl).toBe("https://hooks.example.com/webhook");
+  });
+
+  // ── Webhook secret validation ───────────────────────────────────────────
+
+  it("exits when WEBHOOK_SECRET is shorter than 16 characters", async () => {
+    process.env["WEBHOOK_URL"] = "https://example.com/hooks";
+    process.env["WEBHOOK_SECRET"] = "short";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
+  });
+
+  it("exits when WEBHOOK_SECRET is exactly 15 characters", async () => {
+    process.env["WEBHOOK_URL"] = "https://example.com/hooks";
+    process.env["WEBHOOK_SECRET"] = "A".repeat(15);
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
+  });
+
+  it("accepts a WEBHOOK_SECRET of exactly 16 characters", async () => {
+    process.env["WEBHOOK_URL"] = "https://example.com/hooks";
+    process.env["WEBHOOK_SECRET"] = "A".repeat(16);
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.webhookSecret).toBe("A".repeat(16));
+  });
+
+  it("accepts a WEBHOOK_SECRET longer than 16 characters", async () => {
+    process.env["WEBHOOK_URL"] = "https://example.com/hooks";
+    process.env["WEBHOOK_SECRET"] = "my-super-long-secret-key-32-chars!!";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.webhookSecret).toBe("my-super-long-secret-key-32-chars!!");
+  });
+
+  // ── Oracle config fields ────────────────────────────────────────────────
 
   it("defaults oracle fields to null/false when env vars are absent", async () => {
     vi.resetModules();
@@ -154,7 +235,7 @@ describe("loadConfig", () => {
   });
 
   it("treats blank ORACLE_URL as null", async () => {
-    process.env["ORACLE_URL"] = "   ";
+    process.env["ORACLE_URL"] = " ";
     vi.resetModules();
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();

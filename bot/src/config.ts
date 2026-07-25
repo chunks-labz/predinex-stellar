@@ -128,6 +128,28 @@ function validateSecretKey(key: string): void {
   }
 }
 
+function validateWebhookUrl(url: string | null): void {
+  if (url === null) return;
+  try {
+    new URL(url);
+  } catch {
+    console.error(
+      `[config] WEBHOOK_URL="${url}" is not a valid URL`,
+    );
+    process.exit(1);
+  }
+}
+
+function validateWebhookSecret(secret: string | null): void {
+  if (secret === null) return;
+  if (secret.length < 16) {
+    console.error(
+      `[config] WEBHOOK_SECRET must be at least 16 characters long (got ${secret.length})`,
+    );
+    process.exit(1);
+  }
+}
+
 export function loadConfig(): BotConfig {
   const rpcUrl = requireEnv("STELLAR_RPC_URL");
   const rawNetwork = optionalEnv("STELLAR_NETWORK", "testnet").toLowerCase();
@@ -198,7 +220,16 @@ export function loadConfig(): BotConfig {
   );
 
   const webhookUrl = process.env["WEBHOOK_URL"]?.trim() || null;
+  validateWebhookUrl(webhookUrl);
+
   const webhookSecret = process.env["WEBHOOK_SECRET"]?.trim() || null;
+  validateWebhookSecret(webhookSecret);
+
+  const oracleUrl = process.env["ORACLE_URL"]?.trim() || null;
+  const oracleSecret = process.env["ORACLE_SECRET"]?.trim() || null;
+  const oracleFallbackToDefault =
+    optionalEnv("ORACLE_FALLBACK_TO_DEFAULT", "false").toLowerCase() === "true";
+
   const logLevel = parseLogLevel(optionalEnv("LOG_LEVEL", "info"));
 
   const healthCheckEnabled =
