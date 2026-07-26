@@ -4788,19 +4788,75 @@ fn f6_withdraw_more_than_owned_rejected() {
 // ============================================================================
 
 /// G1: dispute_pool within settlement window succeeds.
-/// Ignored: requires get_pool_dispute which is not yet implemented.
 #[test]
-#[ignore]
 fn g1_dispute_within_window_succeeds() {
-    panic!("get_pool_dispute not yet implemented in contract");
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
+
+    let creator = Address::generate(&env);
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Pool"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Yes"),
+        &String::from_str(&env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = 3601);
+    client.settle_pool(&admin, &pool_id, &0);
+
+    // Default window is 7 days (604800 secs).
+    // Dispute at settlement_time + 100 should succeed.
+    env.ledger().with_mut(|l| l.timestamp = 3601 + 100);
+    client.dispute_pool(&admin, &pool_id);
+
+    let pool = client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Disputed);
 }
 
 /// G2: dispute_pool after window expiry is rejected.
-/// Ignored: dispute_pool call signature mismatch (reason arg not in contract).
 #[test]
-#[ignore]
+#[should_panic(expected = "DisputeWindowExpired")]
 fn g2_dispute_after_window_rejected() {
-    panic!("dispute_pool reason arg not in contract; test needs updating");
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
+
+    let creator = Address::generate(&env);
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Pool"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Yes"),
+        &String::from_str(&env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = 3601);
+    client.settle_pool(&admin, &pool_id, &0);
+
+    // Set custom dispute window for testing
+    client.set_dispute_window(&admin, &100);
+
+    // Dispute at settlement_time + 101 should fail.
+    env.ledger().with_mut(|l| l.timestamp = 3601 + 101);
+    client.dispute_pool(&admin, &pool_id);
 }
 
 /// G3: resolve_dispute upheld = true → claiming proceeds normally.

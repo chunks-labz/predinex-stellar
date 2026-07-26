@@ -101,6 +101,7 @@ fn single_asset_pool_full_lifecycle() {
         &String::from_str(&f.env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(event_emitted(&f.env, "create_pool"));
 
@@ -203,6 +204,7 @@ fn cancellation_and_refund_flow() {
         &String::from_str(&f.env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     f.client.place_bet(&bettor, &pool_id, &0, &stake, &None::<Address>);
@@ -244,6 +246,7 @@ fn claim_after_expiry_flow() {
         &String::from_str(&f.env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     assert!(event_emitted(&f.env, "create_pool"));
 
