@@ -629,6 +629,126 @@ export class SorobanTransactionService {
     return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
   }
 
+  async depositLiquidity(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: { poolId: number; amountStroops: number },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    if (!wallet.address) throw new Error("Wallet not connected");
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "deposit_liquidity",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.poolId, { type: "u32" }),
+          nativeToScVal(params.amountStroops, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
+  async withdrawLiquidity(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: { poolId: number; shares: number },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    if (!wallet.address) throw new Error("Wallet not connected");
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "withdraw_liquidity",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.poolId, { type: "u32" }),
+          nativeToScVal(params.shares, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
+  async stakeLp(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: { poolId: number; shares: number; durationSecs: number },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    if (!wallet.address) throw new Error("Wallet not connected");
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "stake_lp",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.poolId, { type: "u32" }),
+          nativeToScVal(params.shares, { type: "i128" }),
+          nativeToScVal(params.durationSecs, { type: "u64" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
+  async claimLpRewards(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: { poolId: number },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    if (!wallet.address) throw new Error("Wallet not connected");
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "claim_lp_rewards",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.poolId, { type: "u32" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
   private async pollForSuccess(txHash: string): Promise<SorobanTxResult> {
     let attempts = 0;
     while (attempts < 20) {
