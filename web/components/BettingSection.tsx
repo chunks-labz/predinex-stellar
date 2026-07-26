@@ -13,6 +13,7 @@ import { toastMessages, showToastPayload } from '@/lib/toast-messages';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
+import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
 
 interface BettingSectionProps {
@@ -24,6 +25,7 @@ interface BettingSectionProps {
 export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSectionProps) {
     const wallet = useWallet();
     const { isConnected, address, connect } = wallet;
+    const { balance } = useWalletAccount();
     const { showToast } = useToast();
     const [betAmount, setBetAmount] = useState('');
     const [isBetting, setIsBetting] = useState(false);
@@ -40,8 +42,9 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
     const hasMaxBet = maxBetStroops > 0;
     const maxBetXlm = hasMaxBet ? maxBetStroops / STROOPS_PER_XLM : null;
 
-    // Derived wallet balance (placeholder — replace with real balance hook if available).
-    const walletBalance: number | null = isConnected ? 100.0 : null;
+    const parsedWalletBalance = Number.parseFloat(balance);
+    const walletBalance: number | null =
+        isConnected && Number.isFinite(parsedWalletBalance) ? parsedWalletBalance : null;
 
     const { isMismatch, expectedNetworkName } = useNetworkMismatch();
 
