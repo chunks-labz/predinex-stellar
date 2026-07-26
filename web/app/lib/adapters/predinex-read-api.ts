@@ -12,8 +12,12 @@ import {
   getPoolCountFromSoroban,
   getPoolBetLimitsFromSoroban,
   getFreezeAdminFromSoroban,
+  getLpPositionFromSoroban,
+  getPendingLpRewardsFromSoroban,
+  getLpStakeFromSoroban,
   type Pool,
   type UserBetData,
+  type LpPositionData,
 } from "../soroban-read-api";
 import { getPublicTemplatesFromSoroban } from '../soroban-template-api';
 import { getUserActivityFromSoroban } from "../soroban-event-service";
@@ -148,6 +152,12 @@ export const predinexReadApi = {
   getUserActivitySoroban,
   /** Canonical Soroban read: get user activity via events */
   getUserActivity: getUserActivitySoroban,
+  /** Canonical Soroban read: get LP position for a user in a pool */
+  getLpPosition: getLpPositionFromSoroban,
+  /** Canonical Soroban read: get pending LP rewards for a user */
+  getPendingLpRewards: getPendingLpRewardsFromSoroban,
+  /** Canonical Soroban read: get LP stake info for a user */
+  getLpStake: getLpStakeFromSoroban,
   /** Legacy delegates retained for compatibility while callers migrate */
   getMarkets,
   getTotalVolume,
