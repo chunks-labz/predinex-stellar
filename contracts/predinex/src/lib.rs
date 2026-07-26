@@ -245,6 +245,9 @@ pub enum DataKey {
     LpStake(u32, Address),
     /// #714 — Bonus multiplier for time-locked LP staking (basis points, 10000 = 1x).
     LpStakeBoostBps,
+    /// #811 — Timestamp of the last qualifying large bet per (user, pool).
+    /// Used by the large bet cooldown check independently of daily loss windows.
+    LastLargeBetTimestamp(Address, u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -2227,19 +2230,14 @@ impl PredinexContract {
             && amount >= config.large_bet_threshold
         {
             let now = env.ledger().timestamp();
-            let last_large_bet_key = DataKey::UserExposurePerPool(user.clone(), pool_id);
-            // Use a separate tracking for cooldown - we'll use the daily loss state's window_start
-            // as a proxy for last large bet time (in production, you'd use a dedicated key)
-            let daily_state = env
+            let last_large_bet_key = DataKey::LastLargeBetTimestamp(user.clone(), pool_id);
+            let last_large_bet_ts: u64 = env
                 .storage()
                 .persistent()
-                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
-                .unwrap_or(UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                });
+                .get(&last_large_bet_key)
+                .unwrap_or(0);
 
-            if now.saturating_sub(daily_state.window_start) < config.large_bet_cooldown_secs {
+            if last_large_bet_ts > 0 && now.saturating_sub(last_large_bet_ts) < config.large_bet_cooldown_secs {
                 env.events().publish(
                     (
                         Symbol::new(env, "user_large_bet_cooldown_active"),
@@ -3606,6 +3604,19 @@ impl PredinexContract {
 
         // #705 — Update user exposure tracking after bet is placed.
         Self::update_user_exposure(&env, &user, pool_id, net_amount);
+
+        // #811 — Record large bet timestamp for cooldown tracking.
+        {
+            let config = Self::get_user_exposure_config(env.clone());
+            if config.large_bet_cooldown_secs > 0
+                && config.large_bet_threshold > 0
+                && amount >= config.large_bet_threshold
+            {
+                let ts_key = DataKey::LastLargeBetTimestamp(user.clone(), pool_id);
+                env.storage().persistent().set(&ts_key, &env.ledger().timestamp());
+                env.storage().persistent().extend_ttl(&ts_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+            }
+        }
 
         // Calculate totals for the event
         let total_yes = pool.total_a;
@@ -8631,9 +8642,12 @@ impl PredinexContract {
         if shares <= 0 { return Err(ContractError::InvalidLpAmount); }
         if duration_secs < MIN_POOL_DURATION_SECS { return Err(ContractError::DurationTooShort); }
         let position: LpPosition = env.storage().persistent().get(&DataKey::LpPosition(pool_id, user.clone())).ok_or(ContractError::InsufficientLpShares)?;
-        let existing_staked: i128 = env.storage().persistent().get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone())).map(|s| s.shares).unwrap_or(0);
+        let existing_stake: Option<LpStakeInfo> = env.storage().persistent().get(&DataKey::LpStake(pool_id, user.clone()));
+        let existing_staked = existing_stake.as_ref().map(|s| s.shares).unwrap_or(0);
+        let existing_lock_until = existing_stake.as_ref().map(|s| s.lock_until).unwrap_or(0);
         if shares > position.shares - existing_staked { return Err(ContractError::InsufficientLpShares); }
-        let lock_until = env.ledger().timestamp().checked_add(duration_secs).ok_or(ContractError::ExpiryOverflow)?;
+        let new_lock_until = env.ledger().timestamp().checked_add(duration_secs).ok_or(ContractError::ExpiryOverflow)?;
+        let lock_until = new_lock_until.max(existing_lock_until);
         let new_staked = existing_staked.checked_add(shares).ok_or(ContractError::PoolTotalOverflow)?;
         let stake = LpStakeInfo { shares: new_staked, lock_until };
         env.storage().persistent().set(&DataKey::LpStake(pool_id, user.clone()), &stake);
