@@ -259,6 +259,22 @@ export async function resolveWinningOutcome(
 
 // ─── Poller ───────────────────────────────────────────────────────────────────
 
+/**
+ * Consecutive-failure count at which a pool is escalated in the logs.
+ */
+export const FAILURE_ESCALATION_THRESHOLD = 3;
+
+/**
+ * Hard ceiling on a pool's tracked consecutive-failure count.
+ *
+ * Once a pool reaches this many consecutive failures it is treated as
+ * permanently broken (auth failure, contract panic, …): it is escalated once,
+ * then evicted from the tracking map. It re-enters tracking from zero if a
+ * later cycle attempts it again, so a transient outage still recovers, but the
+ * counter can never grow without bound.
+ */
+export const MAX_FAILURE_COUNT = 10;
+
 export class Poller {
   private readonly client: ContractClient;
   private readonly executor: Executor;
@@ -268,7 +284,13 @@ export class Poller {
   private _sleepTimer: ReturnType<typeof setTimeout> | null = null;
   /** Unique instance identifier for multi-instance debugging */
   private readonly instanceId: string;
-  /** Pool IDs that failed in a previous cycle -- tracked for escalation logging */
+  /**
+   * Pool IDs that failed in a previous cycle -- tracked for escalation logging.
+   *
+   * Bounded on both axes: each value is capped at {@link MAX_FAILURE_COUNT}
+   * (entries are evicted once they reach it), and every cycle prunes entries
+   * for pools that are no longer in the active expired-unsettled scan.
+   */
   private readonly persistentFailures = new Map<number, number>();
   /** Epoch ms of the last cycle that successfully settled at least one pool */
   private lastSettlementTs: number | null = null;
@@ -317,6 +339,11 @@ export class Poller {
       // fetched it inside findExpiredUnsettledPools. Re-fetch is cheap enough.
       poolsScanned = await this.client.getPoolCount();
       poolsExpiredUnsettled = expired.length;
+
+      // Drop failure counters for pools that are no longer candidates (settled
+      // elsewhere, voided, or out of the scan range). Without this the map
+      // grows for the lifetime of the process.
+      this.pruneFailureTracking(new Set(expired.map(({ poolId }) => poolId)));
 
       logger.info("Pool scan complete", {
         poolsScanned,
@@ -410,14 +437,30 @@ export class Poller {
         } else {
           const prev = this.persistentFailures.get(result.poolId) ?? 0;
           const failCount = prev + 1;
-          this.persistentFailures.set(result.poolId, failCount);
 
-          if (failCount >= 3) {
-            logger.error("Pool has failed to settle repeatedly — manual intervention needed", {
-              poolId: result.poolId,
-              failureCount: failCount,
-              lastError: result.error,
-            });
+          if (failCount >= MAX_FAILURE_COUNT) {
+            // Treat as permanently broken: alert once, then stop tracking so a
+            // pool that never succeeds cannot pin an entry forever.
+            logger.error(
+              "Pool hit the maximum consecutive failure count — giving up tracking it, settle it manually",
+              {
+                poolId: result.poolId,
+                failureCount: failCount,
+                maxFailureCount: MAX_FAILURE_COUNT,
+                lastError: result.error,
+              },
+            );
+            this.persistentFailures.delete(result.poolId);
+          } else {
+            this.persistentFailures.set(result.poolId, failCount);
+
+            if (failCount >= FAILURE_ESCALATION_THRESHOLD) {
+              logger.error("Pool has failed to settle repeatedly — manual intervention needed", {
+                poolId: result.poolId,
+                failureCount: failCount,
+                lastError: result.error,
+              });
+            }
           }
         }
       }
@@ -462,6 +505,34 @@ export class Poller {
       settlementsFailed,
       durationMs: Date.now() - cycleStart,
     };
+  }
+
+  /**
+   * Drop consecutive-failure entries for pools outside the current scan.
+   *
+   * A pool leaves the scan once it is settled, voided, or falls out of the
+   * scanned range, at which point its failure history is no longer actionable.
+   * Keeping the map a subset of the active scan is what bounds its size
+   * regardless of how many pools the contract has accumulated.
+   */
+  private pruneFailureTracking(activePoolIds: Set<number>): void {
+    if (this.persistentFailures.size === 0) return;
+
+    const pruned: number[] = [];
+    for (const poolId of this.persistentFailures.keys()) {
+      if (!activePoolIds.has(poolId)) {
+        this.persistentFailures.delete(poolId);
+        pruned.push(poolId);
+      }
+    }
+
+    if (pruned.length > 0) {
+      logger.debug("Pruned stale failure-tracking entries", {
+        cycle: this.cycleCount,
+        prunedPoolIds: pruned,
+        tracked: this.persistentFailures.size,
+      });
+    }
   }
 
   /**
@@ -535,6 +606,7 @@ export class Poller {
         : null,
       pendingPoolsCount: this.pendingPoolsCount,
       errorCount: this.errorCount,
+      trackedFailurePools: this.persistentFailures.size,
     };
   }
 }

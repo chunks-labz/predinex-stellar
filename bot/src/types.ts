@@ -97,6 +97,11 @@ export interface PollerMetrics {
   pendingPoolsCount: number;
   /** Cumulative count of failed settlement attempts and unhandled cycle errors. */
   errorCount: number;
+  /**
+   * Number of pools currently tracked in the consecutive-failure map. Bounded
+   * by the size of the active scan, so a steady climb here signals a leak.
+   */
+  trackedFailurePools: number;
 }
 
 /**

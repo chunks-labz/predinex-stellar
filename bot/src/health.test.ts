@@ -25,6 +25,7 @@ function makeFakePoller(overrides: {
     lastSettlementAt: null,
     pendingPoolsCount: 0,
     errorCount: 0,
+    trackedFailurePools: 0,
     ...overrides.metrics,
   };
 
