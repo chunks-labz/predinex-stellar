@@ -20,3 +20,11 @@ Thumbs.db
 issue.md
 pr.md
 docs/api/
+
+# Removed one-off fix/refactor scripts (see issue #771)
+fix_pool_lifecycle.py
+fix_tests.py
+modify_test.py
+modify.py
+refactor.py
+refactor2.py

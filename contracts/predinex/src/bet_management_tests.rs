@@ -81,6 +81,7 @@ fn make_pool_bm(t: &BmEnv) -> (u32, Address) {
         &String::from_str(&t.env, "No"),
         &3_600u64,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     (pool_id, creator)
 }

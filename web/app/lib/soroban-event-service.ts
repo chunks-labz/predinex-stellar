@@ -90,7 +90,10 @@ export type SorobanEventName =
   | 'settle_pool'
   | 'claim_winnings'
   | 'fee_collected'
-  | 'treasury_withdrawal';
+  | 'treasury_withdrawal'
+  | 'pool_frozen'
+  | 'pool_disputed'
+  | 'pool_unfrozen';
 
 /**
  * Normalized, typed shape of a decoded Soroban contract event.
@@ -241,6 +244,14 @@ export function decodeSorobanEvent(raw: RawSorobanEvent): DecodedSorobanEvent | 
       return base;
     }
 
+    case 'pool_frozen':
+    case 'pool_disputed':
+    case 'pool_unfrozen': {
+      // topics: [name, version, pool_id]
+      base.poolId = toNumber(topics[2]);
+      return base;
+    }
+
     case 'fee_collected':
     case 'treasury_withdrawal':
       // Not surfaced in the activity feed
@@ -334,6 +345,19 @@ export function mapEventToActivityItem(
           poolId: event.poolId,
           outcome: event.winningOutcome,
         },
+      };
+
+    case 'pool_frozen':
+    case 'pool_disputed':
+    case 'pool_unfrozen':
+      return {
+        txId: event.txHash,
+        type: 'contract-call',
+        functionName: event.name,
+        timestamp: event.timestamp,
+        status: 'success',
+        poolId: event.poolId,
+        explorerUrl: txUrl,
       };
 
     default:
@@ -503,6 +527,70 @@ export async function getUserActivityFromSoroban(
     return items.slice(0, limit);
   } catch (e) {
     log.error('Failed to fetch Soroban activity events', e);
+    return [];
+  }
+}
+
+/**
+ * Fetches pool freeze/dispute events specifically for the admin dashboard.
+ *
+ * @param poolId - The pool ID to query events for
+ * @param limit  - Maximum number of events
+ * @param config - Soroban configuration
+ */
+export async function getPoolAdminActivityFromSoroban(
+  poolId: number,
+  limit: number = 20,
+  config: SorobanEventServiceConfig
+): Promise<ActivityItem[]> {
+  const { rpcUrl, explorerUrl, contractId } = config;
+  if (!rpcUrl || !explorerUrl || !contractId) return [];
+
+  try {
+    const body = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getEvents',
+      params: {
+        filters: [
+          {
+            type: 'contract',
+            contractIds: [contractId],
+            topics: [
+              ['pool_frozen', 'pool_disputed', 'pool_unfrozen'],
+              [SUPPORTED_EVENT_SCHEMA_VERSION]
+            ],
+          },
+        ],
+        pagination: { limit },
+      },
+    };
+
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) return [];
+    const json: GetEventsResponse = await response.json();
+    if (json.error) return [];
+
+    const rawEvents: RawSorobanEvent[] = json.result?.events ?? [];
+    const items: ActivityItem[] = [];
+
+    for (const raw of rawEvents) {
+      const decoded = decodeSorobanEvent(raw);
+      if (!decoded || decoded.poolId !== poolId) continue;
+      
+      const item = mapEventToActivityItem(decoded, explorerUrl);
+      if (item) items.push(item);
+    }
+
+    items.sort((a, b) => b.timestamp - a.timestamp);
+    return items.slice(0, limit);
+  } catch (e) {
+    log.error('Failed to fetch pool admin activity events', e);
     return [];
   }
 }

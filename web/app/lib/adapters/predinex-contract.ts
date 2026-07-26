@@ -5,6 +5,7 @@
 import { getRuntimeConfig } from '../runtime-config';
 import { SorobanTransactionService, TxStage } from '../soroban-transaction-service';
 import { FreighterWalletClient } from '../freighter-adapter';
+import { scValToNative } from '@stellar/stellar-sdk';
 
 let sorobanService: SorobanTransactionService | null = null;
 
@@ -42,6 +43,98 @@ export const predinexContract = {
         outcomeA: params.outcomeA,
         outcomeB: params.outcomeB,
         duration: params.durationSeconds,
+      },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    let poolId: number | undefined;
+    try {
+      if (result.returnValue) {
+        const decoded = scValToNative(result.returnValue);
+        if (typeof decoded === 'number' || typeof decoded === 'bigint') {
+          poolId = Number(decoded);
+        }
+      }
+    } catch {
+      // best-effort; extended metadata call will be skipped if poolId is unavailable
+    }
+
+    return { txHash: result.txHash, poolId };
+  },
+
+  /**
+   * Submit a `create_multi_outcome_pool` Soroban contract call (wallet prompt).
+   */
+  async createMultiOutcomePoolSoroban(params: {
+    wallet: FreighterWalletClient;
+    title: string;
+    description: string;
+    outcomes: string[];
+    durationSeconds: number;
+    metadataUri?: string | null;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.createMultiOutcomePool(
+      params.wallet,
+      soroban.contractId,
+      {
+        title: params.title,
+        description: params.description,
+        outcomes: params.outcomes,
+        duration: params.durationSeconds,
+        metadataUri: params.metadataUri,
+      },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    return { txHash: result.txHash };
+  },
+
+  /**
+   * Submit a `create_pool_from_template` Soroban contract call (wallet prompt).
+   */
+  async createPoolFromTemplateSoroban(params: {
+    wallet: FreighterWalletClient;
+    templateId: number;
+    overrides: {
+      title?: string;
+      description?: string;
+      outcomes?: string[];
+      durationSeconds?: number;
+      metadataUri?: string | null;
+    };
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.createPoolFromTemplate(
+      params.wallet,
+      soroban.contractId,
+      {
+        templateId: params.templateId,
+        overrides: {
+          title: params.overrides.title,
+          description: params.overrides.description,
+          outcomes: params.overrides.outcomes,
+          duration: params.overrides.durationSeconds,
+          metadataUri: params.overrides.metadataUri,
+        },
       },
       params.onStageChange,
       params.onFeeEstimated
@@ -233,6 +326,157 @@ export const predinexContract = {
       throw new Error(result.error || 'Transaction failed');
     }
 
+    return { txHash: result.txHash };
+  },
+
+  async freezePoolSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.freezePool(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async disputePoolSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.disputePool(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async unfreezePoolSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.unfreezePool(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async depositLiquiditySoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    amountStroops: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.depositLiquidity(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId, amountStroops: params.amountStroops },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async withdrawLiquiditySoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    shares: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.withdrawLiquidity(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId, shares: params.shares },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async stakeLpSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    shares: number;
+    durationSecs: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.stakeLp(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId, shares: params.shares, durationSecs: params.durationSecs },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
+    return { txHash: result.txHash };
+  },
+
+  async claimLpRewardsSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.claimLpRewards(
+      params.wallet,
+      soroban.contractId,
+      { poolId: params.poolId },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') throw new Error(result.error || 'Transaction failed');
     return { txHash: result.txHash };
   },
 };

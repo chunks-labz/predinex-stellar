@@ -50,6 +50,7 @@ fn make_pool(
         &String::from_str(env, "No"),
         &3_600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 

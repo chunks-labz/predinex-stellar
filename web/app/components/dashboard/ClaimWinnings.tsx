@@ -6,7 +6,7 @@ import Link from 'next/link';
 import type { UserBet } from '../../lib/dashboard-types';
 import type { ClaimTxState } from '../../lib/hooks/useClaimWinnings';
 import { formatCurrency } from '../../lib/dashboard-utils';
-import { getNetworkConfig } from '../../lib/constants';
+import { DEFAULT_NETWORK } from '../../lib/constants';
 import TransactionReceipt, { TransactionReceiptData } from '@/components/TransactionReceipt';
 import { Dialog } from '../../../components/ui/Dialog';
 
@@ -59,7 +59,7 @@ export default function ClaimWinnings({
 
     const receipt: TransactionReceiptData = {
       txId: claimTx.txId,
-      network: getNetworkConfig().network,
+      network: DEFAULT_NETWORK,
       marketId: bet.poolId,
       marketTitle: bet.marketTitle,
       type: 'claim',

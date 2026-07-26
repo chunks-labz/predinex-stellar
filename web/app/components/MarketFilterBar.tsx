@@ -33,6 +33,7 @@ const statusOptions: Array<{ value: MarketStatusFilter; label: string }> = [
   { value: 'open', label: 'Open' },
   { value: 'settled', label: 'Settled' },
   { value: 'disputed', label: 'Disputed' },
+  { value: 'frozen', label: 'Frozen' },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [

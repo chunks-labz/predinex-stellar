@@ -34,6 +34,8 @@ pub enum PoolError {
     NegativeVolume = 6,
     /// Contract not yet initialized.
     NotInitialized = 7,
+    /// Caller is not authorized to perform this action.
+    Unauthorized = 8,
 }
 
 /// A single fee tier: a volume threshold and the corresponding fee in bps.
@@ -58,6 +60,8 @@ pub enum DataKey {
     FeeManager,
     /// List of fee tiers stored in ascending order of `volume_threshold`.
     FeeTiers,
+    /// Address of the pool creator (the only account allowed to modify admin settings).
+    Creator,
 }
 
 /// The pool contract supporting both a flat default fee and volume‑based tiered fees.
@@ -106,11 +110,13 @@ impl Pool {
         }
 
         // ── Write state ──
+        let creator = env.invoker();
         env.storage().instance().set(&DataKey::Initialized, &true);
         env.storage().instance().set(&DataKey::DefaultBps, &default_bps);
         env.storage()
             .instance()
             .set(&DataKey::FeeTiers, &Vec::new(&env));
+        env.storage().instance().set(&DataKey::Creator, &creator);
 
         log!(&env, "info", "Pool initialized with default fee: {} bps", default_bps);
         Ok(())
@@ -138,7 +144,20 @@ impl Pool {
     /// # Events
     ///
     /// Emits `fee_manager_updated` with the new value.
-    pub fn set_fee_manager(env: Env, fee_manager: Option<Address>) {
+    pub fn set_fee_manager(env: Env, fee_manager: Option<Address>) -> Result<(), PoolError> {
+        Self::check_initialized(&env)?;
+
+        let caller = env.invoker();
+        let creator: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Creator)
+            .ok_or(PoolError::NotInitialized)?;
+        if caller != creator {
+            log!(&env, "error", "Unauthorized: only the pool creator can set the fee manager");
+            return Err(PoolError::Unauthorized);
+        }
+
         env.storage()
             .instance()
             .set(&DataKey::FeeManager, &fee_manager);
@@ -147,6 +166,7 @@ impl Pool {
         env.events().publish(event_payload);
 
         log!(&env, "info", "Fee manager set to {:?}", fee_manager);
+        Ok(())
     }
 
     /// Retrieve the current fee manager address.
@@ -217,6 +237,17 @@ impl Pool {
     /// Emits `fee_tiers_updated` with the new list of tiers.
     pub fn set_volume_fee_tiers(env: Env, tiers: Vec<FeeTier>) -> Result<(), PoolError> {
         Self::check_initialized(&env)?;
+
+        let caller = env.invoker();
+        let creator: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Creator)
+            .ok_or(PoolError::NotInitialized)?;
+        if caller != creator {
+            log!(&env, "error", "Unauthorized: only the pool creator can set fee tiers");
+            return Err(PoolError::Unauthorized);
+        }
 
         // ── Validate count ──
         if tiers.len() > MAX_TIERS {
@@ -351,5 +382,110 @@ impl Pool {
         // No tier matched → fallback to default
         log!(&env, "info", "No tier matched, using default fee: {} bps", default_fee);
         Ok(default_fee)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn setup_test(env: &Env) -> Address {
+        env.mock_all_auths();
+        let creator = Address::generate(env);
+        Pool::initialize(env.clone(), 30);
+        // Simulate that the invoker during initialize was the creator by
+        // storing the creator key directly. In a real test harness the
+        // initialize call would be made through a client with `creator` as
+        // the invoker. Here we write the key manually for testing purposes.
+        env.storage().instance().set(&DataKey::Initialized, &true);
+        env.storage().instance().set(&DataKey::DefaultBps, &30u32);
+        env.storage().instance().set(&DataKey::FeeTiers, &Vec::new(env));
+        env.storage().instance().set(&DataKey::Creator, &creator);
+        creator
+    }
+
+    #[test]
+    fn test_set_fee_manager_creator_succeeds() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+
+        // Creator can set fee manager
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &creator,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_fee_manager",
+                args: (&Some(creator.clone()),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_fee_manager(env.clone(), Some(creator.clone()));
+        assert!(result.is_ok(), "Creator should be able to set fee manager");
+    }
+
+    #[test]
+    fn test_set_fee_manager_unauthorized() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+        let unauthorized = Address::generate(&env);
+
+        // Unauthorized user tries to set fee manager
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &unauthorized,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_fee_manager",
+                args: (&Some(unauthorized.clone()),).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_fee_manager(env.clone(), Some(unauthorized));
+        assert_eq!(result, Err(PoolError::Unauthorized));
+    }
+
+    #[test]
+    fn test_set_volume_fee_tiers_creator_succeeds() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+
+        let tiers = Vec::new(&env);
+
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &creator,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_volume_fee_tiers",
+                args: (&tiers,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_volume_fee_tiers(env.clone(), tiers);
+        assert!(result.is_ok(), "Creator should be able to set fee tiers");
+    }
+
+    #[test]
+    fn test_set_volume_fee_tiers_unauthorized() {
+        let env = Env::default();
+        let creator = setup_test(&env);
+        let unauthorized = Address::generate(&env);
+
+        let tiers = Vec::new(&env);
+
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &unauthorized,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &env.register_contract(None, Pool),
+                fn_name: "set_volume_fee_tiers",
+                args: (&tiers,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+
+        let result = Pool::set_volume_fee_tiers(env.clone(), tiers);
+        assert_eq!(result, Err(PoolError::Unauthorized));
     }
 }

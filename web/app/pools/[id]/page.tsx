@@ -7,12 +7,14 @@ import { use, useEffect, useState, useCallback } from "react";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
+import type { PoolExtendedMetadata } from "../../lib/soroban-read-api";
 import Navbar from '@/components/Navbar';
 import CountdownTimer from '@/components/CountdownTimer';
 import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
 import { blocksToSeconds } from "../../lib/countdown-utils";
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
-import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet } from "lucide-react";
+import PoolExportButton from "../../../components/PoolExportButton";
+import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 
 function LoadingSkeleton() {
@@ -48,6 +50,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
+    const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
 
     const fetchPool = useCallback(async () => {
         try {
@@ -91,6 +94,13 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         load();
         return () => { cancelled = true; };
     }, [fetchPool]);
+
+    // #721 — Fetch extended metadata once on mount (best-effort).
+    useEffect(() => {
+        predinexReadApi.getPoolExtMetadata(poolId)
+            .then(meta => { if (meta) setExtMetadata(meta); })
+            .catch(() => {});
+    }, [poolId]);
 
     useEffect(() => {
         fetchUserBet();
@@ -191,11 +201,28 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <h1 className="text-3xl font-bold">{pool.title}</h1>
                             <p className="text-muted-foreground mt-1">{pool.description}</p>
                         </div>
-                        <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
-                            pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'
-                        }`}>
-                            {pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active'}
-                        </span>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                                pool.settled ? 'bg-zinc-800 text-zinc-400'
+                                    : pool.status === 'expired' ? 'bg-yellow-500/10 text-yellow-500'
+                                    : pool.status === 'frozen' ? 'bg-blue-500/10 text-blue-500'
+                                    : pool.status === 'disputed' ? 'bg-orange-500/10 text-orange-500'
+                                    : 'bg-green-500/10 text-green-500'
+                            }`}>
+                                {pool.settled ? 'Settled'
+                                    : pool.status === 'expired' ? 'Expired'
+                                    : pool.status === 'frozen' ? 'Frozen'
+                                    : pool.status === 'disputed' ? 'Disputed'
+                                    : 'Active'}
+                            </span>
+                            {/* #722 — Export pool data */}
+                            <PoolExportButton
+                                pool={pool}
+                                poolId={poolId}
+                                isCreator={stxAddress === pool.creator}
+                                walletAddress={stxAddress}
+                            />
+                        </div>
                     </div>
 
                     {/* Stats */}
@@ -227,7 +254,8 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     </div>
 
-                    {/* Odds display */}
+                    {/* Odds display — only meaningful while the pool is active */}
+                    {pool.status === 'active' && !pool.settled && (
                     <div className="mb-8">
                         <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
                         <div className="flex h-4 rounded-full overflow-hidden">
@@ -245,6 +273,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
                         </div>
                     </div>
+                    )}
 
                     {/* Pool Details */}
                     <div className="bg-muted/30 p-4 rounded-xl mb-8">
@@ -276,13 +305,66 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     </div>
 
+                    {/* #721 — Extended metadata */}
+                    {extMetadata && (extMetadata.resolutionCriteria || extMetadata.externalLinks || extMetadata.coverImage) && (
+                        <div className="bg-muted/30 p-4 rounded-xl mb-8 space-y-4">
+                            {extMetadata.coverImage && (
+                                <img
+                                    src={extMetadata.coverImage}
+                                    alt="Pool cover"
+                                    className="w-full h-40 object-cover rounded-lg"
+                                />
+                            )}
+                            {extMetadata.resolutionCriteria && (
+                                <div>
+                                    <h3 className="text-sm font-semibold mb-1">Resolution Criteria</h3>
+                                    <p className="text-sm text-muted-foreground whitespace-pre-wrap">{extMetadata.resolutionCriteria}</p>
+                                </div>
+                            )}
+                            {extMetadata.externalLinks && (
+                                <div>
+                                    <h3 className="text-sm font-semibold mb-1">Reference Links</h3>
+                                    <div className="flex flex-wrap gap-2">
+                                        {extMetadata.externalLinks.split('|').map((url, i) => {
+                                            const trimmed = url.trim();
+                                            return trimmed ? (
+                                                <a
+                                                    key={i}
+                                                    href={trimmed}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className="flex items-center gap-1 text-xs text-primary hover:underline"
+                                                >
+                                                    <ExternalLink className="w-3 h-3" />
+                                                    {trimmed.replace(/^https?:\/\//, '').split('/')[0]}
+                                                </a>
+                                            ) : null;
+                                        })}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {/* User bet position */}
                     {userHasPosition && (
-                        <div className="mb-8 p-4 bg-primary/10 border border-primary/20 rounded-xl">
-                            <h3 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                                <Wallet className="w-4 h-4" />
-                                Your Position
-                            </h3>
+                        <div className="mb-8 p-4 bg-primary/10 border border-primary/20 rounded-xl print:border-black print:bg-white" id="bet-receipt">
+                            <div className="flex justify-between items-center mb-3">
+                                <h3 className="text-lg font-semibold flex items-center gap-2">
+                                    <Wallet className="w-4 h-4" />
+                                    Your Position
+                                </h3>
+                                {/* #722 — Printable bet receipt */}
+                                <button
+                                    type="button"
+                                    onClick={() => window.print()}
+                                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors print:hidden"
+                                    aria-label="Print bet receipt"
+                                >
+                                    <Printer className="w-3 h-3" />
+                                    Print receipt
+                                </button>
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet!.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>
@@ -333,10 +415,34 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         </div>
                     )}
 
+                    {/* Status banners for non-active / non-settled pools */}
                     {pool.status === 'expired' && !pool.settled && (
                         <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
                             <p className="text-sm text-yellow-400">
                                 This pool has expired and is awaiting settlement.
+                            </p>
+                        </div>
+                    )}
+                    {pool.status === 'frozen' && !pool.settled && (
+                        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                            <p className="text-sm text-blue-400">
+                                This pool is frozen and not accepting new bets.
+                            </p>
+                        </div>
+                    )}
+                    {pool.status === 'disputed' && !pool.settled && (
+                        <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                            <p className="text-sm text-orange-400">
+                                This pool is under dispute. Settlement is paused pending resolution.
+                            </p>
+                        </div>
+                    )}
+                    {pool.settled && (
+                        <div className="mt-6 p-4 bg-muted/30 border border-border rounded-xl">
+                            <p className="text-sm text-muted-foreground">
+                                This pool has been settled. {pool.winningOutcome !== undefined && pool.winningOutcome !== null
+                                    ? `Winning outcome: ${pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}.`
+                                    : ''}
                             </p>
                         </div>
                     )}

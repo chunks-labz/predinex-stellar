@@ -71,6 +71,7 @@ fn make_ma_pool(t: &MaEnv, creator: &Address) -> u32 {
         &3_600u64,
         &allowed,
         &None,
+        &None::<u64>,
     )
 }
 
@@ -218,6 +219,7 @@ fn ma_4_place_bet_without_exchange_rate_fails() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &None::<u64>,
     );
     assert_eq!(create_result, Err(Ok(ContractError::ExchangeRateNotSet)));
 

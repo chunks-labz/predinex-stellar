@@ -1,0 +1,1 @@
+export { FreighterInstallPrompt } from './FreighterInstallPrompt';

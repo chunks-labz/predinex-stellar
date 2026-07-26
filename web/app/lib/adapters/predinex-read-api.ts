@@ -11,14 +11,23 @@ import {
   getUserBetFromSoroban,
   getPoolCountFromSoroban,
   getPoolBetLimitsFromSoroban,
+  getFreezeAdminFromSoroban,
+  getLpPositionFromSoroban,
+  getPendingLpRewardsFromSoroban,
+  getLpStakeFromSoroban,
   type Pool,
   type UserBetData,
+  type LpPositionData,
 } from "../soroban-read-api";
+import { getPublicTemplatesFromSoroban } from '../soroban-template-api';
 import { getUserActivityFromSoroban } from "../soroban-event-service";
 import { getMarkets, getTotalVolume, getUserActivity } from "../stacks-api";
 import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('predinexReadApi');
 import type { ActivityItem } from "./types";
+
+/** #721 — Re-export for convenience. */
+export type { PoolExtendedMetadata } from '../soroban-read-api';
 
 /**
  * Get the base URL of the configured Stacks Core API.
@@ -118,20 +127,37 @@ async function getPoolCount(): Promise<number> {
 }
 
 /**
+ * Get freeze admin address from Soroban.
+ */
+async function getFreezeAdmin(): Promise<string | null> {
+  return getFreezeAdminFromSoroban();
+}
+
+/**
  * Public read API for the SDK client. Prefers Soroban read paths; retains
  * legacy Stacks delegates for callers still migrating.
  */
 export const predinexReadApi = {
+  /** Canonical Soroban read: list public pool templates */
+  getPublicTemplates: getPublicTemplatesFromSoroban,
   /** Canonical Soroban read: get pool by ID */
   getPool,
   /** Canonical Soroban read: get user's bet in a pool */
   getUserBet,
   /** Canonical Soroban read: get total pool count */
   getPoolCount,
+  /** Canonical Soroban read: get freeze admin */
+  getFreezeAdmin,
   /** Canonical Soroban read: get user activity via events */
   getUserActivitySoroban,
   /** Canonical Soroban read: get user activity via events */
   getUserActivity: getUserActivitySoroban,
+  /** Canonical Soroban read: get LP position for a user in a pool */
+  getLpPosition: getLpPositionFromSoroban,
+  /** Canonical Soroban read: get pending LP rewards for a user */
+  getPendingLpRewards: getPendingLpRewardsFromSoroban,
+  /** Canonical Soroban read: get LP stake info for a user */
+  getLpStake: getLpStakeFromSoroban,
   /** Legacy delegates retained for compatibility while callers migrate */
   getMarkets,
   getTotalVolume,

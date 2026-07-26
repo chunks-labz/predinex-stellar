@@ -125,21 +125,18 @@ describe('BettingSection', () => {
     expect(screen.getByText('Connect Wallet')).toBeInTheDocument();
   });
 
-  it('shows error toast for empty bet amount', async () => {
+  it('disables bet buttons for an empty amount', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
-    const user = userEvent.setup();
     renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
 
-    // Try to bet with empty amount
+    // With no amount entered the form is invalid, so submission is disabled.
     const betButton = screen.getByText(/Bet on Outcome A/i);
-    await user.click(betButton);
-
-    expect(showToast).toHaveBeenCalledWith('Please enter a valid amount', 'error');
+    expect(betButton).toBeDisabled();
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
-  it('shows error toast for bet below minimum amount', async () => {
+  it('shows an inline error and disables submit for a bet below the minimum', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
     const user = userEvent.setup();
@@ -147,15 +144,14 @@ describe('BettingSection', () => {
 
     const input = screen.getByLabelText(/Enter bet amount/i);
     await user.type(input, '0.05'); // Less than 0.1 XLM minimum
+    await user.tab(); // blur to surface the inline error
 
-    const betButton = screen.getByText(/Bet on Outcome A/i);
-    await user.click(betButton);
-
-    expect(showToast).toHaveBeenCalledWith('Minimum bet is 0.1 XLM', 'error');
+    expect(screen.getByRole('alert')).toHaveTextContent('Minimum bet is 0.1 XLM');
+    expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
-  it('shows error toast for bet above maximum amount', async () => {
+  it('shows an inline error and disables submit for a bet above the maximum', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
     const user = userEvent.setup();
@@ -163,11 +159,10 @@ describe('BettingSection', () => {
 
     const input = screen.getByLabelText(/Enter bet amount/i);
     await user.type(input, '6'); // Greater than max (5 XLM)
+    await user.tab(); // blur to surface the inline error
 
-    const betButton = screen.getByText(/Bet on Outcome A/i);
-    await user.click(betButton);
-
-    expect(showToast).toHaveBeenCalledWith('Maximum bet is 5 XLM', 'error');
+    expect(screen.getByRole('alert')).toHaveTextContent('Maximum bet is 5 XLM');
+    expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 

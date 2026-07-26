@@ -72,6 +72,7 @@ fn make_pool(ctx: &Ctx, creator: &Address) -> u32 {
         &String::from_str(&ctx.env, "No"),
         &3_600u64,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 
@@ -276,6 +277,7 @@ fn mu3_dispute_blocks_claims_unfreeze_re_settles() {
         &String::from_str(&ctx.env, "No"),
         &3_600u64,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     ctx.client
