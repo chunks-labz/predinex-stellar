@@ -1,14 +1,15 @@
 "use client";
 /**
- * Pool creation form (Issue #677).
+ * Pool creation form (Issue #677, #831).
  *
  * Renders an accessible single-page form for creating a pool with client-side
  * validation. Submission flows through `createPool` (web/lib/contract.ts),
- * which encodes the extended form fields into the underlying `create_pool`
- * Soroban call.
+ * which encodes the extended form fields into the underlying
+ * `create_multi_outcome_pool` Soroban call.
  *
  * The component contract:
  *   - Validates inputs on change, blur and submit.
+ *   - Supports 2–10 outcome labels (issue #831).
  *   - Surfaces a transaction fee modal before signing.
  *   - Displays transaction pending / confirmed / failed states.
  *   - Calls `onSuccess({ txHash, poolId })` upon a confirmed submission so the
@@ -23,6 +24,8 @@ import {
   FileText,
   Hash,
   Loader2,
+  Plus,
+  Trash2,
   Wallet,
 } from "lucide-react";
 import { useWallet } from "@/components/WalletAdapterProvider";
@@ -32,12 +35,16 @@ import { useTransactionToast } from "@/lib/hooks/useTransactionToast";
 import {
   MAX_TITLE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
+  MAX_OUTCOME_LENGTH,
+  MIN_OUTCOMES,
+  MAX_OUTCOMES,
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
   MIN_DEPOSIT_AMOUNT,
   MAX_DEPOSIT_AMOUNT,
   SUPPORTED_POOL_ASSETS,
   validatePoolForm,
+  validateOutcomesList,
   getCharLimit,
   getHelpText,
 } from "@/lib/validators";
@@ -46,10 +53,10 @@ import type { TxStage } from "@/app/lib/soroban-transaction-service";
 
 type PoolFormErrors = Partial<
   Record<
-    "name" | "description" | "asset" | "depositAmount" | "expirySeconds",
+    "name" | "description" | "asset" | "depositAmount" | "expirySeconds" | "outcomes",
     string
   >
->;
+> & Record<string, string | undefined>;
 
 const EXPIRY_FIELD = "expirySeconds";
 const DEPOSIT_FIELD = "depositAmount";
@@ -72,6 +79,8 @@ export interface CreatePoolFormState {
   asset: string;
   depositAmount: string;
   expirySeconds: string;
+  /** 2–10 outcome labels */
+  outcomes: string[];
 }
 
 export const EMPTY_POOL_FORM: CreatePoolFormState = {
@@ -80,6 +89,7 @@ export const EMPTY_POOL_FORM: CreatePoolFormState = {
   asset: "XLM",
   depositAmount: "",
   expirySeconds: "",
+  outcomes: ["", ""],
 };
 
 export interface CreatePoolFormProps {
@@ -105,15 +115,19 @@ interface FieldTouched {
   asset: boolean;
   depositAmount: boolean;
   expirySeconds: boolean;
+  outcomes: boolean[];
 }
 
-const EMPTY_TOUCHED: FieldTouched = {
-  name: false,
-  description: false,
-  asset: false,
-  depositAmount: false,
-  expirySeconds: false,
-};
+function makeEmptyTouched(outcomeCount: number): FieldTouched {
+  return {
+    name: false,
+    description: false,
+    asset: false,
+    depositAmount: false,
+    expirySeconds: false,
+    outcomes: Array(outcomeCount).fill(false),
+  };
+}
 
 function getStageLabel(stage: TxStage): string {
   switch (stage) {
@@ -144,12 +158,20 @@ export function CreatePoolForm({
   } = useTransactionToast();
   const formId = useId();
 
-  const [form, setForm] = useState<CreatePoolFormState>({
+  const initial: CreatePoolFormState = {
     ...EMPTY_POOL_FORM,
     ...initialValues,
-  });
+    outcomes:
+      initialValues?.outcomes && initialValues.outcomes.length >= MIN_OUTCOMES
+        ? initialValues.outcomes
+        : EMPTY_POOL_FORM.outcomes,
+  };
+
+  const [form, setForm] = useState<CreatePoolFormState>(initial);
   const [errors, setErrors] = useState<PoolFormErrors>({});
-  const [touched, setTouched] = useState<FieldTouched>(EMPTY_TOUCHED);
+  const [touched, setTouched] = useState<FieldTouched>(
+    makeEmptyTouched(initial.outcomes.length)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [stage, setStage] = useState<TxStage>("idle");
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -159,28 +181,76 @@ export function CreatePoolForm({
   } | null>(null);
 
   const setField = useCallback(
-    (field: keyof CreatePoolFormState, value: string) => {
+    (field: keyof Omit<CreatePoolFormState, "outcomes">, value: string) => {
       setForm((prev) => ({ ...prev, [field]: value }));
     },
     [],
   );
 
+  const setOutcome = useCallback((index: number, value: string) => {
+    setForm((prev) => {
+      const outcomes = [...prev.outcomes];
+      outcomes[index] = value;
+      return { ...prev, outcomes };
+    });
+  }, []);
+
+  const addOutcome = useCallback(() => {
+    setForm((prev) => {
+      if (prev.outcomes.length >= MAX_OUTCOMES) return prev;
+      return { ...prev, outcomes: [...prev.outcomes, ""] };
+    });
+    setTouched((prev) => ({
+      ...prev,
+      outcomes: [...prev.outcomes, false],
+    }));
+  }, []);
+
+  const removeOutcome = useCallback((index: number) => {
+    setForm((prev) => {
+      if (prev.outcomes.length <= MIN_OUTCOMES) return prev;
+      return {
+        ...prev,
+        outcomes: prev.outcomes.filter((_, i) => i !== index),
+      };
+    });
+    setTouched((prev) => ({
+      ...prev,
+      outcomes: prev.outcomes.filter((_, i) => i !== index),
+    }));
+  }, []);
+
   const validateAll = useCallback((): PoolFormErrors => {
     const expirySeconds = parseInt(form.expirySeconds, 10);
     const depositAmount = parseFloat(form.depositAmount);
-    const result = validatePoolForm({
+    const baseResult = validatePoolForm({
       name: form.name,
       description: form.description,
       asset: form.asset,
       depositAmount: Number.isNaN(depositAmount) ? NaN : depositAmount,
       expirySeconds: Number.isNaN(expirySeconds) ? 0 : expirySeconds,
     });
-    return result.errors;
+    const outcomeResult = validateOutcomesList(form.outcomes);
+    return { ...baseResult.errors, ...outcomeResult.errors };
   }, [form]);
 
   const handleFieldBlur = useCallback(
     (field: keyof FieldTouched) => {
+      if (field === "outcomes") return; // handled per-outcome
       setTouched((prev) => ({ ...prev, [field]: true }));
+      const nextErrors = validateAll();
+      setErrors(nextErrors);
+    },
+    [validateAll],
+  );
+
+  const handleOutcomeBlur = useCallback(
+    (index: number) => {
+      setTouched((prev) => {
+        const outcomes = [...prev.outcomes];
+        outcomes[index] = true;
+        return { ...prev, outcomes };
+      });
       const nextErrors = validateAll();
       setErrors(nextErrors);
     },
@@ -190,7 +260,7 @@ export function CreatePoolForm({
   const resetForm = useCallback(() => {
     setForm(EMPTY_POOL_FORM);
     setErrors({});
-    setTouched(EMPTY_TOUCHED);
+    setTouched(makeEmptyTouched(EMPTY_POOL_FORM.outcomes.length));
   }, []);
 
   const handleSubmit = useCallback(
@@ -207,6 +277,7 @@ export function CreatePoolForm({
         asset: true,
         depositAmount: true,
         expirySeconds: true,
+        outcomes: form.outcomes.map(() => true),
       });
       setErrors(nextErrors);
       if (Object.keys(nextErrors).length > 0) {
@@ -231,6 +302,7 @@ export function CreatePoolForm({
             asset: form.asset,
             depositAmount,
             expirySeconds,
+            outcomes: form.outcomes.map((o) => o.trim()),
           },
           {
             wallet,
@@ -264,17 +336,15 @@ export function CreatePoolForm({
 
   // Re-evaluate errors on every render so the field-level copy stays in sync
   // with current form values (used to apply aria-invalid hints).
-  const liveErrors =
-    errors.name ||
-    errors.description ||
-    errors.asset ||
-    errors.depositAmount ||
-    errors.expirySeconds
-      ? errors
-      : validateAll();
+  const liveErrors = validateAll();
 
-  const showError = (field: keyof PoolFormErrors) =>
-    touched[field] && liveErrors[field];
+  const showFieldError = (field: keyof PoolFormErrors) =>
+    field === "outcomes"
+      ? false
+      : (touched as Record<string, boolean>)[field as string] && liveErrors[field];
+
+  const showOutcomeError = (index: number) =>
+    touched.outcomes[index] && liveErrors[`outcome_${index}`];
 
   return (
     <>
@@ -327,17 +397,17 @@ export function CreatePoolForm({
             onChange={(e) => setField("name", e.target.value)}
             onBlur={() => handleFieldBlur("name")}
             placeholder="e.g. BTC above $100k by 2026"
-            aria-invalid={!!showError("name")}
+            aria-invalid={!!showFieldError("name")}
             aria-describedby={
-              showError("name") ? `${formId}-name-error` : `${formId}-name-help`
+              showFieldError("name") ? `${formId}-name-error` : `${formId}-name-help`
             }
             maxLength={MAX_TITLE_LENGTH}
             className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-              showError("name") ? "border-red-500" : "border-input"
+              showFieldError("name") ? "border-red-500" : "border-input"
             }`}
           />
           <div className="flex justify-between items-center mt-1">
-            {showError("name") ? (
+            {showFieldError("name") ? (
               <p
                 id={`${formId}-name-error`}
                 role="alert"
@@ -376,19 +446,19 @@ export function CreatePoolForm({
             onChange={(e) => setField("description", e.target.value)}
             onBlur={() => handleFieldBlur("description")}
             placeholder="Describe the pool, including any resolution criteria."
-            aria-invalid={!!showError("description")}
+            aria-invalid={!!showFieldError("description")}
             aria-describedby={
-              showError("description")
+              showFieldError("description")
                 ? `${formId}-description-error`
                 : `${formId}-description-help`
             }
             maxLength={MAX_DESCRIPTION_LENGTH}
             className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none ${
-              showError("description") ? "border-red-500" : "border-input"
+              showFieldError("description") ? "border-red-500" : "border-input"
             }`}
           />
           <div className="flex justify-between items-center mt-1">
-            {showError("description") ? (
+            {showFieldError("description") ? (
               <p
                 id={`${formId}-description-error`}
                 role="alert"
@@ -410,6 +480,93 @@ export function CreatePoolForm({
           </div>
         </div>
 
+        {/* Outcomes */}
+        <div>
+          <fieldset>
+            <legend className="text-sm font-medium mb-2">
+              Outcomes ({MIN_OUTCOMES}–{MAX_OUTCOMES})
+            </legend>
+            {liveErrors.outcomes && touched.outcomes.some(Boolean) && (
+              <p role="alert" className="text-sm text-red-500 mb-2">
+                {liveErrors.outcomes}
+              </p>
+            )}
+            <div className="space-y-2">
+              {form.outcomes.map((outcome, index) => {
+                const errKey = `outcome_${index}`;
+                const hasError = showOutcomeError(index);
+                return (
+                  <div key={index} className="flex items-start gap-2">
+                    <div className="flex-1">
+                      <label
+                        htmlFor={`${formId}-outcome-${index}`}
+                        className="sr-only"
+                      >
+                        Outcome {index + 1}
+                      </label>
+                      <input
+                        id={`${formId}-outcome-${index}`}
+                        name={`outcome_${index}`}
+                        type="text"
+                        value={outcome}
+                        onChange={(e) => setOutcome(index, e.target.value)}
+                        onBlur={() => handleOutcomeBlur(index)}
+                        placeholder={
+                          index === 0
+                            ? "e.g. Yes"
+                            : index === 1
+                              ? "e.g. No"
+                              : `Outcome ${index + 1}`
+                        }
+                        maxLength={MAX_OUTCOME_LENGTH}
+                        aria-invalid={!!hasError}
+                        aria-label={`Outcome ${index + 1}`}
+                        aria-describedby={
+                          hasError
+                            ? `${formId}-outcome-${index}-error`
+                            : undefined
+                        }
+                        className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
+                          hasError ? "border-red-500" : "border-input"
+                        }`}
+                      />
+                      {hasError && (
+                        <p
+                          id={`${formId}-outcome-${index}-error`}
+                          role="alert"
+                          className="text-sm text-red-500 mt-1"
+                        >
+                          {liveErrors[errKey]}
+                        </p>
+                      )}
+                    </div>
+                    {form.outcomes.length > MIN_OUTCOMES && (
+                      <button
+                        type="button"
+                        onClick={() => removeOutcome(index)}
+                        aria-label={`Remove outcome ${index + 1}`}
+                        className="mt-1 p-2 rounded-lg border border-border text-muted-foreground hover:text-red-500 hover:border-red-500/40"
+                      >
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {form.outcomes.length < MAX_OUTCOMES && (
+              <button
+                type="button"
+                onClick={addOutcome}
+                className="mt-3 inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-border text-sm hover:bg-muted/30"
+              >
+                <Plus className="w-4 h-4" aria-hidden="true" />
+                Add outcome
+              </button>
+            )}
+          </fieldset>
+        </div>
+
         {/* Asset & Deposit */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
@@ -426,14 +583,14 @@ export function CreatePoolForm({
               value={form.asset}
               onChange={(e) => setField("asset", e.target.value)}
               onBlur={() => handleFieldBlur("asset")}
-              aria-invalid={!!showError("asset")}
+              aria-invalid={!!showFieldError("asset")}
               aria-describedby={
-                showError("asset")
+                showFieldError("asset")
                   ? `${formId}-asset-error`
                   : `${formId}-asset-help`
               }
               className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-                showError("asset") ? "border-red-500" : "border-input"
+                showFieldError("asset") ? "border-red-500" : "border-input"
               }`}
             >
               {SUPPORTED_POOL_ASSETS.map((symbol) => (
@@ -443,7 +600,7 @@ export function CreatePoolForm({
               ))}
             </select>
             <div className="flex justify-between items-center mt-1">
-              {showError("asset") ? (
+              {showFieldError("asset") ? (
                 <p
                   id={`${formId}-asset-error`}
                   role="alert"
@@ -482,18 +639,18 @@ export function CreatePoolForm({
               onChange={(e) => setField("depositAmount", e.target.value)}
               onBlur={() => handleFieldBlur("depositAmount")}
               placeholder={`e.g. 25 (${MIN_DEPOSIT_AMOUNT}–${MAX_DEPOSIT_AMOUNT})`}
-              aria-invalid={!!showError("depositAmount")}
+              aria-invalid={!!showFieldError("depositAmount")}
               aria-describedby={
-                showError("depositAmount")
+                showFieldError("depositAmount")
                   ? `${formId}-depositAmount-error`
                   : `${formId}-depositAmount-help`
               }
               className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-                showError("depositAmount") ? "border-red-500" : "border-input"
+                showFieldError("depositAmount") ? "border-red-500" : "border-input"
               }`}
             />
             <div className="flex justify-between items-center mt-1">
-              {showError("depositAmount") ? (
+              {showFieldError("depositAmount") ? (
                 <p
                   id={`${formId}-depositAmount-error`}
                   role="alert"
@@ -533,18 +690,18 @@ export function CreatePoolForm({
             onChange={(e) => setField("expirySeconds", e.target.value)}
             onBlur={() => handleFieldBlur("expirySeconds")}
             placeholder={`e.g. 86400 (${MIN_POOL_DURATION_SECS}–${MAX_POOL_DURATION_SECS.toLocaleString()})`}
-            aria-invalid={!!showError("expirySeconds")}
+            aria-invalid={!!showFieldError("expirySeconds")}
             aria-describedby={
-              showError("expirySeconds")
+              showFieldError("expirySeconds")
                 ? `${formId}-${EXPIRY_FIELD}-error`
                 : `${formId}-${EXPIRY_FIELD}-help`
             }
             className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
-              showError("expirySeconds") ? "border-red-500" : "border-input"
+              showFieldError("expirySeconds") ? "border-red-500" : "border-input"
             }`}
           />
           <div className="flex justify-between items-center mt-1">
-            {showError("expirySeconds") ? (
+            {showFieldError("expirySeconds") ? (
               <p
                 id={`${formId}-${EXPIRY_FIELD}-error`}
                 role="alert"

@@ -139,13 +139,13 @@ export default function CreateMarket() {
     setIsSubmitting(true);
     setStage("idle");
     try {
-      const { txHash, poolId } = await predinexContract.createMarketSoroban({
+      const { txHash, poolId } = await predinexContract.createMultiOutcomePoolSoroban({
         wallet,
         title: wizard.draft.title,
         description: wizard.draft.description,
-        outcomeA: wizard.draft.outcomeA,
-        outcomeB: wizard.draft.outcomeB,
+        outcomes: outcomes,
         durationSeconds: duration,
+        metadataUri: metadataUri || null,
         onStageChange: (s) => {
           setStage(s);
           onTransactionStageChange(s);
