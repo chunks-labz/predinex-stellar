@@ -219,7 +219,7 @@ export class ContractClient {
    * Returns `{ healthy: true, latestLedger }` on success, or
    * `{ healthy: false, error }` if the RPC call fails or times out.
    */
-  async checkRpcHealth(): Promise
+  async checkRpcHealth(): Promise<
     { healthy: true; latestLedger: number } | { healthy: false; error: string }
   > {
     try {
