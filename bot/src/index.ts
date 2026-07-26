@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Predinex Settlement Bot — Entry Point
  *
  * Usage:
@@ -80,9 +80,11 @@ async function main(): Promise<void> {
 
   process.on("unhandledRejection", (reason) => {
     logger.error("Unhandled promise rejection", { reason: String(reason) });
+    setTimeout(() => process.exit(1), 200);
   });
 
   await poller.start();
+  process.exit(0);
 }
 
 main().catch((err) => {

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Polling orchestrator.
  *
  * Runs a periodic loop that:
@@ -276,6 +276,8 @@ export class Poller {
   private errorCount = 0;
   /** Number of expired-but-unsettled pools found in the most recent cycle */
   private pendingPoolsCount = 0;
+  /** AbortController for interrupting in-flight operations on shutdown */
+  private abortController: AbortController | null = null;
 
   constructor(config: BotConfig) {
     this.config = config;
@@ -292,6 +294,10 @@ export class Poller {
   async runCycle(): Promise<CycleSummary> {
     const cycleStart = Date.now();
     this.cycleCount++;
+
+    // Create a new AbortController for this cycle
+    this.abortController = new AbortController();
+    this.executor.setSignal(this.abortController.signal);
 
     logger.info("Starting settlement cycle", {
       cycle: this.cycleCount,
@@ -512,6 +518,7 @@ export class Poller {
       clearTimeout(this._sleepTimer);
       this._sleepTimer = null;
     }
+    this.abortController?.abort();
   }
 
   /**

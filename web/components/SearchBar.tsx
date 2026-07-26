@@ -54,6 +54,11 @@ export default function SearchBar({
                    focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50
                    transition-all duration-200 text-sm placeholder:text-muted-foreground"
         />
+        {localValue !== value && (
+          <div className="absolute right-10 top-1/2 transform -translate-y-1/2">
+            <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
+          </div>
+        )}
         {localValue && (
           <button
             onClick={handleClear}
@@ -65,13 +70,6 @@ export default function SearchBar({
           </button>
         )}
       </div>
-
-      {/* Search indicator */}
-      {localValue !== value && (
-        <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-          <div className="w-2 h-2 bg-primary rounded-full animate-pulse" />
-        </div>
-      )}
     </div>
   );
 }
