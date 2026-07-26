@@ -35,20 +35,25 @@ interface Props {
 // Simple in-memory rate limiter (5 requests per 10-second window per client session)
 const REQUEST_WINDOW_MS = 10_000;
 const MAX_REQUESTS = 5;
-const requestLog: number[] = [];
+const rateLimitMap = new Map<string, number[]>();
 
-function isRateLimited(): boolean {
+function isRateLimited(poolId: string): boolean {
   const now = Date.now();
+  const requestLog = rateLimitMap.get(poolId) ?? [];
   while (requestLog.length > 0 && now - requestLog[0] > REQUEST_WINDOW_MS) {
     requestLog.shift();
   }
-  if (requestLog.length >= MAX_REQUESTS) return true;
+  if (requestLog.length >= MAX_REQUESTS) {
+    rateLimitMap.set(poolId, requestLog);
+    return true;
+  }
   requestLog.push(now);
+  rateLimitMap.set(poolId, requestLog);
   return false;
 }
 
 async function fetchPoolDetail(poolId: string): Promise<PoolDetail> {
-  if (isRateLimited()) throw new Error('Rate limit exceeded. Please wait before refreshing.');
+  if (isRateLimited(poolId)) throw new Error('Rate limit exceeded. Please wait before refreshing.');
   const res = await fetch(`/api/pools/${poolId}`);
   if (!res.ok) throw new Error(`Failed to fetch pool: ${res.status}`);
   return res.json();
