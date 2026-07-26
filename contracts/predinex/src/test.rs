@@ -2672,7 +2672,10 @@ fn test_set_volume_fee_tiers_event_and_clear() {
     let version: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 1)).unwrap();
     assert_eq!(name, soroban_sdk::Symbol::new(&env, "volume_fee_tiers_set"));
-    assert_eq!(version, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        version,
+        soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION)
+    );
 
     let data_val: Val = match &last_event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
@@ -2717,7 +2720,10 @@ fn test_set_protocol_fee_emits_versioned_event() {
     let version: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 1)).unwrap();
     assert_eq!(name, soroban_sdk::Symbol::new(&env, "protocol_fee_set"));
-    assert_eq!(version, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        version,
+        soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION)
+    );
 
     let data_val: Val = match &last_event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<

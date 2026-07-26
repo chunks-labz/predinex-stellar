@@ -106,9 +106,11 @@ fn single_asset_pool_full_lifecycle() {
     assert!(event_emitted(&f.env, "create_pool"));
 
     // Both sides take an equal position.
-    f.client.place_bet(&winner, &pool_id, &0, &bet, &None::<Address>);
+    f.client
+        .place_bet(&winner, &pool_id, &0, &bet, &None::<Address>);
     assert!(event_emitted(&f.env, "place_bet"));
-    f.client.place_bet(&loser, &pool_id, &1, &bet, &None::<Address>);
+    f.client
+        .place_bet(&loser, &pool_id, &1, &bet, &None::<Address>);
 
     assert_eq!(f.client.get_participant_count(&pool_id), 2);
     assert_eq!(f.token.balance(&winner), 100_000_000 - bet);
@@ -161,9 +163,12 @@ fn multi_asset_pool_full_lifecycle() {
     assert!(event_emitted(&f.env, "create_pool"));
 
     // One bettor per outcome, equal stakes.
-    f.client.place_bet(&better_a, &pool_id, &0, &bet, &None::<Address>);
-    f.client.place_bet(&better_b, &pool_id, &1, &bet, &None::<Address>);
-    f.client.place_bet(&better_c, &pool_id, &2, &bet, &None::<Address>);
+    f.client
+        .place_bet(&better_a, &pool_id, &0, &bet, &None::<Address>);
+    f.client
+        .place_bet(&better_b, &pool_id, &1, &bet, &None::<Address>);
+    f.client
+        .place_bet(&better_c, &pool_id, &2, &bet, &None::<Address>);
 
     // The pool really tracks three distinct outcomes with their totals.
     let pool_outcomes = f.client.get_pool_outcomes(&pool_id);
@@ -207,13 +212,17 @@ fn cancellation_and_refund_flow() {
         &None::<u64>,
     );
 
-    f.client.place_bet(&bettor, &pool_id, &0, &stake, &None::<Address>);
+    f.client
+        .place_bet(&bettor, &pool_id, &0, &stake, &None::<Address>);
     assert_eq!(f.token.balance(&bettor), 100_000_000 - stake);
 
     // Creator cancels the market while still open. cancel_pool refunds all
     // bettors their full stake (no fee) atomically and removes their positions.
-    f.client
-        .cancel_pool(&creator, &pool_id, &String::from_str(&f.env, "Event cancelled"));
+    f.client.cancel_pool(
+        &creator,
+        &pool_id,
+        &String::from_str(&f.env, "Event cancelled"),
+    );
     assert!(event_emitted(&f.env, "cancel_pool"));
 
     assert_eq!(
@@ -250,7 +259,8 @@ fn claim_after_expiry_flow() {
     );
     assert!(event_emitted(&f.env, "create_pool"));
 
-    f.client.place_bet(&bettor, &pool_id, &1, &stake, &None::<Address>);
+    f.client
+        .place_bet(&bettor, &pool_id, &1, &stake, &None::<Address>);
     assert_eq!(f.token.balance(&bettor), 100_000_000 - stake);
 
     // Move strictly past expiry; the creator never calls settle_pool.

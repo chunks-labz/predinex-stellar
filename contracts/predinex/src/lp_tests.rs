@@ -168,8 +168,7 @@ fn test_stake_and_unstake_lp() {
     ctx.client.deposit_liquidity(&lp, &pool_id, &10_000_000);
 
     // Stake half the shares for 1 hour
-    ctx.client
-        .stake_lp(&lp, &pool_id, &5_000_000, &3_600);
+    ctx.client.stake_lp(&lp, &pool_id, &5_000_000, &3_600);
 
     let stake = ctx.client.get_lp_stake(&pool_id, &lp).unwrap();
     assert_eq!(stake.shares, 5_000_000);
@@ -285,8 +284,7 @@ fn test_lp_reward_dust_accumulator_recovers_rounding() {
     ctx.client.deposit_liquidity(&lp, &pool_id, &3);
 
     for _ in 0..3 {
-        ctx.client
-            .distribute_lp_rewards(&ctx.admin, &pool_id, &1);
+        ctx.client.distribute_lp_rewards(&ctx.admin, &pool_id, &1);
     }
 
     let pending = ctx.client.get_pending_lp_rewards(&pool_id, &lp);
