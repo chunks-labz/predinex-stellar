@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Unit tests for the config loader.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -87,11 +87,35 @@ describe("loadConfig", () => {
 
   it("parses webhook URL and secret", async () => {
     process.env["WEBHOOK_URL"] = "https://example.com/hooks";
-    process.env["WEBHOOK_SECRET"] = "mysecret";
+    process.env["WEBHOOK_SECRET"] = "my-super-secret-key";
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.webhookUrl).toBe("https://example.com/hooks");
-    expect(config.webhookSecret).toBe("mysecret");
+    expect(config.webhookSecret).toBe("my-super-secret-key");
+  });
+
+  it("exits when WEBHOOK_URL is invalid", async () => {
+    process.env["WEBHOOK_URL"] = "not-a-url";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
+  });
+
+  it("exits when WEBHOOK_SECRET is too short", async () => {
+    process.env["WEBHOOK_SECRET"] = "short";
+    vi.spyOn(process, "exit").mockImplementation((code) => {
+      throw new Error(`exit ${code}`);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    vi.resetModules();
+    const { loadConfig } = await import("./config.js");
+    await expect(() => loadConfig()).toThrow("exit 1");
   });
 
   it("selects testnet passphrase for testnet network", async () => {

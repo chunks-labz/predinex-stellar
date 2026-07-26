@@ -245,9 +245,21 @@ pub enum DataKey {
     LpStake(u32, Address),
     /// #714 — Bonus multiplier for time-locked LP staking (basis points, 10000 = 1x).
     LpStakeBoostBps,
-    /// #811 — Timestamp of the last qualifying large bet per (user, pool).
-    /// Used by the large bet cooldown check independently of daily loss windows.
-    LastLargeBetTimestamp(Address, u32),
+    /// Dispute window for local pools (seconds).
+    DisputeWindow,
+    /// Record of settlement timestamp for enforcing local dispute window.
+    PoolSettlementTime(u32),
+    UserMaxExposurePerPoolBps,
+    UserMaxBetPerTransaction,
+    UserDailyLossLimit,
+    UserDailyLossWindowSecs,
+    UserWeeklyLossLimit,
+    UserWeeklyLossWindowSecs,
+    UserLargeBetCooldownSecs,
+    UserLargeBetThreshold,
+    UserExposurePerPool(Address, u32),
+    UserDailyLossState(Address),
+    UserWeeklyLossState(Address),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -439,6 +451,15 @@ pub enum ContractError {
     LpStakeLocked = 76,
     /// #714 — No active LP stake found.
     NoLpStake = 77,
+    /// Dispute window has expired.
+    DisputeWindowExpired = 78,
+    BetExceedsMaxBetPerTx = 79,
+    ExposureLimitExceeded = 80,
+    DailyLossLimitExceeded = 81,
+    WeeklyLossLimitExceeded = 82,
+    CreatorCannotBet = 83,
+    InvalidDepositDeadline = 84,
+    DepositDeadlinePassed = 85,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -4403,7 +4424,6 @@ impl PredinexContract {
         winning_outcome: u32,
     ) -> Result<(), ContractError> {
         Self::require_not_paused(env)?;
-        Self::require_admin(env, caller)?;
 
         let mut pool = env
             .storage()
@@ -4411,7 +4431,23 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let source = SettlementSource::Admin;
+        let admin = Self::get_admin(env.clone());
+        let is_admin = admin.is_some() && admin.as_ref().unwrap() == caller;
+        let is_creator = pool.creator == *caller;
+        let delegated_settler = Self::get_delegated_settler(env.clone(), pool_id);
+        let is_delegated = delegated_settler.is_some() && delegated_settler.as_ref().unwrap() == caller;
+
+        if !is_admin && !is_creator && !is_delegated {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let source = if is_admin {
+            SettlementSource::Admin
+        } else if is_creator {
+            SettlementSource::Creator
+        } else {
+            SettlementSource::Delegated
+        };
 
         if pool.status != PoolStatus::Open {
             return Err(ContractError::PoolAlreadySettled);
@@ -4486,6 +4522,16 @@ impl PredinexContract {
         // #189 — keep pool accessible for claim operations after settlement.
         env.storage().persistent().extend_ttl(
             &DataKey::Pool(pool_id),
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+
+        env.storage().persistent().set(
+            &DataKey::PoolSettlementTime(pool_id),
+            &env.ledger().timestamp(),
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::PoolSettlementTime(pool_id),
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
@@ -4857,6 +4903,7 @@ impl PredinexContract {
                 let refund = user_bet.total_bet;
                 if refund > 0 {
                     token_client.transfer(&env.current_contract_address(), &bettor, &refund);
+                    Self::reduce_user_exposure(&env, &bettor, pool_id, refund);
                     total_refunded = total_refunded.checked_add(refund).unwrap_or(total_refunded);
                 }
                 env.storage()
@@ -5873,6 +5920,30 @@ impl PredinexContract {
         Ok(())
     }
 
+    pub fn get_dispute_window(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::DisputeWindow)
+            .unwrap_or(DISPUTE_WINDOW_SECS)
+    }
+
+    pub fn set_dispute_window(
+        env: Env,
+        caller: Address,
+        window_secs: u64,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_freeze_admin(&env, &caller)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::DisputeWindow, &window_secs);
+        env.events().publish(
+            (Symbol::new(&env, "dispute_window_set"), event_version(&env)),
+            window_secs,
+        );
+        Ok(())
+    }
+
     /// Mark a settled pool as disputed, blocking claim payouts pending review.
     /// Callable only by the freeze admin.
     pub fn dispute_pool(env: Env, caller: Address, pool_id: u32) -> Result<(), ContractError> {
@@ -5891,6 +5962,24 @@ impl PredinexContract {
 
         if pool.status == PoolStatus::Disputed {
             return Err(ContractError::PoolIsDisputed);
+        }
+
+        let settlement_time = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::PoolSettlementTime(pool_id))
+            .unwrap_or(0);
+
+        if settlement_time > 0 {
+            let dispute_window = env
+                .storage()
+                .persistent()
+                .get::<_, u64>(&DataKey::DisputeWindow)
+                .unwrap_or(DISPUTE_WINDOW_SECS);
+
+            if env.ledger().timestamp() > settlement_time + dispute_window {
+                return Err(ContractError::DisputeWindowExpired);
+            }
         }
 
         pool.status = PoolStatus::Disputed;
@@ -6312,16 +6401,7 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-        env.storage().persistent().extend_ttl(
-            &DataKey::UserOutcomeBets(pool_id, user.clone()),
-            POOL_BUMP_THRESHOLD,
-            POOL_BUMP_TARGET,
-        );
-
-        // #705 — Update user exposure tracking after bet is placed.
-        Self::update_user_exposure(&env, &user, pool_id, normalized);
-
-        env.events().publish(
+                env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),
@@ -8543,7 +8623,7 @@ impl PredinexContract {
 
         env.events().publish(
             (Symbol::new(&env, "lp_deposit"), event_version(&env), pool_id, user),
-            LpDepositEvent { user: _pool.creator.clone(), pool_id, amount, shares_minted: shares_to_mint },
+            LpDepositEvent { user: user.clone(), pool_id, amount, shares_minted: shares_to_mint },
         );
         Ok(shares_to_mint)
     }
@@ -8595,7 +8675,7 @@ impl PredinexContract {
 
         env.events().publish(
             (Symbol::new(&env, "lp_withdraw"), event_version(&env), pool_id, user),
-            LpWithdrawEvent { user: _pool.creator.clone(), pool_id, amount: withdraw_amount, shares_burned: shares },
+            LpWithdrawEvent { user: user.clone(), pool_id, amount: withdraw_amount, shares_burned: shares },
         );
         Ok(withdraw_amount)
     }
