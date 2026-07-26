@@ -2,20 +2,19 @@
 import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
-import { useMemo, useState } from "react";
-import { Loader2, Wallet, AlertCircle } from "lucide-react";
-import { validateBetAmount } from "@/app/lib/validators";
-import type { Pool } from "@/app/lib/adapters/types";
-import { useWallet } from "@/components/WalletAdapterProvider";
-import { useToast } from "@/providers/ToastProvider";
-import { predinexContract } from "@/app/lib/adapters/predinex-contract";
-import { invalidateOnPlaceBet } from "@/app/lib/cache-invalidation";
-import { toastMessages, showToastPayload } from "@/lib/toast-messages";
-import { TransactionFeeModal } from "@/components/TransactionFeeModal";
-import { TruncatedAddress } from "@/components/TruncatedAddress";
-import { useNetworkMismatch } from "@/lib/hooks/useNetworkMismatch";
-import { useTransactionToast } from "@/lib/hooks/useTransactionToast";
-import type { TxStage } from "@/app/lib/soroban-transaction-service";
+import { useState } from 'react';
+import { Loader2, Wallet, AlertCircle } from 'lucide-react';
+import type { Pool } from '@/app/lib/adapters/types';
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { useToast } from '@/providers/ToastProvider';
+import { predinexContract } from '@/app/lib/adapters/predinex-contract';
+import { invalidateOnPlaceBet } from '@/app/lib/cache-invalidation';
+import { toastMessages, showToastPayload } from '@/lib/toast-messages';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
+import { TruncatedAddress } from '@/components/TruncatedAddress';
+import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
+import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
+import type { TxStage } from '@/app/lib/soroban-transaction-service';
 
 interface BettingSectionProps {
   pool: Pool;
@@ -51,8 +50,9 @@ export default function BettingSection({
   const hasMaxBet = maxBetStroops > 0;
   const maxBetXlm = hasMaxBet ? maxBetStroops / STROOPS_PER_XLM : null;
 
-  // Derived wallet balance (placeholder — replace with real balance hook if available).
-  const walletBalance: number | null = isConnected ? 100.0 : null;
+    const parsedWalletBalance = Number.parseFloat(balance);
+    const walletBalance: number | null =
+        isConnected && Number.isFinite(parsedWalletBalance) ? parsedWalletBalance : null;
 
   const { isMismatch, expectedNetworkName } = useNetworkMismatch();
 

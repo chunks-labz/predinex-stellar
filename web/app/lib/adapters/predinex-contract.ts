@@ -101,7 +101,19 @@ export const predinexContract = {
       throw new Error(result.error || 'Transaction failed');
     }
 
-    return { txHash: result.txHash };
+    let poolId: number | undefined;
+    try {
+      if (result.returnValue) {
+        const decoded = scValToNative(result.returnValue);
+        if (typeof decoded === 'number' || typeof decoded === 'bigint') {
+          poolId = Number(decoded);
+        }
+      }
+    } catch {
+      // best-effort; extended metadata call will be skipped if poolId is unavailable
+    }
+
+    return { txHash: result.txHash, poolId };
   },
 
   /**

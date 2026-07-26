@@ -4,14 +4,11 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BettingSection from '@/components/BettingSection';
 import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
-import * as StacksProvider from '@/components/StacksProvider';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
-import * as TxStatusHook from '../../app/lib/hooks/useTxStatus';
+import * as WalletAccountHook from '../../lib/hooks/useWalletAccount';
 import { useToast } from '../../providers/ToastProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
-import { toastMessages } from '../../lib/toast-messages';
 
 // Mock WalletAdapterProvider hook
 vi.mock('@/components/WalletAdapterProvider', () => ({
@@ -34,6 +31,10 @@ vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
   useNetworkMismatch: vi.fn(),
 }));
 
+vi.mock('../../lib/hooks/useWalletAccount', () => ({
+  useWalletAccount: vi.fn(),
+}));
+
 vi.mock('../../app/lib/hooks/useTxStatus', () => ({
   useTxStatus: vi.fn(),
 }));
@@ -44,12 +45,6 @@ vi.mock('../../providers/ToastProvider', () => ({
   // wrapper renders without throwing "No ToastProvider export" errors.
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
-
-// Mock useNetworkMismatch hook
-vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
-  useNetworkMismatch: vi.fn(),
-}));
-
 
 const mockPool = {
   id: 0,
@@ -103,6 +98,11 @@ describe('BettingSection', () => {
       expectedNetworkName: 'Stellar Testnet',
       currentNetworkName: 'Stellar Testnet',
       switchNetwork: vi.fn(),
+    });
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '100.0000000',
+      isConnected: true,
     });
   });
 
@@ -163,6 +163,27 @@ describe('BettingSection', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('Maximum bet is 5 XLM');
     expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
+  });
+
+  it('uses the Horizon wallet balance when validating sufficient funds', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '1.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '2');
+
+    const betButton = screen.getByText(/Bet on Outcome A/i);
+    await user.click(betButton);
+
+    expect(showToast).toHaveBeenCalledWith('Insufficient balance. Available: 1.00 XLM', 'error');
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 

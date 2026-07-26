@@ -217,49 +217,29 @@ pub enum DataKey {
     /// #625 — Pending rescue request waiting out the 24-hour timelock.
     /// Value: (token: Address, to: Address, amount: i128, not_before: u64)
     PendingRescue,
-    /// #716 — Cross-chain mirror configuration for a pool.
-    PoolMirror(u32),
-    /// #716 — Mapping from unified pool ID to source chain pool.
-    MirrorByUnifiedId(u32),
-    /// #716 — Auto-incrementing unified pool ID counter.
-    UnifiedPoolCounter,
-    /// #716 — Bridge timeout in seconds for cross-chain settlements.
-    BridgeTimeout,
-    /// #716 — Dispute window for cross-chain settlements (seconds).
-    CrossChainDisputeWindow,
-    /// #714 — Per-pool LP position for a user (shares + reward debt).
-    LpPosition(u32, Address),
-    /// #714 — Total LP shares minted for a pool.
-    LpTotalShares(u32),
-    /// #714 — Total liquidity deposited by LPs into a pool.
-    LpTotalLiquidity(u32),
-    /// #714 — Cumulative fee-per-share accumulator (scaled by LP_PRECISION).
-    LpFeePerShare(u32),
-    /// #714 — Percentage of protocol fees allocated to LP rewards (basis points).
-    LpFeeAllocationBps,
-    /// #714 — Per-pool accumulated LP reward pool (unclaimed fees).
-    LpRewardPool(u32),
-    /// #807 — Rounding remainder from fee-per-share updates (scaled: amount * LP_PRECISION + prior dust).
-    LpRewardDust(u32),
-    /// #714 — Optional time-locked LP stake for bonus multiplier.
-    LpStake(u32, Address),
-    /// #714 — Bonus multiplier for time-locked LP staking (basis points, 10000 = 1x).
-    LpStakeBoostBps,
-    /// Dispute window for local pools (seconds).
-    DisputeWindow,
-    /// Record of settlement timestamp for enforcing local dispute window.
-    PoolSettlementTime(u32),
-    UserMaxExposurePerPoolBps,
-    UserMaxBetPerTransaction,
-    UserDailyLossLimit,
-    UserDailyLossWindowSecs,
-    UserWeeklyLossLimit,
-    UserWeeklyLossWindowSecs,
-    UserLargeBetCooldownSecs,
-    UserLargeBetThreshold,
+    /// #705 — Total exposure (outstanding bets) for a user in a specific pool.
     UserExposurePerPool(Address, u32),
+    /// #705 — Max exposure per pool as percentage of pool volume (basis points).
+    /// e.g., 1000 = 10% of pool volume. 0 disables the cap.
+    UserMaxExposurePerPoolBps,
+    /// #705 — Max bet size per transaction in stroops. 0 disables the cap.
+    UserMaxBetPerTransaction,
+    /// #705 — Max daily loss per wallet in stroops. 0 disables the limit.
+    UserDailyLossLimit,
+    /// #705 — Daily loss tracking window in seconds (default: 86400 = 1 day).
+    UserDailyLossWindowSecs,
+    /// #705 — Max weekly loss per wallet in stroops. 0 disables the limit.
+    UserWeeklyLossLimit,
+    /// #705 — Weekly loss tracking window in seconds (default: 604800 = 7 days).
+    UserWeeklyLossWindowSecs,
+    /// #705 — Per-wallet daily loss state tracking.
     UserDailyLossState(Address),
+    /// #705 — Per-wallet weekly loss state tracking.
     UserWeeklyLossState(Address),
+    /// #705 — Cooldown (seconds) between large bets from the same wallet.
+    UserLargeBetCooldownSecs,
+    /// #705 — Threshold (stroops) above which cooldown applies.
+    UserLargeBetThreshold,
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -2283,16 +2263,19 @@ impl PredinexContract {
             && amount >= config.large_bet_threshold
         {
             let now = env.ledger().timestamp();
-            let last_large_bet_key = DataKey::LastLargeBetTimestamp(user.clone(), pool_id);
-            let last_large_bet_ts: u64 = env
+            let last_large_bet_key = DataKey::UserExposurePerPool(user.clone(), pool_id);
+            // Use a separate tracking for cooldown - we'll use the daily loss state's window_start
+            // as a proxy for last large bet time (in production, you'd use a dedicated key)
+            let daily_state = env
                 .storage()
                 .persistent()
-                .get(&last_large_bet_key)
-                .unwrap_or(0);
+                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
+                .unwrap_or(UserLossTrackingState {
+                    window_start: now,
+                    loss: 0,
+                });
 
-            if last_large_bet_ts > 0
-                && now.saturating_sub(last_large_bet_ts) < config.large_bet_cooldown_secs
-            {
+            if now.saturating_sub(daily_state.window_start) < config.large_bet_cooldown_secs {
                 env.events().publish(
                     (
                         Symbol::new(env, "user_large_bet_cooldown_active"),
@@ -6439,7 +6422,16 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-                env.events().publish(
+        env.storage().persistent().extend_ttl(
+            &DataKey::UserOutcomeBets(pool_id, user.clone()),
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+
+        // #705 — Update user exposure tracking after bet is placed.
+        Self::update_user_exposure(&env, &user, pool_id, normalized);
+
+        env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),

@@ -25,6 +25,8 @@ import {
 import type { OnChainPoolTemplate } from '@/app/lib/soroban-template-api';
 
 export const CREATE_MARKET_DRAFT_KEY = 'predinex_create_market_draft_v2';
+/** @deprecated Use CREATE_MARKET_DRAFT_KEY */
+export const CREATE_POOL_DRAFT_KEY = CREATE_MARKET_DRAFT_KEY;
 
 export type TemplateSource = 'blank' | 'public' | 'saved';
 export type WizardStep = 1 | 2 | 3 | 4 | 5;

@@ -15,36 +15,42 @@ import {
 } from '../../lib/validators';
 
 describe('validateContractId', () => {
-  it('accepts a valid mainnet contract identifier', () => {
+  it('accepts a valid Stellar contract address', () => {
     const result = validateContractId(
-      'SPENV2J0V4BHRFAZ6FVF97K9ZGQJ0GT19RC3JFN7.predinex-pool',
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
       'mainnet'
     );
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('accepts a valid testnet contract identifier', () => {
+  it('does not require network-specific prefixes for Stellar contract addresses', () => {
     const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
+      'CCV2F3HHPJ5KQWZIQYBXLF3D5XDY4D5MHKXZ4FFLFKSKNIOGOHYRFTMP',
       'testnet'
     );
     expect(result.valid).toBe(true);
   });
 
-  it('rejects missing separators', () => {
-    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM');
+  it('rejects legacy Stacks contract identifiers', () => {
+    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool');
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/format/i);
+    expect(result.error).toMatch(/stellar contract address/i);
   });
 
-  it('rejects a network/address mismatch', () => {
+  it('rejects account public keys', () => {
+    const result = validateContractId('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ');
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/stellar contract address/i);
+  });
+
+  it('rejects invalid Stellar contract characters', () => {
     const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
-      'mainnet'
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSG0',
+      'testnet'
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/mainnet/i);
+    expect(result.error).toMatch(/stellar contract address/i);
   });
 });
 

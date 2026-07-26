@@ -37,43 +37,17 @@ export const SUPPORTED_POOL_ASSETS = ['XLM', 'USDC', 'BTC', 'ETH'] as const;
 export type SupportedPoolAsset = (typeof SUPPORTED_POOL_ASSETS)[number];
 
 /**
- * Validate a Stacks contract identifier in `<address>.<name>` form.
- * The address prefix must match the target network when specified.
+ * Validate a Stellar Soroban contract address.
+ *
+ * The optional network argument is accepted for backward-compatible callers,
+ * but Stellar contract strkeys do not encode mainnet/testnet in the prefix.
  */
 export function validateContractId(
   contractId: string,
   network?: 'mainnet' | 'testnet' | 'devnet'
 ): { valid: boolean; error?: string } {
-  if (!contractId || contractId.trim().length === 0) {
-    return { valid: false, error: 'Contract identifier is required' };
-  }
-
-  const trimmed = contractId.trim();
-  const separatorIndex = trimmed.indexOf('.');
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    return { valid: false, error: 'Contract identifier must be in <address>.<name> format' };
-  }
-
-  const address = trimmed.slice(0, separatorIndex);
-  const name = trimmed.slice(separatorIndex + 1);
-
-  if (!/^(SP|ST)[A-Z0-9]{10,}$/.test(address)) {
-    return { valid: false, error: 'Invalid Stacks contract address format' };
-  }
-
-  if (!/^[a-zA-Z][a-zA-Z0-9-]*$/.test(name)) {
-    return { valid: false, error: 'Invalid contract name format' };
-  }
-
-  if (network === 'mainnet' && !address.startsWith('SP')) {
-    return { valid: false, error: 'Mainnet contract addresses must start with SP' };
-  }
-
-  if ((network === 'testnet' || network === 'devnet') && !address.startsWith('ST')) {
-    return { valid: false, error: 'Testnet/devnet contract addresses must start with ST' };
-  }
-
-  return { valid: true };
+  void network;
+  return validateStellarContractAddress(contractId);
 }
 
 export function validatePoolTitle(title: string): { valid: boolean; error?: string } {
@@ -153,8 +127,8 @@ export function validateDuration(duration: number): { valid: boolean; error?: st
 }
 
 /**
- * Validate bet amount in STX
- * @param amount Bet amount in STX
+ * Validate bet amount in XLM
+ * @param amount Bet amount in XLM
  * @returns Validation result
  */
 export function validateBetAmount(amount: number): { valid: boolean; error?: string } {

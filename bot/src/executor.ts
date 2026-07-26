@@ -41,6 +41,31 @@ export interface SettleCandidate {
   winningOutcome: number;
 }
 
+/** Binary pools only support outcome index 0 or 1. */
+function isValidSettlementOutcome(outcome: number): boolean {
+  return outcome === 0 || outcome === 1;
+}
+
+/**
+ * Reject invalid winning outcome indices before building or submitting a tx.
+ */
+function validateSettlementOutcomes(candidates: SettleCandidate[]): void {
+  for (const c of candidates) {
+    if (!isValidSettlementOutcome(c.winningOutcome)) {
+      throw new Error(
+        `InvalidOutcome: pool ${c.poolId} has winning outcome ${c.winningOutcome}`,
+      );
+    }
+  }
+}
+
+/** @internal Exported for unit tests only. */
+export function validateSettlementOutcomesForTest(
+  candidates: SettleCandidate[],
+): void {
+  validateSettlementOutcomes(candidates);
+}
+
 /**
  * Mirrors the contract's SettleResult struct returned by settle_pools.
  * Each entry represents the outcome for a single pool in the batch.
@@ -122,6 +147,8 @@ async function submitSettleBatch(
   candidates: SettleCandidate[],
   config: BotConfig,
 ): Promise<{ txHash: string; poolResults: PoolSettleResult[] }> {
+  validateSettlementOutcomes(candidates);
+
   const callerAddress = keypair.publicKey();
   const sourceAccount = await server.getAccount(callerAddress);
   const contract = new Contract(contractId);
@@ -158,6 +185,20 @@ async function submitSettleBatch(
     throw new Error("Simulation returned unexpected result type");
   }
 
+  const simulatedResults = decodeSettleResults(
+    simulation.result?.retval as xdr.ScVal | undefined,
+  );
+  if (!simulatedResults) {
+    throw new Error(
+      "Simulation succeeded but settlement results could not be decoded",
+    );
+  }
+  if (simulatedResults.length !== candidates.length) {
+    throw new Error(
+      `Simulation returned ${simulatedResults.length} settlement results for ${candidates.length} pools`,
+    );
+  }
+
   // Assemble with the resource estimate embedded
   const assembledTx = rpc.assembleTransaction(tx, simulation).build();
 
@@ -169,8 +210,7 @@ async function submitSettleBatch(
   );
 
   // Decode per-pool settlement results from the contract's Vec<SettleResult>
-  // The return value is an array of { pool_id: u32, success: bool }
-  // Priority: confirmed tx returnValue → simulation retval → assume all succeeded
+  // Priority: confirmed tx returnValue → pre-submit simulation retval
   let poolResults = decodeSettleResults(
     returnValue as xdr.ScVal | undefined,
   );
@@ -179,15 +219,7 @@ async function submitSettleBatch(
     logger.warn(
       "Failed to decode transaction return value, falling back to simulation retval",
     );
-    poolResults = decodeSettleResults(simulation.result?.retval as xdr.ScVal | undefined);
-  }
-
-  if (!poolResults) {
-    // If even simulation decoding fails, assume all succeeded (existing behavior)
-    poolResults = candidates.map((c) => ({
-      pool_id: c.poolId,
-      success: true,
-    }));
+    poolResults = simulatedResults;
   }
 
   return { txHash: hash, poolResults };
@@ -286,6 +318,8 @@ export class Executor {
           // Don't retry PoolAlreadySettled — another instance settled it first
           shouldRetry: (err) =>
             !String(err).includes("Simulation failed") &&
+            !String(err).includes("Simulation succeeded but settlement results") &&
+            !String(err).includes("Simulation returned") &&
             !String(err).includes("InvalidOutcome") &&
             !String(err).includes("PoolNotExpired") &&
             !String(err).includes("PoolAlreadySettled"),
