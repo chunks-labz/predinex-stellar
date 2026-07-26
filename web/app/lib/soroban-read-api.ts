@@ -903,6 +903,113 @@ function getSorobanConfig(): SorobanReadConfig {
 }
 
 // ---------------------------------------------------------------------------
+// LP Read Functions
+// ---------------------------------------------------------------------------
+
+export interface LpPositionData {
+  shares: number;
+  rewardDebt: number;
+}
+
+export async function getLpPositionFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<LpPositionData | null> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return null;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_lp_position',
+      [poolId, userAddress],
+    );
+
+    if (rawResult === null || typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      shares: toNum(raw.shares ?? raw[0]),
+      rewardDebt: toNum(raw.reward_debt ?? raw[1]),
+    };
+  } catch (e) {
+    log.error(`Failed to fetch LP position for pool ${poolId}:`, e);
+    return null;
+  }
+}
+
+export async function getPendingLpRewardsFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<number> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return 0;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_pending_lp_rewards',
+      [poolId, userAddress],
+    );
+
+    return toNum(rawResult as bigint | number | string | undefined);
+  } catch (e) {
+    log.error(`Failed to fetch pending LP rewards for pool ${poolId}:`, e);
+    return 0;
+  }
+}
+
+export async function getLpStakeFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<{ shares: number; lockUntil: number } | null> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return null;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_lp_stake',
+      [poolId, userAddress],
+    );
+
+    if (rawResult === null) return null;
+    if (typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      shares: toNum(raw.shares),
+      lockUntil: toNum(raw.lock_until),
+    };
+  } catch (e) {
+    log.error(`Failed to fetch LP stake for pool ${poolId}:`, e);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -923,6 +1030,9 @@ export const sorobanReadApi = {
   getPoolBetLimits: getPoolBetLimitsFromSoroban,
   getPoolCount: getPoolCountFromSoroban,
   getPoolsBatch: getPoolsBatchFromSoroban,
+  getLpPosition: getLpPositionFromSoroban,
+  getPendingLpRewards: getPendingLpRewardsFromSoroban,
+  getLpStake: getLpStakeFromSoroban,
 };
 
 /** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */
