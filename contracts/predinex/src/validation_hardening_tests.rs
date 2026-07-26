@@ -9,6 +9,7 @@ struct TestCtx<'a> {
     admin: Address,
     user: Address,
     user_b: Address,
+    token: Address,
 }
 
 fn setup() -> TestCtx<'static> {
@@ -30,6 +31,7 @@ fn setup() -> TestCtx<'static> {
         admin,
         user,
         user_b,
+        token: token_id.address(),
     }
 }
 
@@ -203,5 +205,70 @@ fn boundary_validation_uses_consistent_errors() {
     assert_eq!(
         ctx.client.try_withdraw_treasury(&ctx.admin, &0),
         Err(Ok(ContractError::InvalidWithdrawalAmount))
+    );
+}
+
+// ── rescue_tokens amount validation ──────────────────────────────────────────
+
+/// A zero rescue is a pointless cross-contract transfer — reject it before the
+/// token client is touched.
+#[test]
+fn rescue_tokens_rejects_zero_amount() {
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+
+    assert_eq!(
+        ctx.client
+            .try_rescue_tokens(&ctx.admin, &ctx.token, &recipient, &0),
+        Err(Ok(ContractError::InvalidWithdrawalAmount))
+    );
+}
+
+/// A negative rescue would be a reverse transfer — reject it outright.
+#[test]
+fn rescue_tokens_rejects_negative_amount() {
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+    let token_admin = token::StellarAssetClient::new(&ctx.env, &ctx.token);
+    token_admin.mint(&recipient, &1_000);
+
+    assert_eq!(
+        ctx.client
+            .try_rescue_tokens(&ctx.admin, &ctx.token, &recipient, &-1),
+        Err(Ok(ContractError::InvalidWithdrawalAmount))
+    );
+
+    // The rejected call must not have moved anything.
+    let token_client = token::Client::new(&ctx.env, &ctx.token);
+    assert_eq!(token_client.balance(&recipient), 1_000);
+}
+
+/// The happy path is unaffected by the new guard: a positive amount still moves
+/// from the contract balance to the recipient.
+#[test]
+fn rescue_tokens_transfers_positive_amount() {
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+    let token_admin = token::StellarAssetClient::new(&ctx.env, &ctx.token);
+    token_admin.mint(&ctx.client.address, &500);
+
+    ctx.client
+        .rescue_tokens(&ctx.admin, &ctx.token, &recipient, &500);
+
+    let token_client = token::Client::new(&ctx.env, &ctx.token);
+    assert_eq!(token_client.balance(&recipient), 500);
+    assert_eq!(token_client.balance(&ctx.client.address), 0);
+}
+
+/// Non-treasury callers are still rejected regardless of the amount.
+#[test]
+fn rescue_tokens_rejects_non_treasury_caller() {
+    let ctx = setup();
+    let recipient = Address::generate(&ctx.env);
+
+    assert_eq!(
+        ctx.client
+            .try_rescue_tokens(&ctx.user, &ctx.token, &recipient, &100),
+        Err(Ok(ContractError::Unauthorized))
     );
 }

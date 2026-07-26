@@ -4,7 +4,8 @@
 //
 // `cancel_bet` lets a bettor reduce or close their exposure on an outcome while
 // the market is still live; `extend_pool_duration` lets the creator push out an
-// open pool's expiry up to the maximum total lifetime.
+// open pool's expiry by at most `MAX_EXTENSION_SECS` per call and up to the
+// maximum total lifetime.
 // ============================================================================
 
 #![cfg(test)]
@@ -480,27 +481,35 @@ fn e4_zero_extension_rejected() {
     );
 }
 
-/// E5: Boundary — extending exactly to MAX_POOL_DURATION_SECS from creation is
-/// allowed, but one second more is rejected.
+/// E5: Boundary — repeated capped extensions can reach exactly
+/// MAX_POOL_DURATION_SECS from creation, but one second more is rejected.
 #[test]
 fn e5_boundary_at_max_pool_duration() {
     let t = setup_bm();
     t.env.ledger().with_mut(|li| li.timestamp = 0);
     let (pool_id, creator) = make_pool_bm(&t); // created_at = 0, expiry = 3600
 
-    // Extend so total lifetime == MAX exactly.
-    let to_max = MAX_POOL_DURATION_SECS - 3_600;
-    let new_expiry = t.client.extend_pool_duration(&creator, &pool_id, &to_max);
-    assert_eq!(new_expiry, MAX_POOL_DURATION_SECS);
+    // The per-call cap means reaching the total-lifetime ceiling takes several
+    // calls; walk the expiry up to MAX exactly.
+    let mut remaining = MAX_POOL_DURATION_SECS - 3_600;
+    while remaining > 0 {
+        let step = core::cmp::min(remaining, MAX_EXTENSION_SECS);
+        t.client.extend_pool_duration(&creator, &pool_id, &step);
+        remaining -= step;
+    }
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().expiry,
+        MAX_POOL_DURATION_SECS
+    );
 
-    // Any further extension exceeds the cap.
+    // Any further extension exceeds the total-lifetime cap.
     assert_eq!(
         t.client.try_extend_pool_duration(&creator, &pool_id, &1u64),
         Err(Ok(ContractError::DurationTooLong))
     );
 }
 
-/// E6: Extending beyond the max cap in a single call is rejected.
+/// E6: An extension larger than the per-call cap is rejected.
 #[test]
 fn e6_extension_beyond_cap_rejected() {
     let t = setup_bm();
@@ -511,6 +520,59 @@ fn e6_extension_beyond_cap_rejected() {
         t.client
             .try_extend_pool_duration(&creator, &pool_id, &MAX_POOL_DURATION_SECS),
         Err(Ok(ContractError::DurationTooLong))
+    );
+}
+
+/// E6a: Boundary — exactly MAX_EXTENSION_SECS is accepted, one second more is
+/// rejected, and the rejected call leaves the stored expiry untouched.
+#[test]
+fn e6a_boundary_at_max_extension_per_call() {
+    let t = setup_bm();
+    t.env.ledger().with_mut(|li| li.timestamp = 0);
+    let (pool_id, creator) = make_pool_bm(&t); // expiry = 3600
+
+    assert_eq!(
+        t.client
+            .try_extend_pool_duration(&creator, &pool_id, &(MAX_EXTENSION_SECS + 1)),
+        Err(Ok(ContractError::DurationTooLong)),
+        "one second over the per-call cap is rejected"
+    );
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().expiry,
+        3_600,
+        "rejected extension must not mutate the pool"
+    );
+
+    let new_expiry = t
+        .client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+    assert_eq!(
+        new_expiry,
+        3_600 + MAX_EXTENSION_SECS,
+        "exactly the per-call cap is accepted"
+    );
+}
+
+/// E6b: The per-call cap is not a total cap — a creator can still extend again
+/// on a later call, each capped in turn.
+#[test]
+fn e6b_repeated_extensions_each_capped() {
+    let t = setup_bm();
+    t.env.ledger().with_mut(|li| li.timestamp = 0);
+    let (pool_id, creator) = make_pool_bm(&t); // expiry = 3600
+
+    t.client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+    let new_expiry = t
+        .client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+
+    assert_eq!(new_expiry, 3_600 + 2 * MAX_EXTENSION_SECS);
+    assert_eq!(
+        t.client
+            .try_extend_pool_duration(&creator, &pool_id, &(MAX_EXTENSION_SECS + 1)),
+        Err(Ok(ContractError::DurationTooLong)),
+        "the per-call cap still applies on subsequent calls"
     );
 }
 

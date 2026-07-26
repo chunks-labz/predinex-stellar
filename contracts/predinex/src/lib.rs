@@ -300,6 +300,13 @@ const MAX_WEBHOOK_URL_LENGTH: u32 = 512;
 const MIN_POOL_DURATION_SECS: u64 = 300;
 /// #570 — Maximum pool lifetime in seconds (~1 year).
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
+/// Maximum duration a single `extend_pool_duration` call may add (30 days).
+///
+/// The total-lifetime cap (`MAX_POOL_DURATION_SECS`) already bounds how far a
+/// pool can be pushed out overall; this per-call cap additionally bounds how
+/// far it can jump at once, so bettors are never surprised by a single
+/// multi-month extension of a market they have funds locked in.
+const MAX_EXTENSION_SECS: u64 = 30 * 24 * 3600;
 /// #570 — Minimum creator deposit in stroops (1 XLM).
 pub const MIN_CREATOR_DEPOSIT: i128 = 10_000_000;
 
@@ -4232,8 +4239,9 @@ impl PredinexContract {
     ///
     /// Gives a market more time to resolve without having to settle/void and
     /// recreate it. The expiry is pushed out by `additional_seconds`, subject to
-    /// a hard cap of `MAX_POOL_DURATION_SECS` total lifetime measured from the
-    /// pool's `created_at` timestamp.
+    /// two bounds: a per-call cap of `MAX_EXTENSION_SECS`, and a hard cap of
+    /// `MAX_POOL_DURATION_SECS` total lifetime measured from the pool's
+    /// `created_at` timestamp.
     ///
     /// # Conditions
     /// * Only the pool creator may extend (`creator.require_auth`).
@@ -4241,6 +4249,7 @@ impl PredinexContract {
     ///   voided, cancelled, frozen, or disputed pools).
     /// * Pool must not have expired yet.
     /// * `additional_seconds` must be positive — duration can only be increased.
+    /// * `additional_seconds` must not exceed `MAX_EXTENSION_SECS`.
     /// * The resulting expiry must not exceed `created_at + MAX_POOL_DURATION_SECS`.
     ///
     /// # Post-conditions
@@ -4255,7 +4264,8 @@ impl PredinexContract {
     /// * `PoolNotOpen` — pool is not in the `Open` state (covers frozen/disputed).
     /// * `PoolExpired` — pool expiry has already passed.
     /// * `DurationTooShort` — `additional_seconds` is zero.
-    /// * `DurationTooLong` — extension would exceed `MAX_POOL_DURATION_SECS`.
+    /// * `DurationTooLong` — `additional_seconds` exceeds `MAX_EXTENSION_SECS`,
+    ///   or the extension would exceed `MAX_POOL_DURATION_SECS`.
     /// * `ExpiryOverflow` — expiry arithmetic overflowed.
     pub fn extend_pool_duration(
         env: Env,
@@ -4289,6 +4299,11 @@ impl PredinexContract {
         // Duration can only be increased.
         if additional_seconds == 0 {
             return Err(ContractError::DurationTooShort);
+        }
+
+        // Bound how far a single call can push the expiry out.
+        if additional_seconds > MAX_EXTENSION_SECS {
+            return Err(ContractError::DurationTooLong);
         }
 
         let new_expiry = pool
@@ -8372,6 +8387,12 @@ impl PredinexContract {
     ///
     /// This is a best-effort safety valve: the admin is trusted to only
     /// rescue tokens that are not currently locked in active pools.
+    ///
+    /// # Errors
+    /// * `Unauthorized` – caller is not the treasury recipient.
+    /// * `InvalidWithdrawalAmount` – `amount <= 0`. A zero transfer is a
+    ///   pointless cross-contract call, and a negative one is never a valid
+    ///   rescue.
     pub fn rescue_tokens(
         env: Env,
         caller: Address,
@@ -8381,6 +8402,10 @@ impl PredinexContract {
     ) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
+
+        if amount <= 0 {
+            return Err(ContractError::InvalidWithdrawalAmount);
+        }
 
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
 

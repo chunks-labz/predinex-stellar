@@ -61,9 +61,9 @@ Extends an open pool's duration before it expires. Only the pool creator may cal
   - `env`: Soroban environment
   - `creator`: The pool creator
   - `pool_id`: The ID of the pool
-  - `additional_seconds`: Seconds to add to the current expiry; must be `> 0`
+  - `additional_seconds`: Seconds to add to the current expiry; must be `> 0` and at most `MAX_EXTENSION_SECS` (2,592,000 s = 30 days)
 - **Returns**: `u64` (the pool's new expiry timestamp)
-- **Behavior**: Pushes `pool.expiry` out by `additional_seconds`, capped so total lifetime never exceeds `MAX_POOL_DURATION_SECS` (1,000,000 s) from creation. Pool must be `Open` and not yet expired. Emits `pool_duration_extended`.
+- **Behavior**: Pushes `pool.expiry` out by `additional_seconds`, subject to two caps: a per-call cap of `MAX_EXTENSION_SECS` (30 days), and a total lifetime that never exceeds `MAX_POOL_DURATION_SECS` (31,536,000 s ≈ 1 year) from creation. Pool must be `Open` and not yet expired. Emits `pool_duration_extended`.
 - **Errors**: `PoolNotFound`, `Unauthorized`, `PoolNotOpen`, `PoolExpired`, `DurationTooShort`, `DurationTooLong`, `ExpiryOverflow`.
 - **Example**:
   ```bash

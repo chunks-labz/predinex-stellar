@@ -242,13 +242,18 @@ pub fn cancel_scheduled_pool(
 ```rust
 pub fn extend_pool_duration(
     env: Env,
-    caller: Address,
+    creator: Address,
     pool_id: u32,
     additional_seconds: u64,
-) -> Result<(), ContractError>
+) -> Result<u64, ContractError>
 ```
 
-**Auth:** `caller` (creator or treasury recipient).
+**Auth:** `creator` (the pool creator only).
+
+**Bounds:** `additional_seconds` must be `> 0` and at most `MAX_EXTENSION_SECS`
+(30 days) per call, and the resulting expiry must not push the pool's total
+lifetime beyond `MAX_POOL_DURATION_SECS` (≈1 year) from creation. Violations
+return `DurationTooShort` / `DurationTooLong`.
 
 ---
 
