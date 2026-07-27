@@ -189,15 +189,6 @@ export function useWallet() {
     }
     return context;
 }
-
-/**
- * @deprecated Use WalletProvider instead. This alias is maintained for backward compatibility.
- */
-export const StacksProvider = WalletProvider;
-
-/**
- * @deprecated Use useWallet instead. This alias is maintained for backward compatibility.
- */
 export function useStacks() {
     return useWallet();
 }

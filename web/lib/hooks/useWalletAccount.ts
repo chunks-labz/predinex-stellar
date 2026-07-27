@@ -56,10 +56,3 @@ export function useWalletAccount(): WalletAccountData {
     isConnected,
   };
 }
-
-/**
- * @deprecated Use useWalletAccount instead. Maintained for backward compatibility.
- */
-export function useStacksAccount() {
-  return useWalletAccount();
-}
