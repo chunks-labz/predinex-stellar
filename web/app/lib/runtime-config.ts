@@ -69,11 +69,17 @@ function parseNetwork(raw: string): SupportedNetwork {
 
 function parseContractId(contractAddress: string): { address: string; name: string; id: string } {
   const trimmed = contractAddress.trim();
-  const separatorIndex = trimmed.indexOf('.');
 
+  // Stellar Soroban contract ID (C-prefixed strkey).
+  if (trimmed.startsWith('C')) {
+    return { address: trimmed, name: '', id: trimmed };
+  }
+
+  // Legacy Stacks contract principal + name in `<address>.<name>` form.
+  const separatorIndex = trimmed.indexOf('.');
   if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
     throw new Error(
-      `Invalid contract id '${trimmed}'. Expected '<address>.<name>' coordinates for Stacks reads/writes.`
+      `Invalid contract id '${trimmed}'. Expected a Stellar contract ID (C... strkey) or Stacks '<address>.<name>' coordinates.`
     );
   }
 
