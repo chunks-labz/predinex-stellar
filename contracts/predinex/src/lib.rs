@@ -240,6 +240,28 @@ pub enum DataKey {
     UserLargeBetCooldownSecs,
     /// #705 — Threshold (stroops) above which cooldown applies.
     UserLargeBetThreshold,
+    /// LP Staking & Rewards
+    LpPosition(u32, Address),
+    LpFeePerShare(u32),
+    LpTotalLiquidity(u32),
+    LpTotalShares(u32),
+    LpFeeAllocationBps,
+    LpStakeBoostBps,
+    LpStake(u32, Address),
+    LpRewardDust(u32),
+    LpRewardPool(u32),
+    /// Cross-chain & Mirror
+    PoolMirror(u32),
+    MirrorByUnifiedId(u32),
+    UnifiedPoolCounter,
+    BridgeTimeout,
+    CrossChainDisputeWindow,
+    DisputeWindow,
+    PoolSettlementTime(u32),
+    PoolExtMetadata(u32),
+    LastLargeBetTimestamp(Address, u32),
+    PoolCategory(u32),
+    PoolTags(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -447,6 +469,7 @@ pub enum ContractError {
     CreatorCannotBet = 83,
     InvalidDepositDeadline = 84,
     DepositDeadlinePassed = 85,
+    LargeBetCooldownActive = 86,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -464,6 +487,8 @@ pub enum SettlementSource {
     Operator,
     /// Permissionless settlement of an expired pool.
     Expired,
+    /// Delegated settlement.
+    Delegated,
 }
 
 /// #396 — Event types that can trigger an off-chain webhook notification.
@@ -6156,7 +6181,7 @@ impl PredinexContract {
         cursor: Option<Address>,
     ) -> Vec<PoolLeaderboardEntry> {
         let effective_limit = if limit > 50 { 50 } else { limit };
-        let mut result = Vec::new(&env);
+        let mut all_entries = Vec::new(&env);
 
         let bettors: Vec<Address> = env
             .storage()
@@ -6166,13 +6191,6 @@ impl PredinexContract {
 
         for i in 0..bettors.len() {
             let user = bettors.get(i).unwrap();
-
-            // Skip entries before cursor.
-            if let Some(ref cursor_addr) = cursor {
-                if user == cursor_addr.clone() {
-                    continue;
-                }
-            }
 
             if let Some(bet) = env
                 .storage()
@@ -6185,7 +6203,7 @@ impl PredinexContract {
                         _ => false,
                     };
 
-                result.push_back(PoolLeaderboardEntry {
+                all_entries.push_back(PoolLeaderboardEntry {
                     user,
                     total_bet: bet.total_bet,
                     winnings_claimed,
@@ -6193,31 +6211,44 @@ impl PredinexContract {
             }
         }
 
-        // Sort by total_bet descending using a simple bubble sort (Vec has no sort).
-        let n = result.len();
+        // Sort by total_bet descending, with user address tie-breaking for a stable total order.
+        let n = all_entries.len();
         for i in 0..n {
             for j in (i + 1)..n {
-                let a = result.get(i).unwrap().total_bet;
-                let b = result.get(j).unwrap().total_bet;
-                if b > a {
-                    let entry_i = result.get(i).unwrap();
-                    let entry_j = result.get(j).unwrap();
-                    let tmp = entry_i.clone();
-                    result.set(i, entry_j.clone());
-                    result.set(j, tmp);
+                let entry_i = all_entries.get(i).unwrap();
+                let entry_j = all_entries.get(j).unwrap();
+
+                let swap = if entry_j.total_bet > entry_i.total_bet {
+                    true
+                } else if entry_j.total_bet == entry_i.total_bet {
+                    entry_j.user < entry_i.user
+                } else {
+                    false
+                };
+
+                if swap {
+                    all_entries.set(i, entry_j);
+                    all_entries.set(j, entry_i);
                 }
             }
         }
 
-        // Apply limit.
+        // Determine start index after cursor (if specified).
+        let mut start_index: u32 = 0;
+        if let Some(ref cursor_addr) = cursor {
+            for i in 0..all_entries.len() {
+                if all_entries.get(i).unwrap().user == *cursor_addr {
+                    start_index = i + 1;
+                    break;
+                }
+            }
+        }
+
+        // Slice up to effective_limit entries.
         let mut limited = Vec::new(&env);
-        let count = if effective_limit < result.len() {
-            effective_limit
-        } else {
-            result.len()
-        };
-        for i in 0..count {
-            limited.push_back(result.get(i).unwrap());
+        let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
+        for i in start_index..end_index {
+            limited.push_back(all_entries.get(i).unwrap());
         }
         limited
     }
@@ -6422,16 +6453,7 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-        env.storage().persistent().extend_ttl(
-            &DataKey::UserOutcomeBets(pool_id, user.clone()),
-            POOL_BUMP_THRESHOLD,
-            POOL_BUMP_TARGET,
-        );
-
-        // #705 — Update user exposure tracking after bet is placed.
-        Self::update_user_exposure(&env, &user, pool_id, normalized);
-
-        env.events().publish(
+                env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),
@@ -6519,6 +6541,71 @@ impl PredinexContract {
             creator,
         );
         Ok(())
+    }
+
+    pub fn set_pool_category(
+        env: Env,
+        caller: Address,
+        pool_id: u32,
+        category: PoolCategory,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        let admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
+        if caller != pool.creator && Some(&caller) != admin.as_ref() {
+            return Err(ContractError::Unauthorized);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolCategory(pool_id), &category);
+        Ok(())
+    }
+
+    pub fn get_pool_category(env: Env, pool_id: u32) -> Option<PoolCategory> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolCategory(pool_id))
+    }
+
+    pub fn set_pool_tags(
+        env: Env,
+        caller: Address,
+        pool_id: u32,
+        tags: Vec<String>,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        let admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
+        if caller != pool.creator && Some(&caller) != admin.as_ref() {
+            return Err(ContractError::Unauthorized);
+        }
+        if tags.len() > 10 {
+            return Err(ContractError::DescriptionTooLong);
+        }
+        for i in 0..tags.len() {
+            if tags.get(i).unwrap().len() > 32 {
+                return Err(ContractError::DescriptionTooLong);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolTags(pool_id), &tags);
+        Ok(())
+    }
+
+    pub fn get_pool_tags(env: Env, pool_id: u32) -> Vec<String> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolTags(pool_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     pub fn create_pool_template(
@@ -8875,7 +8962,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_deposit"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpDepositEvent {
                 user: user.clone(),
@@ -9028,7 +9115,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_withdraw"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpWithdrawEvent {
                 user: user.clone(),

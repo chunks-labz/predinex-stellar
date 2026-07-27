@@ -6905,6 +6905,7 @@ fn test_bet_after_expiry_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
@@ -6938,6 +6939,7 @@ fn test_multiple_bettors_proportional_reward() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user1, &pool_id, &0, &2000000, &None::<Address>);
@@ -6983,6 +6985,7 @@ fn test_fee_calculation_verification() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user1, &pool_id, &0, &1000000, &None::<Address>);
@@ -7019,6 +7022,7 @@ fn test_zero_value_bet_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &0, &0, &None::<Address>);
@@ -7047,6 +7051,7 @@ fn test_settle_expired_pool_success() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &1, &1000000, &None::<Address>);
@@ -7054,7 +7059,7 @@ fn test_settle_expired_pool_success() {
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
     let stranger = Address::generate(&env);
-    client.settle_expired_pool(&stranger, &pool_id);
+    client.settle_pool(&stranger, &pool_id, &1u32);
 
     let pool = client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.status, PoolStatus::Settled(1));
@@ -7083,6 +7088,7 @@ fn test_empty_winning_pool_handling() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &1, &1000000, &None::<Address>);

@@ -28,6 +28,7 @@ fn create_test_pool(env: &Env, client: &PredinexContractClient<'_>, creator: &Ad
         &String::from_str(env, "No"),
         &3600u64,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 
