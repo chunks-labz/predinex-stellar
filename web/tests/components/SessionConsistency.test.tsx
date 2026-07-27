@@ -13,19 +13,6 @@ vi.mock('../../app/components/WalletAdapterProvider', () => ({
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/StacksProvider', () => ({
-  useStacks: vi.fn(() => ({
-    userData: null,
-    authenticate: vi.fn(),
-    userSession: {},
-    setUserData: vi.fn(),
-    signOut: vi.fn(),
-    openWalletModal: vi.fn(),
-    isLoading: false,
-  })),
-  StacksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
 vi.mock('../../providers/ToastProvider', () => ({
   useToast: vi.fn(() => ({ showToast: vi.fn() })),
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,

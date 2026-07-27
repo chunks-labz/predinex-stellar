@@ -4,7 +4,6 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import BettingSection from '../../app/components/BettingSection';
 import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
-import * as StacksProvider from '../../app/components/StacksProvider';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
 import * as TxStatusHook from '../../app/lib/hooks/useTxStatus';
 import { useToast } from '../../providers/ToastProvider';
@@ -17,11 +16,6 @@ import { toastMessages } from '../../lib/toast-messages';
 vi.mock('../../app/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}));
-
-vi.mock('../../app/components/StacksProvider', () => ({
-  useStacks: vi.fn(),
-  StacksProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock('../../app/lib/adapters/predinex-contract', () => ({
