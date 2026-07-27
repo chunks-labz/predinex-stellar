@@ -12,6 +12,7 @@ export interface IncentiveConfig {
 }
 
 export interface BetterIncentive {
+  id?: string;
   betterId: string;
   poolId: number;
   betAmount: number;
