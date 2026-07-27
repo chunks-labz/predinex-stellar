@@ -20,6 +20,8 @@ jobs:
   safety-checks:
     name: Pre-deployment Safety Checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       wasm-hash: ${{ steps.build.outputs.wasm-hash }}
     steps:
@@ -88,6 +90,8 @@ jobs:
     name: Deploy to Mainnet
     needs: safety-checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     environment: mainnet   # requires manual approval in GitHub Environments
     outputs:
       contract-id: ${{ steps.deploy.outputs.contract-id }}
@@ -185,6 +189,8 @@ jobs:
     name: Post-deployment Smoke Tests
     needs: deploy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -255,6 +261,8 @@ jobs:
     name: Notify Deployment Status
     needs: [safety-checks, deploy, smoke-tests]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     if: always()
     steps:
       - name: Determine status
