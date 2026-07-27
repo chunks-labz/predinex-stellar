@@ -2116,21 +2116,29 @@ impl PredinexContract {
             .unwrap_or(0)
     }
 
-    /// Return the user's current daily loss tracking state.
-    pub fn get_user_daily_loss_status(env: Env, user: Address) -> UserLossTrackingState {
-        let config = Self::get_user_exposure_config(env.clone());
-        let now = env.ledger().timestamp();
+    /// Internal: read a loss-tracking entry, rolling the window forward when the
+    /// configured window has elapsed since `window_start`.
+    ///
+    /// Both the pre-bet check and the post-bet write go through here so that a
+    /// bet can never be validated against one window and recorded into another.
+    /// A `window_secs` of 0 disables the roll-over and keeps a single window
+    /// open indefinitely.
+    fn load_loss_state(
+        env: &Env,
+        key: &DataKey,
+        now: u64,
+        window_secs: u64,
+    ) -> UserLossTrackingState {
         let state = env
             .storage()
             .persistent()
-            .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user))
+            .get::<_, UserLossTrackingState>(key)
             .unwrap_or(UserLossTrackingState {
                 window_start: now,
                 loss: 0,
             });
-        if config.daily_loss_window_secs > 0
-            && now.saturating_sub(state.window_start) >= config.daily_loss_window_secs
-        {
+
+        if window_secs > 0 && now.saturating_sub(state.window_start) >= window_secs {
             UserLossTrackingState {
                 window_start: now,
                 loss: 0,
@@ -2140,28 +2148,28 @@ impl PredinexContract {
         }
     }
 
+    /// Return the user's current daily loss tracking state.
+    pub fn get_user_daily_loss_status(env: Env, user: Address) -> UserLossTrackingState {
+        let config = Self::get_user_exposure_config(env.clone());
+        let now = env.ledger().timestamp();
+        Self::load_loss_state(
+            &env,
+            &DataKey::UserDailyLossState(user),
+            now,
+            config.daily_loss_window_secs,
+        )
+    }
+
     /// Return the user's current weekly loss tracking state.
     pub fn get_user_weekly_loss_status(env: Env, user: Address) -> UserLossTrackingState {
         let config = Self::get_user_exposure_config(env.clone());
         let now = env.ledger().timestamp();
-        let state = env
-            .storage()
-            .persistent()
-            .get::<_, UserLossTrackingState>(&DataKey::UserWeeklyLossState(user))
-            .unwrap_or(UserLossTrackingState {
-                window_start: now,
-                loss: 0,
-            });
-        if config.weekly_loss_window_secs > 0
-            && now.saturating_sub(state.window_start) >= config.weekly_loss_window_secs
-        {
-            UserLossTrackingState {
-                window_start: now,
-                loss: 0,
-            }
-        } else {
-            state
-        }
+        Self::load_loss_state(
+            &env,
+            &DataKey::UserWeeklyLossState(user),
+            now,
+            config.weekly_loss_window_secs,
+        )
     }
 
     /// Internal: check all user exposure limits before placing a bet.
@@ -2223,31 +2231,23 @@ impl PredinexContract {
             }
         }
 
-        // Check daily loss limit
+        // Check daily loss limit. The accumulated total comes from storage, so
+        // the cap applies across every bet in the window, not just this one.
         if config.daily_loss_limit > 0 {
             let now = env.ledger().timestamp();
-            let mut daily_state = env
-                .storage()
-                .persistent()
-                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
-                .unwrap_or(UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                });
-
-            // Reset if window expired
-            if config.daily_loss_window_secs > 0
-                && now.saturating_sub(daily_state.window_start) >= config.daily_loss_window_secs
-            {
-                daily_state = UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                };
-            }
+            let daily_state = Self::load_loss_state(
+                env,
+                &DataKey::UserDailyLossState(user.clone()),
+                now,
+                config.daily_loss_window_secs,
+            );
 
             // For a bet, we don't know if it will win or lose yet, so we track the bet amount
             // as potential loss. The actual loss is updated on settlement.
-            let potential_loss = daily_state.loss + amount;
+            let potential_loss = daily_state
+                .loss
+                .checked_add(amount)
+                .ok_or(ContractError::PoolTotalOverflow)?;
             if potential_loss > config.daily_loss_limit {
                 env.events().publish(
                     (
@@ -2263,26 +2263,17 @@ impl PredinexContract {
         // Check weekly loss limit
         if config.weekly_loss_limit > 0 {
             let now = env.ledger().timestamp();
-            let mut weekly_state = env
-                .storage()
-                .persistent()
-                .get::<_, UserLossTrackingState>(&DataKey::UserWeeklyLossState(user.clone()))
-                .unwrap_or(UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                });
+            let weekly_state = Self::load_loss_state(
+                env,
+                &DataKey::UserWeeklyLossState(user.clone()),
+                now,
+                config.weekly_loss_window_secs,
+            );
 
-            // Reset if window expired
-            if config.weekly_loss_window_secs > 0
-                && now.saturating_sub(weekly_state.window_start) >= config.weekly_loss_window_secs
-            {
-                weekly_state = UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                };
-            }
-
-            let potential_loss = weekly_state.loss + amount;
+            let potential_loss = weekly_state
+                .loss
+                .checked_add(amount)
+                .ok_or(ContractError::PoolTotalOverflow)?;
             if potential_loss > config.weekly_loss_limit {
                 env.events().publish(
                     (
@@ -2295,25 +2286,24 @@ impl PredinexContract {
             }
         }
 
-        // Check large bet cooldown
+        // Check large bet cooldown against the timestamp of the user's last
+        // large bet in this pool, written by `record_user_bet_limits_state`.
         if config.large_bet_cooldown_secs > 0
             && config.large_bet_threshold > 0
             && amount >= config.large_bet_threshold
         {
             let now = env.ledger().timestamp();
-            let last_large_bet_key = DataKey::UserExposurePerPool(user.clone(), pool_id);
-            // Use a separate tracking for cooldown - we'll use the daily loss state's window_start
-            // as a proxy for last large bet time (in production, you'd use a dedicated key)
-            let daily_state = env
+            // Absence of the key means the wallet has not yet placed a large
+            // bet here. A stored 0 is a real timestamp, so presence — not a
+            // non-zero sentinel — is what distinguishes the two.
+            let last_large_bet_ts: Option<u64> = env
                 .storage()
                 .persistent()
-                .get::<_, UserLossTrackingState>(&DataKey::UserDailyLossState(user.clone()))
-                .unwrap_or(UserLossTrackingState {
-                    window_start: now,
-                    loss: 0,
-                });
+                .get(&DataKey::LastLargeBetTimestamp(user.clone(), pool_id));
 
-            if now.saturating_sub(daily_state.window_start) < config.large_bet_cooldown_secs {
+            if last_large_bet_ts.is_some_and(|ts| {
+                now.saturating_sub(ts) < config.large_bet_cooldown_secs
+            }) {
                 env.events().publish(
                     (
                         Symbol::new(env, "user_large_bet_cooldown_active"),
@@ -2326,6 +2316,55 @@ impl PredinexContract {
         }
 
         Ok(())
+    }
+
+    /// Internal: persist the per-wallet bet-limit state after a bet is accepted.
+    ///
+    /// `check_user_exposure_limits` validates a bet against the accumulated
+    /// daily and weekly totals; without this write those totals would stay at
+    /// zero and each limit would only ever reject a single oversized bet.
+    /// `amount` is the same value the check was given, so the recorded total
+    /// and the validated total stay in step.
+    ///
+    /// State is only written for limits the admin has enabled, so wallets pay
+    /// no storage cost for caps that are switched off.
+    fn record_user_bet_limits_state(env: &Env, user: &Address, pool_id: u32, amount: i128) {
+        let config = Self::get_user_exposure_config(env.clone());
+        let now = env.ledger().timestamp();
+
+        if config.daily_loss_limit > 0 {
+            let key = DataKey::UserDailyLossState(user.clone());
+            let mut state =
+                Self::load_loss_state(env, &key, now, config.daily_loss_window_secs);
+            state.loss = state.loss.saturating_add(amount);
+            env.storage().persistent().set(&key, &state);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        }
+
+        if config.weekly_loss_limit > 0 {
+            let key = DataKey::UserWeeklyLossState(user.clone());
+            let mut state =
+                Self::load_loss_state(env, &key, now, config.weekly_loss_window_secs);
+            state.loss = state.loss.saturating_add(amount);
+            env.storage().persistent().set(&key, &state);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        }
+
+        // #811 — Record large bet timestamp so the cooldown can be enforced.
+        if config.large_bet_cooldown_secs > 0
+            && config.large_bet_threshold > 0
+            && amount >= config.large_bet_threshold
+        {
+            let key = DataKey::LastLargeBetTimestamp(user.clone(), pool_id);
+            env.storage().persistent().set(&key, &now);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        }
     }
 
     /// Internal: update user exposure after a bet is placed.
@@ -3673,24 +3712,9 @@ impl PredinexContract {
         // #705 — Update user exposure tracking after bet is placed.
         Self::update_user_exposure(&env, &user, pool_id, net_amount);
 
-        // #811 — Record large bet timestamp for cooldown tracking.
-        {
-            let config = Self::get_user_exposure_config(env.clone());
-            if config.large_bet_cooldown_secs > 0
-                && config.large_bet_threshold > 0
-                && amount >= config.large_bet_threshold
-            {
-                let ts_key = DataKey::LastLargeBetTimestamp(user.clone(), pool_id);
-                env.storage()
-                    .persistent()
-                    .set(&ts_key, &env.ledger().timestamp());
-                env.storage().persistent().extend_ttl(
-                    &ts_key,
-                    POOL_BUMP_THRESHOLD,
-                    POOL_BUMP_TARGET,
-                );
-            }
-        }
+        // #705/#811 — Persist the daily/weekly loss windows and large-bet
+        // timestamp this bet was validated against.
+        Self::record_user_bet_limits_state(&env, &user, pool_id, amount);
 
         // Calculate totals for the event
         let total_yes = pool.total_a;
@@ -8086,6 +8110,14 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+
+        // #705 — Update user exposure tracking after bet is placed.
+        Self::update_user_exposure(&env, &user, pool_id, normalized);
+
+        // #705/#811 — Persist the daily/weekly loss windows and large-bet
+        // timestamp this bet was validated against. `normalized` is the value
+        // check_user_exposure_limits was given, so both sides use one scale.
+        Self::record_user_bet_limits_state(&env, &user, pool_id, normalized);
 
         env.events().publish(
             (
