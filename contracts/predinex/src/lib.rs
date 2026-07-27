@@ -7992,6 +7992,21 @@ impl PredinexContract {
         let is_first_bet = user_bet.total_bet == 0;
         if is_first_bet {
             pool.participant_count += 1;
+
+            let mut bettors = env
+                .storage()
+                .persistent()
+                .get::<_, Vec<Address>>(&DataKey::PoolBettors(pool_id))
+                .unwrap_or_else(|| Vec::new(&env));
+            bettors.push_back(user.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::PoolBettors(pool_id), &bettors);
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolBettors(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
         }
         pool.cumulative_volume = pool
             .cumulative_volume
