@@ -9,6 +9,7 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   rpcUrl: "https://soroban-testnet.stellar.org",
   networkPassphrase: "Test SDF Network ; September 2015",
   network: "testnet",
+  allowHttp: false,
   contractId: "C" + "A".repeat(55),
   botSecretKey: "S" + "A".repeat(55),
   pollIntervalMs: 300000,

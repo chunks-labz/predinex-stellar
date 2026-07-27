@@ -16,6 +16,12 @@ export interface BotConfig {
   rpcUrl: string;
   networkPassphrase: string;
   network: "testnet" | "mainnet";
+  /**
+   * Whether the Soroban RPC client may connect over plain HTTP.
+   * Defaults to false unless rpcUrl itself is an http:// URL (e.g. a local
+   * standalone node), or ALLOW_HTTP is explicitly set.
+   */
+  allowHttp: boolean;
 
   // Contract
   contractId: string;
@@ -141,6 +147,12 @@ export function loadConfig(): BotConfig {
   const networkPassphrase =
     network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
 
+  const allowHttpEnv = process.env["ALLOW_HTTP"];
+  const allowHttp =
+    allowHttpEnv !== undefined
+      ? allowHttpEnv.trim().toLowerCase() === "true"
+      : rpcUrl.startsWith("http://");
+
   const contractId = requireEnv("CONTRACT_ID");
   validateContractId(contractId);
 
@@ -178,6 +190,12 @@ export function loadConfig(): BotConfig {
     );
     process.exit(1);
   }
+
+  const oracleUrl = process.env["ORACLE_URL"]?.trim() || null;
+  const oracleSecret = process.env["ORACLE_SECRET"]?.trim() || null;
+  const oracleFallbackToDefault =
+    optionalEnv("ORACLE_FALLBACK_TO_DEFAULT", "false").toLowerCase() ===
+    "true";
 
   const txPollIntervalMs = parsePositiveInt(
     optionalEnv("TX_POLL_INTERVAL_MS", "3000"),
@@ -225,6 +243,7 @@ export function loadConfig(): BotConfig {
     rpcUrl,
     networkPassphrase,
     network,
+    allowHttp,
     contractId,
     botSecretKey,
     pollIntervalMs,
