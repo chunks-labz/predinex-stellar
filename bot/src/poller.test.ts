@@ -57,6 +57,7 @@ function makeConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     retryBaseDelayMs: 1_000,
     webhookUrl: null,
     webhookSecret: null,
+    webhookTimeoutMs: 10_000,
     logLevel: "error", // silence logs during tests
     ...overrides,
   };

@@ -188,7 +188,7 @@ export async function notify(
           method: "POST",
           headers,
           body,
-          signal: AbortSignal.timeout(10_000),
+          signal: AbortSignal.timeout(config.webhookTimeoutMs),
         });
 
         if (!response.ok) {

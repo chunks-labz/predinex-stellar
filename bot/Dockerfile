@@ -32,9 +32,14 @@ USER bot
 # The bot reads all config from environment variables.
 # See .env.example for the full reference.
 ENV NODE_ENV=production
+ENV HEALTH_CHECK_PORT=3000
 
-# Healthcheck: verify the process is alive
-HEALTHCHECK --interval=60s --timeout=10s --start-period=15s --retries=3 \
-  CMD node -e "process.exit(0)"
+EXPOSE 3000
+
+# Healthcheck: hit the bot's own /health/live endpoint (see src/health.ts).
+# Unlike a bare `node -e` no-op, this fails if the dist/index.js process has
+# crashed or stopped responding, since there is nothing left to serve the request.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:${HEALTH_CHECK_PORT}/health/live" || exit 1
 
 CMD ["node", "dist/index.js"]

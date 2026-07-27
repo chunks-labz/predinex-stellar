@@ -21,6 +21,7 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   retryBaseDelayMs: 1000,
   webhookUrl: "https://example.com/hook",
   webhookSecret: "supersecret",
+  webhookTimeoutMs: 10_000,
   logLevel: "info",
   ...overrides,
 });
@@ -123,11 +124,55 @@ describe("notify", () => {
     expect(body.settlements).toHaveLength(2);
   });
 
-  it("does not throw when fetch fails (fire-and-forget)", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network error")));
+  it("retries failed deliveries with backoff, then does not throw once the budget is exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn().mockRejectedValue(new Error("network error"));
+      vi.stubGlobal("fetch", fetchMock);
+      const { notify } = await import("./webhook.js");
+      const config = mockConfig();
+
+      const notifyPromise = notify(config, mockSettlements, mockCycleContext);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await expect(notifyPromise).resolves.toBeUndefined();
+
+      // 1 initial attempt + up to 3 retries = 4 total calls.
+      expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("succeeds after a transient failure without exhausting the full retry budget", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("network error"))
+        .mockResolvedValueOnce({ ok: true, status: 200 });
+      vi.stubGlobal("fetch", fetchMock);
+      const { notify } = await import("./webhook.js");
+      const config = mockConfig();
+
+      const notifyPromise = notify(config, mockSettlements, mockCycleContext);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await notifyPromise;
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("uses the configured webhookTimeoutMs for the request's abort signal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
     const { notify } = await import("./webhook.js");
-    const config = mockConfig();
-    // Should not throw
-    await expect(notify(config, mockSettlements, mockCycleContext)).resolves.toBeUndefined();
+    const config = mockConfig({ webhookTimeoutMs: 5_000 });
+
+    await notify(config, mockSettlements, mockCycleContext);
+
+    expect(timeoutSpy).toHaveBeenCalledWith(5_000);
+    timeoutSpy.mockRestore();
   });
 });

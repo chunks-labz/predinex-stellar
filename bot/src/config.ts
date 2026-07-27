@@ -58,6 +58,8 @@ export interface BotConfig {
   // Notifications
   webhookUrl: string | null;
   webhookSecret: string | null;
+  /** Timeout in milliseconds for a single webhook delivery attempt. */
+  webhookTimeoutMs: number;
 
   // Logging
   logLevel: LogLevel;
@@ -212,6 +214,10 @@ export function loadConfig(): BotConfig {
     console.error(`[config] WEBHOOK_SECRET must be at least 16 characters long`);
     process.exit(1);
   }
+  const webhookTimeoutMs = parsePositiveInt(
+    optionalEnv("WEBHOOK_TIMEOUT_MS", "10000"),
+    "WEBHOOK_TIMEOUT_MS",
+  );
   const logLevel = parseLogLevel(optionalEnv("LOG_LEVEL", "info"));
 
   const healthCheckEnabled =
@@ -242,6 +248,7 @@ export function loadConfig(): BotConfig {
     retryBaseDelayMs,
     webhookUrl,
     webhookSecret,
+    webhookTimeoutMs,
     logLevel,
     healthCheckEnabled,
     healthCheckPort,
