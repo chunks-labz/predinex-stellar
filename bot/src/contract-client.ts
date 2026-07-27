@@ -77,7 +77,9 @@ export class ContractClient {
   private readonly sourcePublicKey: string;
 
   constructor(config: BotConfig) {
-    this.server = new rpc.Server(config.rpcUrl, { allowHttp: false });
+    this.server = new rpc.Server(config.rpcUrl, {
+      allowHttp: config.allowHttp,
+    });
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
     // Derive the public key from the bot secret for the simulation source

@@ -36,6 +36,7 @@ describe("loadConfig", () => {
     delete process.env["DEFAULT_WINNING_OUTCOME"];
     delete process.env["HEALTH_CHECK_ENABLED"];
     delete process.env["HEALTH_CHECK_PORT"];
+    delete process.env["ALLOW_HTTP"];
   });
 
   it("applies correct defaults for optional variables", async () => {
@@ -55,6 +56,35 @@ describe("loadConfig", () => {
     expect(config.webhookSecret).toBeNull();
     expect(config.healthCheckEnabled).toBe(true);
     expect(config.healthCheckPort).toBe(3000);
+    expect(config.allowHttp).toBe(false);
+  });
+
+  it("defaults allowHttp to true when STELLAR_RPC_URL is http://", async () => {
+    process.env["STELLAR_RPC_URL"] = "http://localhost:8000/soroban/rpc";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.allowHttp).toBe(true);
+  });
+
+  it("defaults allowHttp to false when STELLAR_RPC_URL is https://", async () => {
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.allowHttp).toBe(false);
+  });
+
+  it("respects an explicit ALLOW_HTTP=true override even for an https:// URL", async () => {
+    process.env["ALLOW_HTTP"] = "true";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.allowHttp).toBe(true);
+  });
+
+  it("respects an explicit ALLOW_HTTP=false override even for an http:// URL", async () => {
+    process.env["STELLAR_RPC_URL"] = "http://localhost:8000/soroban/rpc";
+    process.env["ALLOW_HTTP"] = "false";
+    const { loadConfig } = await import("./config.js");
+    const config = loadConfig();
+    expect(config.allowHttp).toBe(false);
   });
 
   it("parses HEALTH_CHECK_ENABLED=false correctly", async () => {

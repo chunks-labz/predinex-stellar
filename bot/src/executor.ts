@@ -245,7 +245,9 @@ export class Executor {
   private signal?: AbortSignal;
 
   constructor(config: BotConfig) {
-    this.server = new rpc.Server(config.rpcUrl, { allowHttp: false });
+    this.server = new rpc.Server(config.rpcUrl, {
+      allowHttp: config.allowHttp,
+    });
     this.keypair = Keypair.fromSecret(config.botSecretKey);
     this.config = config;
   }
