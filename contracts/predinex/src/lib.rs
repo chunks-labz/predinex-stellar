@@ -6422,16 +6422,7 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-        env.storage().persistent().extend_ttl(
-            &DataKey::UserOutcomeBets(pool_id, user.clone()),
-            POOL_BUMP_THRESHOLD,
-            POOL_BUMP_TARGET,
-        );
-
-        // #705 — Update user exposure tracking after bet is placed.
-        Self::update_user_exposure(&env, &user, pool_id, normalized);
-
-        env.events().publish(
+                env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),
@@ -8058,6 +8049,17 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
+        let total_contract_volume: i128 = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&DataKey::TotalContractVolume)
+            .unwrap_or(0)
+            .checked_add(normalized)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalContractVolume, &total_contract_volume);
+
         env.events().publish(
             (
                 Symbol::new(&env, "place_bet"),
@@ -8875,7 +8877,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_deposit"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpDepositEvent {
                 user: user.clone(),
@@ -9028,7 +9030,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_withdraw"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpWithdrawEvent {
                 user: user.clone(),

@@ -141,6 +141,7 @@ fn ma_2_place_bet_with_supported_token_succeeds() {
     // Pool totals reflect normalised amount (200 × 5000 / 10000 = 100 base units).
     let pool = t.client.get_pool(&pool_id).expect("pool must exist");
     assert_eq!(pool.total_a, 100, "normalised total_a should be 100");
+    assert_eq!(t.client.get_total_contract_volume(), 100);
 }
 
 /// ma_3: Bet with a token not in the allowed list returns UnsupportedToken.
