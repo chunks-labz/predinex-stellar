@@ -18,7 +18,7 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import type { BotConfig } from "./config.js";
-import type { Pool } from "./types.js";
+import type { Pool, PoolStatus } from "./types.js";
 import { logger } from "./logger.js";
 
 /** Maximum ledger sequence validity window for simulation txns (5 min at ~5s/ledger) */
@@ -124,11 +124,20 @@ export class ContractClient {
     // scValToNative returns an array of pool objects or nulls
     const raw = result as Array<Record<string, unknown> | null>;
 
-    return raw.map((item): Pool | null => {
+    return raw.map((item, index): Pool | null => {
       if (!item) return null;
 
-      // Normalize status from scValToNative's enum representation
+      // Normalize status from scValToNative's enum representation.
+      // A pool whose status cannot be recognised is treated as unreadable
+      // rather than assumed Open, so the poller never tries to settle it.
       const status = normalizeStatus(item["status"]);
+      if (!status) {
+        logger.warn("Skipping pool with unrecognised status", {
+          poolId: startId + index,
+          rawStatus: item["status"],
+        });
+        return null;
+      }
 
       return {
         creator: String(item["creator"]),
@@ -234,7 +243,25 @@ export class ContractClient {
 /**
  * Discriminated union result from normalizeStatus indicating which branch parsed the value.
  */
-export type NormalizedStatus = Pool["status"] & { source: "string" | "tag" | "keyed" | "unknown_fallback" };
+export type NormalizedStatus = Pool["status"] & { source: "string" | "tag" | "keyed" };
+
+/**
+ * Every PoolStatus variant the contract can return.
+ * Mirrors `pub enum PoolStatus` in contracts/predinex/src/lib.rs.
+ */
+const KNOWN_POOL_STATUS_TAGS = new Set<PoolStatus["tag"]>([
+  "Open",
+  "Settled",
+  "Voided",
+  "Frozen",
+  "Disputed",
+  "Cancelled",
+  "Scheduled",
+]);
+
+function isKnownStatusTag(tag: unknown): tag is PoolStatus["tag"] {
+  return typeof tag === "string" && KNOWN_POOL_STATUS_TAGS.has(tag as PoolStatus["tag"]);
+}
 
 /**
  * Normalize the status field from scValToNative's enum representation.
@@ -242,36 +269,60 @@ export type NormalizedStatus = Pool["status"] & { source: "string" | "tag" | "ke
  * ({ "Settled": [0] } or { tag: "Settled", values: [0] }).
  *
  * Returns a discriminated union with a `source` field so callers can
- * distinguish known-good parses from the unknown-fallback path.
+ * distinguish which shape was parsed, or `null` when the value is not a
+ * recognised status. Unrecognised values are never coerced to "Open": doing so
+ * would make the settlement poller treat a malformed or newly-added status as
+ * settleable and burn gas on transactions the contract would reject.
  */
-function normalizeStatus(raw: unknown): NormalizedStatus {
+export function normalizeStatus(raw: unknown): NormalizedStatus | null {
+  const parsed = parseStatusShape(raw);
+
+  if (!parsed) {
+    logger.warn("normalizeStatus: unrecognised status shape, rejecting", {
+      raw,
+      type: typeof raw,
+    });
+    return null;
+  }
+
+  if (!isKnownStatusTag(parsed.tag)) {
+    // A contract upgrade may introduce statuses this bot predates. Surface it
+    // loudly instead of silently mapping it onto a known variant.
+    logger.warn("normalizeStatus: unknown status tag, rejecting", {
+      tag: parsed.tag,
+      source: parsed.source,
+      raw,
+    });
+    return null;
+  }
+
+  return parsed as NormalizedStatus;
+}
+
+/** Extracts `{ tag, values? }` from the shapes scValToNative produces, without validating the tag. */
+function parseStatusShape(
+  raw: unknown,
+): { tag: string; values?: unknown; source: NormalizedStatus["source"] } | null {
   if (typeof raw === "string") {
-    return { tag: raw, source: "string" } as NormalizedStatus;
+    return { tag: raw, source: "string" };
   }
 
-  if (raw && typeof raw === "object") {
-    // Handle { tag: "Settled", values: [0] } form
-    if ("tag" in raw) {
-      return { ...raw, source: "tag" } as NormalizedStatus;
-    }
+  if (!raw || typeof raw !== "object") return null;
 
-    // Handle { "Open": [] } or { "Settled": [0] } form
-    const key = Object.keys(raw as object)[0];
-    if (!key) {
-      logger.warn("normalizeStatus: empty object keys, falling back to Open", { raw });
-      return { tag: "Open", source: "unknown_fallback" };
-    }
-
-    const values = (raw as Record<string, unknown>)[key];
-    if (Array.isArray(values) && values.length > 0) {
-      return { tag: key, values, source: "keyed" } as NormalizedStatus;
-    }
-    return { tag: key, source: "keyed" } as NormalizedStatus;
+  // Handle { tag: "Settled", values: [0] } form
+  if ("tag" in raw) {
+    const { tag } = raw as { tag: unknown };
+    if (typeof tag !== "string") return null;
+    return { ...(raw as object), tag, source: "tag" };
   }
 
-  logger.warn("normalizeStatus: unrecognised shape, falling back to Open", {
-    raw,
-    type: typeof raw,
-  });
-  return { tag: "Open", source: "unknown_fallback" };
+  // Handle { "Open": [] } or { "Settled": [0] } form
+  const key = Object.keys(raw as object)[0];
+  if (!key) return null;
+
+  const values = (raw as Record<string, unknown>)[key];
+  if (Array.isArray(values) && values.length > 0) {
+    return { tag: key, values, source: "keyed" };
+  }
+  return { tag: key, source: "keyed" };
 }
