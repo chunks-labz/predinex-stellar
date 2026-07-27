@@ -5696,6 +5696,67 @@ fn test_get_pool_not_initialized() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_pool_with_twap_period_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    client.create_pool_with_twap_period(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "A"),
+        &String::from_str(&env, "B"),
+        &3600,
+        &3600,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_multi_outcome_pool_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let mut outcomes = Vec::new(&env);
+    outcomes.push_back(String::from_str(&env, "A"));
+    outcomes.push_back(String::from_str(&env, "B"));
+
+    client.create_multi_outcome_pool(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &outcomes,
+        &3600,
+        &None::<String>,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_multi_pool_with_twap_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let mut outcomes = Vec::new(&env);
+    outcomes.push_back(String::from_str(&env, "A"));
+    outcomes.push_back(String::from_str(&env, "B"));
+
+    client.create_multi_pool_with_twap(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &outcomes,
+        &3600,
+        &None::<String>,
+        &3600,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_user_bet_not_initialized() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PredinexContract);
