@@ -4,6 +4,7 @@
 // full interaction for Freighter-connected users.
 'use client';
 import { useEffect, useState, useCallback, CSSProperties } from 'react';
+import { resolveEmbedTargetOrigin } from '@/lib/embed-origin';
 
 interface Outcome {
   id: number;
@@ -94,22 +95,31 @@ export function PoolEmbedWidget({ poolId, theme }: Props) {
     load();
   }, [load]);
 
+  // Post a message to the embedding page, addressed to a specific origin.
+  // When no origin can be resolved the message is dropped rather than
+  // broadcast with '*', which would expose pool and bet data to any embedder.
+  const postToParent = useCallback((msg: Record<string, unknown>) => {
+    if (typeof window === 'undefined' || window.parent === window) return;
+    const targetOrigin = resolveEmbedTargetOrigin();
+    if (!targetOrigin) return;
+    window.parent.postMessage(msg, targetOrigin);
+  }, []);
+
   // Notify parent page via postMessage when ready or on resize
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const msg = {
+    postToParent({
       type: 'predinex:pool-embed:ready',
       poolId,
       height: document.body.scrollHeight,
-    };
-    window.parent.postMessage(msg, '*');
-  }, [poolId, pool]);
+    });
+  }, [poolId, pool, postToParent]);
 
   const handleBet = async () => {
     if (!connected || selectedOutcome === null || !betAmount) return;
     try {
       // Dispatch bet via Freighter – integration point with existing transaction helpers
-      window.parent.postMessage({ type: 'predinex:pool-embed:bet', poolId, outcomeId: selectedOutcome, amount: betAmount }, '*');
+      postToParent({ type: 'predinex:pool-embed:bet', poolId, outcomeId: selectedOutcome, amount: betAmount });
     } catch (e: any) {
       setError(e.message);
     }
