@@ -4470,7 +4470,7 @@ impl PredinexContract {
         } else if is_creator {
             SettlementSource::Creator
         } else {
-            SettlementSource::Delegated
+            SettlementSource::Operator
         };
 
         if pool.status != PoolStatus::Open {
@@ -5164,7 +5164,12 @@ impl PredinexContract {
         // Step 4: emit events in final committed state.
         let analytics_user = user.clone();
         env.events().publish(
-            (Symbol::new(env, "claim_winnings"), pool_id, user),
+            (
+                Symbol::new(env, "claim_winnings"),
+                event_version(env),
+                pool_id,
+                user,
+            ),
             ClaimEvent {
                 amount: winnings,
                 fee_amount: fee,

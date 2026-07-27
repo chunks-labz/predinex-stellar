@@ -2,7 +2,7 @@
 import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Loader2, Wallet, AlertCircle } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from '@/components/WalletAdapterProvider';
@@ -10,10 +10,12 @@ import { useToast } from '@/providers/ToastProvider';
 import { predinexContract } from '@/app/lib/adapters/predinex-contract';
 import { invalidateOnPlaceBet } from '@/app/lib/cache-invalidation';
 import { toastMessages, showToastPayload } from '@/lib/toast-messages';
+import { validateBetAmount } from '@/lib/validators';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
+import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
 
 interface BettingSectionProps {
@@ -50,9 +52,10 @@ export default function BettingSection({
   const hasMaxBet = maxBetStroops > 0;
   const maxBetXlm = hasMaxBet ? maxBetStroops / STROOPS_PER_XLM : null;
 
-    const parsedWalletBalance = Number.parseFloat(balance);
-    const walletBalance: number | null =
-        isConnected && Number.isFinite(parsedWalletBalance) ? parsedWalletBalance : null;
+  const { balance } = useWalletAccount();
+  const parsedWalletBalance = Number.parseFloat(balance);
+  const walletBalance: number | null =
+    isConnected && Number.isFinite(parsedWalletBalance) ? parsedWalletBalance : null;
 
   const { isMismatch, expectedNetworkName } = useNetworkMismatch();
 

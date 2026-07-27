@@ -3771,17 +3771,20 @@ fn l5_claim_winnings_emits_claim_event() {
     let last_event = events.events().last().expect("must emit an event");
 
     // Verify topics via XDR decoding
-    // Topics: [claim_winnings, pool_id, user]
+    // Topics: [claim_winnings, event_version, pool_id, user]
     let topic0: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 0)).unwrap();
-    let topic1: u32 =
+    let topic1: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 1)).unwrap();
-    let topic2: Address =
+    let topic2: u32 =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 2)).unwrap();
+    let topic3: Address =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, pool_id);
-    assert_eq!(topic2, user_a);
+    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(topic2, pool_id);
+    assert_eq!(topic3, user_a);
 
     // Verify payload is ClaimEvent
     let data_val: Val = match &last_event.body {
@@ -5231,17 +5234,20 @@ fn m4_claim_winnings_emits_claim_event() {
         .last()
         .expect("must emit claim_winnings event");
 
-    // claim_winnings topics: (Symbol("claim_winnings"), pool_id, user) — no event version
+    // claim_winnings topics: (Symbol("claim_winnings"), event_version, pool_id, user)
     let topic0: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 0)).unwrap();
-    let topic1: u32 =
+    let topic1: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 1)).unwrap();
-    let topic2: Address =
+    let topic2: u32 =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 2)).unwrap();
+    let topic3: Address =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, pool_id);
-    assert_eq!(topic2, user);
+    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(topic2, pool_id);
+    assert_eq!(topic3, user);
 
     let data_val: Val = match &event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
