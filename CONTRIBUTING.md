@@ -12,8 +12,9 @@ Welcome, and thank you for your interest in contributing! This guide covers ever
 4. [Running Contract Checks](#4-running-contract-checks)
 5. [Documentation Standards](#5-documentation-standards)
 6. [Issue and PR Workflow](#6-issue-and-pr-workflow)
-7. [CI Expectations](#7-ci-expectations)
-8. [Automated Dependency Updates (Dependabot)](#8-automated-dependency-updates-dependabot)
+7. [Error Code Stability Policy](#7-error-code-stability-policy)
+8. [CI Expectations](#8-ci-expectations)
+9. [Automated Dependency Updates (Dependabot)](#9-automated-dependency-updates-dependabot)
 
 ---
 
@@ -221,7 +222,24 @@ The repository provides a pull request template at `.github/PULL_REQUEST_TEMPLAT
 
 ---
 
-## 7. CI Expectations
+## 7. Error Code Stability Policy
+
+The `ContractError` enum in `contracts/predinex/src/lib.rs` assigns explicit integer discriminants to every variant. These error codes are part of the contract's public API and are matched on by SDK consumers, cross-language indexers, bots, and off-chain monitoring tools.
+
+### Rules
+
+1. **Never reassign a published discriminant.** Once an error code has been included in a release, that numeric value is permanently reserved — even if the corresponding variant is removed.
+2. **Mark removed variants as reserved.** Replace a deleted variant with an underscored placeholder (e.g., `_Reserved13 = 13`) and annotate it with a `// (reserved — removed variant)` comment. This makes the gap self-documenting and prevents accidental reuse.
+3. **Always assign new variants the next available integer.** Do not insert variants mid-sequence; append them at the end of the enum.
+4. **The enum is `#[non_exhaustive]`.** Downstream consumers must always handle unknown error codes via a catch-all arm (`_ => ...`). This gives us forward-compatibility headroom without breaking matches at compile time.
+
+### Why this matters
+
+Stellar contract error codes propagate as `u32` values in the transaction result. If we reused a previously published discriminant, an indexer or bot that matches on that numeric value could silently misinterpret a new error as an old, unrelated one — leading to incorrect off-chain state or missed recovery logic.
+
+---
+
+## 8. CI Expectations
 
 The CI workflow (`.github/workflows/ci.yml`) runs on every push and pull request to `main`. It includes:
 
@@ -244,7 +262,7 @@ For deeper context on the project architecture, see:
 
 ---
 
-## 8. Automated Dependency Updates (Dependabot)
+## 9. Automated Dependency Updates (Dependabot)
 
 Dependabot is configured in [`.github/dependabot.yml`](./.github/dependabot.yml) and opens pull requests weekly for both package ecosystems:
 

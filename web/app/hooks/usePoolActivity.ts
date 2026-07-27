@@ -25,7 +25,14 @@ const INITIAL_LOAD_SIZE = 100;
 const MAX_EVENTS = 200;
 const CACHE_TTL = 30000;
 
-const poolActivityCache = new Map<number, { events: PoolActivityEvent[]; timestamp: number }>();
+const poolActivityCache = new Map<
+  number,
+  { events: PoolActivityEvent[]; cursor?: string; rawCount: number; timestamp: number }
+>();
+
+export function clearPoolActivityCache(): void {
+  poolActivityCache.clear();
+}
 
 const EVENT_TYPE_MAP: Record<SorobanEventName, PoolActivityEventType | null> = {
   create_pool: 'pool-created',
@@ -57,16 +64,28 @@ function mapEventToPoolActivity(
   };
 }
 
+interface FetchPoolActivityResult {
+  events: PoolActivityEvent[];
+  cursor?: string;
+  rawCount: number;
+}
+
 async function fetchPoolActivityFromSoroban(
   poolId: number,
   limit: number,
-): Promise<PoolActivityEvent[]> {
+  cursor?: string,
+): Promise<FetchPoolActivityResult> {
   const cfg = getRuntimeConfig();
   const { soroban } = cfg;
 
   if (!soroban.rpcUrl || !soroban.explorerUrl || !soroban.contractId) {
     log.warn('Soroban config missing, returning empty pool activity');
-    return [];
+    return { events: [], rawCount: 0 };
+  }
+
+  const paginationParams: { limit: number; cursor?: string } = { limit };
+  if (cursor) {
+    paginationParams.cursor = cursor;
   }
 
   const body = {
@@ -84,7 +103,7 @@ async function fetchPoolActivityFromSoroban(
           ],
         },
       ],
-      pagination: { limit },
+      pagination: paginationParams,
     },
   };
 
@@ -98,15 +117,19 @@ async function fetchPoolActivityFromSoroban(
     throw new Error(`Soroban RPC error: ${response.status}`);
   }
 
-  const json: { result?: { events?: RawSorobanEvent[] }; error?: { message: string } } =
-    await response.json();
+  const json: {
+    result?: {
+      events?: (RawSorobanEvent & { pagingToken?: string })[];
+      cursor?: string;
+    };
+    error?: { message: string };
+  } = await response.json();
 
   if (json.error) {
     throw new Error(`Soroban RPC error: ${json.error.message}`);
   }
 
-  const rawEvents: RawSorobanEvent[] = json.result?.events ?? [];
-
+  const rawEvents = json.result?.events ?? [];
   const results: PoolActivityEvent[] = [];
 
   for (const raw of rawEvents) {
@@ -120,53 +143,86 @@ async function fetchPoolActivityFromSoroban(
 
   results.sort((a, b) => b.timestamp - a.timestamp);
 
-  return results.slice(0, limit);
+  const nextCursor =
+    json.result?.cursor ??
+    (rawEvents.length > 0
+      ? rawEvents[rawEvents.length - 1].pagingToken ?? rawEvents[rawEvents.length - 1].id
+      : undefined);
+
+  return {
+    events: results.slice(0, limit),
+    cursor: nextCursor,
+    rawCount: rawEvents.length,
+  };
 }
 
 export function usePoolActivity(poolId: number | undefined): UsePoolActivityReturn {
-  const [events, setEvents] = useState<PoolActivityEvent[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [events, setEventsState] = useState<PoolActivityEvent[]>([]);
+  const [isLoading, setIsLoadingState] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
+  const [hasMore, setHasMoreState] = useState(true);
   const requestIdRef = useRef<number>(0);
   const isMountedRef = useRef(true);
+  const cursorRef = useRef<string | undefined>(undefined);
+  const isLoadingRef = useRef(false);
+  const hasMoreRef = useRef(true);
+  const eventsRef = useRef<PoolActivityEvent[]>([]);
 
-  const fetchPoolActivity = useCallback(
-    async (id: number, limit: number): Promise<PoolActivityEvent[]> => {
-      const cached = poolActivityCache.get(id);
-      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        return cached.events;
-      }
+  const setEvents = useCallback((val: PoolActivityEvent[] | ((prev: PoolActivityEvent[]) => PoolActivityEvent[])) => {
+    setEventsState((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      eventsRef.current = next;
+      return next;
+    });
+  }, []);
 
-      const events = await fetchPoolActivityFromSoroban(id, limit);
+  const setIsLoading = useCallback((val: boolean) => {
+    isLoadingRef.current = val;
+    setIsLoadingState(val);
+  }, []);
 
-      poolActivityCache.set(id, { events, timestamp: Date.now() });
-
-      return events;
-    },
-    [],
-  );
+  const setHasMore = useCallback((val: boolean) => {
+    hasMoreRef.current = val;
+    setHasMoreState(val);
+  }, []);
 
   const loadEvents = useCallback(async () => {
     if (!poolId || poolId <= 0) {
       setEvents([]);
       setError(null);
+      setHasMore(false);
+      cursorRef.current = undefined;
       return;
     }
 
     const requestId = ++requestIdRef.current;
     setIsLoading(true);
     setError(null);
+    cursorRef.current = undefined;
 
     try {
-      const fetchedEvents = await fetchPoolActivity(poolId, INITIAL_LOAD_SIZE);
+      const cached = poolActivityCache.get(poolId);
+      let res: FetchPoolActivityResult;
+
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        res = { events: cached.events, cursor: cached.cursor, rawCount: cached.rawCount };
+      } else {
+        res = await fetchPoolActivityFromSoroban(poolId, INITIAL_LOAD_SIZE);
+        poolActivityCache.set(poolId, {
+          events: res.events,
+          cursor: res.cursor,
+          rawCount: res.rawCount,
+          timestamp: Date.now(),
+        });
+      }
 
       if (requestId !== requestIdRef.current || !isMountedRef.current) {
         return;
       }
 
-      setEvents(fetchedEvents);
-      setHasMore(fetchedEvents.length >= INITIAL_LOAD_SIZE);
+      cursorRef.current = res.cursor;
+      setEvents(res.events);
+      setHasMore(res.rawCount >= INITIAL_LOAD_SIZE && res.events.length < MAX_EVENTS);
     } catch (err) {
       if (!isMountedRef.current) return;
 
@@ -174,18 +230,20 @@ export function usePoolActivity(poolId: number | undefined): UsePoolActivityRetu
       setError(message);
       log.error(`Failed to load activity for pool ${poolId}:`, err);
       setEvents([]);
+      setHasMore(false);
     } finally {
       if (isMountedRef.current) {
         setIsLoading(false);
       }
     }
-  }, [poolId, fetchPoolActivity]);
+  }, [poolId, setEvents, setIsLoading, setHasMore]);
 
   useEffect(() => {
     loadEvents();
   }, [poolId, loadEvents]);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -195,12 +253,54 @@ export function usePoolActivity(poolId: number | undefined): UsePoolActivityRetu
     if (poolId) {
       poolActivityCache.delete(poolId);
     }
+    cursorRef.current = undefined;
     await loadEvents();
   }, [poolId, loadEvents]);
 
-  const loadMore = useCallback(() => {
-    setHasMore(false);
-  }, []);
+  const loadMore = useCallback(async () => {
+    if (!poolId || poolId <= 0 || isLoadingRef.current || !hasMoreRef.current) {
+      return;
+    }
+
+    const currentEventsCount = eventsRef.current.length;
+    if (currentEventsCount >= MAX_EVENTS) {
+      setHasMore(false);
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const remainingAllowed = MAX_EVENTS - currentEventsCount;
+      const fetchLimit = Math.min(INITIAL_LOAD_SIZE, remainingAllowed);
+
+      const res = await fetchPoolActivityFromSoroban(poolId, fetchLimit, cursorRef.current);
+      if (!isMountedRef.current) return;
+
+      cursorRef.current = res.cursor;
+
+      const existingIds = new Set(eventsRef.current.map((e) => e.id));
+      const newEvents = res.events.filter((e) => !existingIds.has(e.id));
+      const combined = [...eventsRef.current, ...newEvents].slice(0, MAX_EVENTS);
+
+      setEvents(combined);
+
+      const canLoadMore =
+        res.rawCount >= fetchLimit &&
+        combined.length < MAX_EVENTS &&
+        newEvents.length > 0;
+
+      setHasMore(canLoadMore);
+    } catch (err) {
+      if (!isMountedRef.current) return;
+      const message = err instanceof Error ? err.message : 'Failed to load more activity';
+      setError(message);
+      log.error(`Failed to load more activity for pool ${poolId}:`, err);
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, [poolId, setEvents, setIsLoading, setHasMore]);
 
   return {
     events,

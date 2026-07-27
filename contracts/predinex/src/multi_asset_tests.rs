@@ -141,6 +141,7 @@ fn ma_2_place_bet_with_supported_token_succeeds() {
     // Pool totals reflect normalised amount (200 × 5000 / 10000 = 100 base units).
     let pool = t.client.get_pool(&pool_id).expect("pool must exist");
     assert_eq!(pool.total_a, 100, "normalised total_a should be 100");
+    assert_eq!(t.client.get_total_contract_volume(), 100);
 }
 
 /// ma_3: Bet with a token not in the allowed list returns UnsupportedToken.
@@ -493,5 +494,117 @@ fn ma_8_collect_fees_updates_treasury_ledger() {
     assert_eq!(
         pool_revenue_pending.treasury_credited, pool_revenue_after.treasury_credited,
         "Pending and collected amounts should match (no double-counting)"
+    );
+}
+
+// ── PoolBettors population (issue #867) ───────────────────────────────────
+
+/// #867-1: Two users bet on a multi-asset pool and both appear on the leaderboard.
+#[test]
+fn ma_867_1_leaderboard_populated_after_multi_asset_bets() {
+    let t = setup_ma();
+    let creator = Address::generate(&t.env);
+    let user_a = Address::generate(&t.env);
+    let user_b = Address::generate(&t.env);
+
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.alt_token, &10_000i128);
+
+    let pool_id = make_ma_pool(&t, &creator);
+
+    t.base_admin.mint(&user_a, &2_000i128);
+    t.base_admin.mint(&user_b, &3_000i128);
+
+    t.client.place_multi_asset_bet(
+        &user_a,
+        &pool_id,
+        &0u32,
+        &1_000i128,
+        &t.base_token,
+        &None,
+    );
+    t.client.place_multi_asset_bet(
+        &user_b,
+        &pool_id,
+        &1u32,
+        &2_000i128,
+        &t.base_token,
+        &None,
+    );
+
+    let leaderboard = t.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
+    assert_eq!(
+        leaderboard.len(),
+        2,
+        "leaderboard must contain both multi-asset bettors"
+    );
+
+    // user_b bet more, so should be first.
+    assert_eq!(leaderboard.get(0).unwrap().total_bet, 2_000i128);
+    assert_eq!(leaderboard.get(1).unwrap().total_bet, 1_000i128);
+}
+
+/// #867-2: get_participant_count matches the number of unique bettors after multi-asset bets.
+#[test]
+fn ma_867_2_participant_count_matches_pool_bettors() {
+    let t = setup_ma();
+    let creator = Address::generate(&t.env);
+    let user_a = Address::generate(&t.env);
+    let user_b = Address::generate(&t.env);
+
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.alt_token, &10_000i128);
+
+    let pool_id = make_ma_pool(&t, &creator);
+
+    t.alt_admin.mint(&user_a, &100i128);
+    t.alt_admin.mint(&user_b, &200i128);
+
+    t.client.place_multi_asset_bet(
+        &user_a,
+        &pool_id,
+        &0u32,
+        &50i128,
+        &t.alt_token,
+        &None,
+    );
+
+    let count_after_first = t.client.get_participant_count(&pool_id);
+    assert_eq!(count_after_first, 1, "one unique bettor after first bet");
+
+    t.client.place_multi_asset_bet(
+        &user_b,
+        &pool_id,
+        &1u32,
+        &100i128,
+        &t.alt_token,
+        &None,
+    );
+
+    let count_after_second = t.client.get_participant_count(&pool_id);
+    assert_eq!(
+        count_after_second,
+        2,
+        "two unique bettors after second bet"
+    );
+
+    // A second bet from user_a should NOT increase the count.
+    t.client.place_multi_asset_bet(
+        &user_a,
+        &pool_id,
+        &0u32,
+        &30i128,
+        &t.alt_token,
+        &None,
+    );
+
+    let count_after_repeat = t.client.get_participant_count(&pool_id);
+    assert_eq!(
+        count_after_repeat, 2,
+        "repeat bet from same user must not increase count"
     );
 }

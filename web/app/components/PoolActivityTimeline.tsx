@@ -225,8 +225,12 @@ export default function PoolActivityTimeline({
   }, [events, displayedCount]);
 
   const handleLoadMore = () => {
-    setDisplayedCount((prev) => Math.min(prev + 20, maxInitialEvents));
-    loadMore();
+    if (displayedCount < events.length) {
+      setDisplayedCount((prev) => prev + 20);
+    } else if (hasMore && !isLoading) {
+      loadMore();
+      setDisplayedCount((prev) => prev + 20);
+    }
   };
 
   return (
@@ -273,23 +277,34 @@ export default function PoolActivityTimeline({
           </ol>
 
           {/* Load more button */}
-          {displayedCount < events.length && (
+          {(displayedCount < events.length || hasMore) && (
             <div className="mt-6 flex justify-center">
               <button
                 onClick={handleLoadMore}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted/50 text-sm font-medium transition-colors"
-                aria-label={`Load more events (${events.length - displayedCount} remaining)`}
+                disabled={isLoading}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted/50 text-sm font-medium transition-colors disabled:opacity-50"
+                aria-label="Load more events"
               >
-                Load more
-                <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                {isLoading ? (
+                  <>
+                    <span>Loading...</span>
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  </>
+                ) : (
+                  <>
+                    <span>Load more</span>
+                    <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                  </>
+                )}
               </button>
             </div>
           )}
 
           {/* Pagination info */}
-          {events.length >= maxInitialEvents && (
+          {events.length > 0 && (
             <div className="mt-4 text-center text-xs text-muted-foreground">
-              Showing {displayedCount} of {Math.min(events.length, maxInitialEvents)} events
+              Showing {Math.min(displayedCount, events.length)} of {events.length} event{events.length !== 1 ? 's' : ''}
+              {events.length >= 200 ? ' (maximum 200 events reached)' : ''}
             </div>
           )}
         </>

@@ -274,8 +274,28 @@ pub enum DataKey {
     UserLargeBetCooldownSecs,
     /// #705 — Threshold (stroops) above which cooldown applies.
     UserLargeBetThreshold,
-    /// #811 — Timestamp of the user's last large bet in a pool, for cooldown enforcement.
+    /// LP Staking & Rewards
+    LpPosition(u32, Address),
+    LpFeePerShare(u32),
+    LpTotalLiquidity(u32),
+    LpTotalShares(u32),
+    LpFeeAllocationBps,
+    LpStakeBoostBps,
+    LpStake(u32, Address),
+    LpRewardDust(u32),
+    LpRewardPool(u32),
+    /// Cross-chain & Mirror
+    PoolMirror(u32),
+    MirrorByUnifiedId(u32),
+    UnifiedPoolCounter,
+    BridgeTimeout,
+    CrossChainDisputeWindow,
+    DisputeWindow,
+    PoolSettlementTime(u32),
+    PoolExtMetadata(u32),
     LastLargeBetTimestamp(Address, u32),
+    PoolCategory(u32),
+    PoolTags(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -375,6 +395,7 @@ const MAX_TWAP_SNAPSHOTS: u32 = 64;
 /// paths so SDK consumers can match on a stable error code rather than parsing
 /// panic strings, and so error compatibility is preserved across upgrades.
 #[contracterror]
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ContractError {
     AlreadyInitialized = 1,
@@ -389,11 +410,17 @@ pub enum ContractError {
     PoolNotOpen = 10,
     PoolAlreadySettled = 11,
     PoolAlreadyVoided = 12,
+    // (reserved — removed variant)
+    _Reserved13 = 13,
+    // (reserved — removed variant)
+    _Reserved14 = 14,
     PoolIsCancelled = 15,
     PoolIsFrozen = 16,
     PoolIsDisputed = 17,
     PoolNotSettled = 18,
     PoolNotFrozenOrDisputed = 19,
+    // (reserved — removed variant)
+    _Reserved20 = 20,
     PoolCannotBeVoided = 21,
     PoolMustBeSettledToDispute = 22,
     NoBetFound = 23,
@@ -417,6 +444,10 @@ pub enum ContractError {
     PoolTotalOverflow = 41,
     UserBetOverflow = 42,
     TreasuryOverflow = 43,
+    // (reserved — removed variant)
+    _Reserved44 = 44,
+    // (reserved — removed variant)
+    _Reserved45 = 45,
     PoolSizeLimitExceeded = 46,
     InvalidCoolingPeriod = 47,
     InvalidRateLimitConfig = 48,
@@ -483,7 +514,6 @@ pub enum ContractError {
     CreatorCannotBet = 83,
     InvalidDepositDeadline = 84,
     DepositDeadlinePassed = 85,
-    /// #705 — A large bet was placed before the per-wallet cooldown elapsed.
     LargeBetCooldownActive = 86,
 }
 
@@ -502,6 +532,8 @@ pub enum SettlementSource {
     Operator,
     /// Permissionless settlement of an expired pool.
     Expired,
+    /// Delegated settlement.
+    Delegated,
 }
 
 /// #396 — Event types that can trigger an off-chain webhook notification.
@@ -3024,6 +3056,9 @@ impl PredinexContract {
         duration: u64,
         twap_period_secs: u64,
     ) -> Result<u32, ContractError> {
+        if !Self::is_initialized(&env) {
+            panic_with_error!(&env, ContractError::NotInitialized);
+        }
         creator.require_auth();
 
         let mut outcomes = Vec::new(&env);
@@ -3083,6 +3118,9 @@ impl PredinexContract {
         duration: u64,
         metadata_uri: Option<String>,
     ) -> Result<u32, ContractError> {
+        if !Self::is_initialized(&env) {
+            panic_with_error!(&env, ContractError::NotInitialized);
+        }
         creator.require_auth();
         Self::create_pool_internal(
             &env,
@@ -3110,6 +3148,9 @@ impl PredinexContract {
         metadata_uri: Option<String>,
         twap_period_secs: u64,
     ) -> Result<u32, ContractError> {
+        if !Self::is_initialized(&env) {
+            panic_with_error!(&env, ContractError::NotInitialized);
+        }
         creator.require_auth();
         Self::create_pool_internal(
             &env,
@@ -6218,7 +6259,7 @@ impl PredinexContract {
         cursor: Option<Address>,
     ) -> Vec<PoolLeaderboardEntry> {
         let effective_limit = if limit > 50 { 50 } else { limit };
-        let mut result = Vec::new(&env);
+        let mut all_entries = Vec::new(&env);
 
         let bettors: Vec<Address> = env
             .storage()
@@ -6228,13 +6269,6 @@ impl PredinexContract {
 
         for i in 0..bettors.len() {
             let user = bettors.get(i).unwrap();
-
-            // Skip entries before cursor.
-            if let Some(ref cursor_addr) = cursor {
-                if user == cursor_addr.clone() {
-                    continue;
-                }
-            }
 
             if let Some(bet) = env
                 .storage()
@@ -6247,7 +6281,7 @@ impl PredinexContract {
                         _ => false,
                     };
 
-                result.push_back(PoolLeaderboardEntry {
+                all_entries.push_back(PoolLeaderboardEntry {
                     user,
                     total_bet: bet.total_bet,
                     winnings_claimed,
@@ -6255,31 +6289,44 @@ impl PredinexContract {
             }
         }
 
-        // Sort by total_bet descending using a simple bubble sort (Vec has no sort).
-        let n = result.len();
+        // Sort by total_bet descending, with user address tie-breaking for a stable total order.
+        let n = all_entries.len();
         for i in 0..n {
             for j in (i + 1)..n {
-                let a = result.get(i).unwrap().total_bet;
-                let b = result.get(j).unwrap().total_bet;
-                if b > a {
-                    let entry_i = result.get(i).unwrap();
-                    let entry_j = result.get(j).unwrap();
-                    let tmp = entry_i.clone();
-                    result.set(i, entry_j.clone());
-                    result.set(j, tmp);
+                let entry_i = all_entries.get(i).unwrap();
+                let entry_j = all_entries.get(j).unwrap();
+
+                let swap = if entry_j.total_bet > entry_i.total_bet {
+                    true
+                } else if entry_j.total_bet == entry_i.total_bet {
+                    entry_j.user < entry_i.user
+                } else {
+                    false
+                };
+
+                if swap {
+                    all_entries.set(i, entry_j);
+                    all_entries.set(j, entry_i);
                 }
             }
         }
 
-        // Apply limit.
+        // Determine start index after cursor (if specified).
+        let mut start_index: u32 = 0;
+        if let Some(ref cursor_addr) = cursor {
+            for i in 0..all_entries.len() {
+                if all_entries.get(i).unwrap().user == *cursor_addr {
+                    start_index = i + 1;
+                    break;
+                }
+            }
+        }
+
+        // Slice up to effective_limit entries.
         let mut limited = Vec::new(&env);
-        let count = if effective_limit < result.len() {
-            effective_limit
-        } else {
-            result.len()
-        };
-        for i in 0..count {
-            limited.push_back(result.get(i).unwrap());
+        let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
+        for i in start_index..end_index {
+            limited.push_back(all_entries.get(i).unwrap());
         }
         limited
     }
@@ -6572,6 +6619,71 @@ impl PredinexContract {
             creator,
         );
         Ok(())
+    }
+
+    pub fn set_pool_category(
+        env: Env,
+        caller: Address,
+        pool_id: u32,
+        category: PoolCategory,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        let admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
+        if caller != pool.creator && Some(&caller) != admin.as_ref() {
+            return Err(ContractError::Unauthorized);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolCategory(pool_id), &category);
+        Ok(())
+    }
+
+    pub fn get_pool_category(env: Env, pool_id: u32) -> Option<PoolCategory> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolCategory(pool_id))
+    }
+
+    pub fn set_pool_tags(
+        env: Env,
+        caller: Address,
+        pool_id: u32,
+        tags: Vec<String>,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        let admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
+        if caller != pool.creator && Some(&caller) != admin.as_ref() {
+            return Err(ContractError::Unauthorized);
+        }
+        if tags.len() > 10 {
+            return Err(ContractError::DescriptionTooLong);
+        }
+        for i in 0..tags.len() {
+            if tags.get(i).unwrap().len() > 32 {
+                return Err(ContractError::DescriptionTooLong);
+            }
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolTags(pool_id), &tags);
+        Ok(())
+    }
+
+    pub fn get_pool_tags(env: Env, pool_id: u32) -> Vec<String> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolTags(pool_id))
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     pub fn create_pool_template(
@@ -8045,6 +8157,21 @@ impl PredinexContract {
         let is_first_bet = user_bet.total_bet == 0;
         if is_first_bet {
             pool.participant_count += 1;
+
+            let mut bettors = env
+                .storage()
+                .persistent()
+                .get::<_, Vec<Address>>(&DataKey::PoolBettors(pool_id))
+                .unwrap_or_else(|| Vec::new(&env));
+            bettors.push_back(user.clone());
+            env.storage()
+                .persistent()
+                .set(&DataKey::PoolBettors(pool_id), &bettors);
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolBettors(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
         }
         pool.cumulative_volume = pool
             .cumulative_volume
@@ -8111,13 +8238,16 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        // #705 — Update user exposure tracking after bet is placed.
-        Self::update_user_exposure(&env, &user, pool_id, normalized);
-
-        // #705/#811 — Persist the daily/weekly loss windows and large-bet
-        // timestamp this bet was validated against. `normalized` is the value
-        // check_user_exposure_limits was given, so both sides use one scale.
-        Self::record_user_bet_limits_state(&env, &user, pool_id, normalized);
+        let total_contract_volume: i128 = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&DataKey::TotalContractVolume)
+            .unwrap_or(0)
+            .checked_add(normalized)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::TotalContractVolume, &total_contract_volume);
 
         env.events().publish(
             (

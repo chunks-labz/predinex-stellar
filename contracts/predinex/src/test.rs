@@ -5696,6 +5696,67 @@ fn test_get_pool_not_initialized() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_pool_with_twap_period_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    client.create_pool_with_twap_period(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &String::from_str(&env, "A"),
+        &String::from_str(&env, "B"),
+        &3600,
+        &3600,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_multi_outcome_pool_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let mut outcomes = Vec::new(&env);
+    outcomes.push_back(String::from_str(&env, "A"));
+    outcomes.push_back(String::from_str(&env, "B"));
+
+    client.create_multi_outcome_pool(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &outcomes,
+        &3600,
+        &None::<String>,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
+fn test_create_multi_pool_with_twap_not_initialized() {
+    let env = Env::default();
+    let contract_id = env.register_contract(None, PredinexContract);
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let mut outcomes = Vec::new(&env);
+    outcomes.push_back(String::from_str(&env, "A"));
+    outcomes.push_back(String::from_str(&env, "B"));
+
+    client.create_multi_pool_with_twap(
+        &Address::generate(&env),
+        &String::from_str(&env, "Title"),
+        &String::from_str(&env, "Description"),
+        &outcomes,
+        &3600,
+        &None::<String>,
+        &3600,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #2)")]
 fn test_get_user_bet_not_initialized() {
     let env = Env::default();
     let contract_id = env.register_contract(None, PredinexContract);
@@ -6905,6 +6966,7 @@ fn test_bet_after_expiry_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
@@ -6938,6 +7000,7 @@ fn test_multiple_bettors_proportional_reward() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user1, &pool_id, &0, &2000000, &None::<Address>);
@@ -6983,6 +7046,7 @@ fn test_fee_calculation_verification() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user1, &pool_id, &0, &1000000, &None::<Address>);
@@ -7019,6 +7083,7 @@ fn test_zero_value_bet_rejected() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &0, &0, &None::<Address>);
@@ -7047,6 +7112,7 @@ fn test_settle_expired_pool_success() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &1, &1000000, &None::<Address>);
@@ -7054,7 +7120,7 @@ fn test_settle_expired_pool_success() {
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
     let stranger = Address::generate(&env);
-    client.settle_expired_pool(&stranger, &pool_id);
+    client.settle_pool(&stranger, &pool_id, &1u32);
 
     let pool = client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.status, PoolStatus::Settled(1));
@@ -7083,6 +7149,7 @@ fn test_empty_winning_pool_handling() {
         &String::from_str(&env, "No"),
         &3600,
         &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &1, &1000000, &None::<Address>);

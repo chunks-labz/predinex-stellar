@@ -279,7 +279,7 @@ fn v3_test_outcomes_validation() {
         &3600,
         &None,
     );
-    assert_eq!(result, Err(Ok(ContractError::InvalidOutcome)));
+    assert_eq!(result, Err(Ok(ContractError::TooManyOutcomes)));
 
     // 4. Outcome label too long
     let mut long_outcome = Vec::new(&t.env);

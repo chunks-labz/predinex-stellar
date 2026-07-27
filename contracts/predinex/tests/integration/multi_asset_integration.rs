@@ -568,3 +568,46 @@ fn ma7_single_asset_claim_rejected_for_multi_asset_pool() {
         "single-asset claim on a multi-asset pool must return MultiAssetClaimRequired"
     );
 }
+
+/// #867-3: Multi-asset pool bettors appear on the leaderboard.
+#[test]
+fn ma8_leaderboard_populated_for_multi_asset_pool() {
+    let ctx = setup_ma();
+    let creator = Address::generate(&ctx.env);
+    let user_a = Address::generate(&ctx.env);
+    let user_b = Address::generate(&ctx.env);
+
+    set_rates_parity(&ctx);
+    let pool_id = make_ma_pool(&ctx, &creator);
+
+    ctx.base_admin.mint(&user_a, &500i128);
+    ctx.base_admin.mint(&user_b, &300i128);
+
+    ctx.client.place_multi_asset_bet(
+        &user_a,
+        &pool_id,
+        &0u32,
+        &200i128,
+        &ctx.base_token,
+        &None::<Address>,
+    );
+    ctx.client.place_multi_asset_bet(
+        &user_b,
+        &pool_id,
+        &1u32,
+        &100i128,
+        &ctx.base_token,
+        &None::<Address>,
+    );
+
+    let lb = ctx.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
+    assert_eq!(lb.len(), 2, "leaderboard must have 2 entries");
+    assert_eq!(lb.get(0).unwrap().total_bet, 200i128);
+    assert_eq!(lb.get(1).unwrap().total_bet, 100i128);
+
+    assert_eq!(
+        ctx.client.get_participant_count(&pool_id),
+        2,
+        "participant_count must match bettor count"
+    );
+}
