@@ -339,6 +339,7 @@ const MAX_TWAP_SNAPSHOTS: u32 = 64;
 /// paths so SDK consumers can match on a stable error code rather than parsing
 /// panic strings, and so error compatibility is preserved across upgrades.
 #[contracterror]
+#[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum ContractError {
     AlreadyInitialized = 1,
@@ -353,11 +354,17 @@ pub enum ContractError {
     PoolNotOpen = 10,
     PoolAlreadySettled = 11,
     PoolAlreadyVoided = 12,
+    // (reserved — removed variant)
+    _Reserved13 = 13,
+    // (reserved — removed variant)
+    _Reserved14 = 14,
     PoolIsCancelled = 15,
     PoolIsFrozen = 16,
     PoolIsDisputed = 17,
     PoolNotSettled = 18,
     PoolNotFrozenOrDisputed = 19,
+    // (reserved — removed variant)
+    _Reserved20 = 20,
     PoolCannotBeVoided = 21,
     PoolMustBeSettledToDispute = 22,
     NoBetFound = 23,
@@ -381,6 +388,10 @@ pub enum ContractError {
     PoolTotalOverflow = 41,
     UserBetOverflow = 42,
     TreasuryOverflow = 43,
+    // (reserved — removed variant)
+    _Reserved44 = 44,
+    // (reserved — removed variant)
+    _Reserved45 = 45,
     PoolSizeLimitExceeded = 46,
     InvalidCoolingPeriod = 47,
     InvalidRateLimitConfig = 48,
