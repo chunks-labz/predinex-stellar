@@ -8,6 +8,18 @@ import * as StacksApi from '../../app/lib/stacks-api';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 
+const { mockPush } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+}));
+
 // Mock WalletAdapterProvider hook
 vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
@@ -177,11 +189,12 @@ describe('PoolIntegration', () => {
     expect(screen.getByText(/Please switch to Stellar Testnet to interact/i)).toBeInTheDocument();
   });
 
-  it('enables Place Bet button when wallet is connected and network matches', async () => {
+  it('enables Place Bet button and navigates to pool detail page when clicked while connected', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
     vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue(mockNetworkMatch);
     vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
 
+    const user = userEvent.setup();
     renderWithProviders(<PoolIntegration />);
 
     await waitFor(() => {
@@ -190,6 +203,31 @@ describe('PoolIntegration', () => {
 
     const placeBetButton = screen.getByRole('button', { name: /Place Bet/i });
     expect(placeBetButton).not.toBeDisabled();
+
+    await user.click(placeBetButton);
+    expect(mockPush).toHaveBeenCalledWith(`/markets/${mockPool.id}`);
+  });
+
+  it('calls connect when Connect Wallet button is clicked while disconnected', async () => {
+    const mockConnect = vi.fn();
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue({
+      ...disconnectedWallet,
+      connect: mockConnect,
+    });
+    vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue(mockNetworkMatch);
+    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+
+    const user = userEvent.setup();
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Pool')).toBeInTheDocument();
+    });
+
+    const connectButton = screen.getByRole('button', { name: /Connect Wallet/i });
+    await user.click(connectButton);
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 
   it('shows View Pool Details button when wallet is not connected', async () => {

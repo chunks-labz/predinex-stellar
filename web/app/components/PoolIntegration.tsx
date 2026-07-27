@@ -210,7 +210,7 @@ export default function PoolIntegration() {
                   {!pool.settled && (
                     <div className="space-y-2">
                       <button 
-                        onClick={isMismatch ? undefined : (isConnected ? () => {} : connect)}
+                        onClick={isMismatch ? undefined : (isConnected ? () => router.push(`/markets/${pool.id}`) : connect)}
                         disabled={isMismatch}
                         className="w-full py-2 bg-primary hover:bg-violet-600 text-white font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
