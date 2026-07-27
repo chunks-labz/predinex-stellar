@@ -120,6 +120,7 @@ export async function getEnhancedPool(poolId: number): Promise<PoolData | null> 
       participantCount: Number(value['participant-count'] ?? value.participant_count ?? 0),
       assetType: typeof value['asset-type'] === 'string' ? value['asset-type'] : undefined,
       disputed: Boolean(value.disputed ?? value['is-disputed'] ?? false),
+      frozen: Boolean(value.frozen ?? value['is-frozen'] ?? value.status === 'Frozen'),
     };
   } catch (e) {
     log.error(`Failed to fetch pool ${poolId} after retries`, e);
@@ -188,6 +189,7 @@ export async function getPoolsBatch(startId: number, count: number): Promise<Poo
           participantCount: Number(poolData['participant-count'] ?? poolData.participant_count ?? 0),
           assetType: typeof poolData['asset-type'] === 'string' ? poolData['asset-type'] : undefined,
           disputed: Boolean(poolData.disputed ?? poolData['is-disputed'] ?? false),
+          frozen: Boolean(poolData.frozen ?? poolData['is-frozen'] ?? poolData.status === 'Frozen'),
         });
       }
     }

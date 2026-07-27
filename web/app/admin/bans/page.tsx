@@ -54,18 +54,15 @@ export default function AdminBans() {
       }
       setCheckingAccess(true);
       try {
-        // Fetch both admin and freezeAdmin for access checking
         const freezeAdmin = await predinexReadApi.getFreezeAdmin();
-        const contractAdmin = await predinexReadApi.getPoolCount().then(() => null).catch(() => null); // fallback/best-effort
-        
-        const walletAddress = wallet.address.toUpperCase();
-        const isAllowed = 
-          (freezeAdmin && walletAddress === freezeAdmin.toUpperCase()) ||
-          (contractAdmin && walletAddress === (contractAdmin as string).toUpperCase()) ||
-          // Standard backup checking if contract is local/mocked
-          walletAddress === 'GBTESTADMINWALLETXYZ1234567890'; // placeholder for local dev testing
+        const contractAdmin = await predinexReadApi.getAdmin();
 
-        setIsAdmin(!!isAllowed || wallet.isConnected); // Allow for local demo and test connection
+        const walletAddress = wallet.address.toUpperCase();
+        const isAllowed =
+          (freezeAdmin && walletAddress === freezeAdmin.toUpperCase()) ||
+          (contractAdmin && walletAddress === contractAdmin.toUpperCase());
+
+        setIsAdmin(!!isAllowed);
       } catch (err) {
         console.error('Failed to verify admin status', err);
         setIsAdmin(false);

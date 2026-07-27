@@ -15,6 +15,8 @@ import { getRuntimeConfig } from './runtime-config';
  */
 export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number): MarketStatus {
   if (pool.settled) return 'settled';
+  if (pool.disputed) return 'disputed';
+  if (pool.frozen) return 'frozen';
   if (currentBlockHeight > pool.expiry) return 'expired';
   return 'active';
 }

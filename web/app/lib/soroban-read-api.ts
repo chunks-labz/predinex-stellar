@@ -891,6 +891,45 @@ export async function getFreezeAdminFromSoroban(
   }
 }
 
+export async function getAdminFromSoroban(
+  config?: SorobanReadConfig
+): Promise<string | null> {
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      return null;
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_admin',
+      []
+    );
+
+    if (rawResult === null) {
+      return null;
+    }
+
+    let addressVal: unknown = rawResult;
+    if (Array.isArray(rawResult)) {
+      if (rawResult.length === 0) return null;
+      addressVal = rawResult[0];
+    }
+
+    if (typeof addressVal === 'string' && addressVal.startsWith('G')) {
+      return addressVal;
+    }
+
+    return null;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    log.error('Failed to fetch admin from Soroban:', error);
+    return null;
+  }
+}
+
 /**
  * Get Soroban configuration from runtime config.
  */

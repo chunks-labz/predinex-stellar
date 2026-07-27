@@ -71,7 +71,7 @@ interface OracleResponse {
  * Validate that an unknown value is a valid outcome index (0 or 1).
  */
 function isValidOutcome(value: unknown): value is number {
-  return value === 0 || value === 1;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
 }
 
 /**

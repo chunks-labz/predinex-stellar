@@ -17,6 +17,7 @@ export interface PoolData {
   participantCount?: number;
   assetType?: string;
   disputed?: boolean;
+  frozen?: boolean;
 }
 
 export interface ProcessedMarket {
