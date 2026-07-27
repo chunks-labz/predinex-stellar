@@ -217,6 +217,40 @@ pub enum DataKey {
     /// #625 — Pending rescue request waiting out the 24-hour timelock.
     /// Value: (token: Address, to: Address, amount: i128, not_before: u64)
     PendingRescue,
+    /// #716 — Cross-chain mirror configuration for a pool.
+    PoolMirror(u32),
+    /// #716 — Mapping from unified pool ID to source chain pool.
+    MirrorByUnifiedId(u32),
+    /// #716 — Auto-incrementing unified pool ID counter.
+    UnifiedPoolCounter,
+    /// #716 — Bridge timeout in seconds for cross-chain settlements.
+    BridgeTimeout,
+    /// #716 — Dispute window for cross-chain settlements (seconds).
+    CrossChainDisputeWindow,
+    /// #714 — Per-pool LP position for a user (shares + reward debt).
+    LpPosition(u32, Address),
+    /// #714 — Total LP shares minted for a pool.
+    LpTotalShares(u32),
+    /// #714 — Total liquidity deposited by LPs into a pool.
+    LpTotalLiquidity(u32),
+    /// #714 — Cumulative fee-per-share accumulator (scaled by LP_PRECISION).
+    LpFeePerShare(u32),
+    /// #714 — Percentage of protocol fees allocated to LP rewards (basis points).
+    LpFeeAllocationBps,
+    /// #714 — Per-pool accumulated LP reward pool (unclaimed fees).
+    LpRewardPool(u32),
+    /// #807 — Rounding remainder from fee-per-share updates (scaled: amount * LP_PRECISION + prior dust).
+    LpRewardDust(u32),
+    /// #714 — Optional time-locked LP stake for bonus multiplier.
+    LpStake(u32, Address),
+    /// #714 — Bonus multiplier for time-locked LP staking (basis points, 10000 = 1x).
+    LpStakeBoostBps,
+    /// Dispute window for local pools (seconds).
+    DisputeWindow,
+    /// Record of settlement timestamp for enforcing local dispute window.
+    PoolSettlementTime(u32),
+    /// #725 — Extended, structured metadata for a pool.
+    PoolExtMetadata(u32),
     /// #705 — Total exposure (outstanding bets) for a user in a specific pool.
     UserExposurePerPool(Address, u32),
     /// #705 — Max exposure per pool as percentage of pool volume (basis points).
@@ -240,6 +274,8 @@ pub enum DataKey {
     UserLargeBetCooldownSecs,
     /// #705 — Threshold (stroops) above which cooldown applies.
     UserLargeBetThreshold,
+    /// #811 — Timestamp of the user's last large bet in a pool, for cooldown enforcement.
+    LastLargeBetTimestamp(Address, u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -447,6 +483,8 @@ pub enum ContractError {
     CreatorCannotBet = 83,
     InvalidDepositDeadline = 84,
     DepositDeadlinePassed = 85,
+    /// #705 — A large bet was placed before the per-wallet cooldown elapsed.
+    LargeBetCooldownActive = 86,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -4470,7 +4508,7 @@ impl PredinexContract {
         } else if is_creator {
             SettlementSource::Creator
         } else {
-            SettlementSource::Delegated
+            SettlementSource::Operator
         };
 
         if pool.status != PoolStatus::Open {
@@ -6422,16 +6460,7 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-        env.storage().persistent().extend_ttl(
-            &DataKey::UserOutcomeBets(pool_id, user.clone()),
-            POOL_BUMP_THRESHOLD,
-            POOL_BUMP_TARGET,
-        );
-
-        // #705 — Update user exposure tracking after bet is placed.
-        Self::update_user_exposure(&env, &user, pool_id, normalized);
-
-        env.events().publish(
+                env.events().publish(
                     (
                         Symbol::new(&env, "pool_metadata_set"),
                         event_version(&env),
@@ -8875,7 +8904,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_deposit"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpDepositEvent {
                 user: user.clone(),
@@ -9028,7 +9057,7 @@ impl PredinexContract {
                 Symbol::new(&env, "lp_withdraw"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             LpWithdrawEvent {
                 user: user.clone(),
