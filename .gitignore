@@ -28,3 +28,6 @@ modify_test.py
 modify.py
 refactor.py
 refactor2.py
+
+# Bot local data
+bot/data/

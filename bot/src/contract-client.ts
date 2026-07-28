@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Read-only Soroban contract client.
  *
  * Uses simulateTransaction to call view functions:
@@ -10,7 +10,6 @@
 
 import {
   Contract,
-  Keypair,
   nativeToScVal,
   rpc,
   scValToNative,
@@ -82,8 +81,8 @@ export class ContractClient {
     });
     this.networkPassphrase = config.networkPassphrase;
     this.contractId = config.contractId;
-    // Derive the public key from the bot secret for the simulation source
-    this.sourcePublicKey = Keypair.fromSecret(config.botSecretKey).publicKey();
+    // Use public key for simulation source
+    this.sourcePublicKey = config.botPublicKey;
   }
 
   /**

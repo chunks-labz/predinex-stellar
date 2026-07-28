@@ -71,7 +71,7 @@ interface OracleResponse {
  * Validate that an unknown value is a valid outcome index (0 or 1).
  */
 function isValidOutcome(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+  return typeof value === 'number' && Number.isInteger(value) && (value === 0 || value === 1);
 }
 
 /**
@@ -306,7 +306,7 @@ export class Poller {
     this.client = new ContractClient(config);
     this.executor = new Executor(config);
     // Generate a short instance ID from the bot's public key for logging
-    this.instanceId = config.botSecretKey.slice(0, 8) + "...";
+    this.instanceId = config.botPublicKey.slice(0, 10);
   }
 
   /**

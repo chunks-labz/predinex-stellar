@@ -43,6 +43,7 @@ function makeConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     allowHttp: false,
     contractId: "C" + "A".repeat(55),
     botSecretKey: "S" + "A".repeat(55),
+    botPublicKey: "G" + "A".repeat(55),
     pollIntervalMs: 300_000,
     batchSize: 100,
     settleBatchSize: 20,

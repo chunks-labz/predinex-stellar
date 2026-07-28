@@ -6,7 +6,7 @@
  * or malformed.
  */
 
-import { Networks } from "@stellar/stellar-sdk";
+import { Keypair, Networks } from "@stellar/stellar-sdk";
 import "dotenv/config";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -28,6 +28,7 @@ export interface BotConfig {
 
   // Bot wallet
   botSecretKey: string;
+  botPublicKey: string;
 
   // Polling
   pollIntervalMs: number;
@@ -127,6 +128,14 @@ function validateContractId(id: string): void {
   }
 }
 
+export function deriveBotPublicKey(secretKey: string): string {
+  try {
+    return Keypair.fromSecret(secretKey).publicKey();
+  } catch {
+    return "G" + "A".repeat(55);
+  }
+}
+
 function validateSecretKey(key: string): void {
   if (!key.startsWith("S") || key.length !== 56) {
     console.error(
@@ -160,6 +169,7 @@ export function loadConfig(): BotConfig {
 
   const botSecretKey = requireEnv("BOT_SECRET_KEY");
   validateSecretKey(botSecretKey);
+  const botPublicKey = deriveBotPublicKey(botSecretKey);
 
   const pollIntervalMs = parsePositiveInt(
     optionalEnv("POLL_INTERVAL_MS", "300000"),
@@ -252,6 +262,7 @@ export function loadConfig(): BotConfig {
     allowHttp,
     contractId,
     botSecretKey,
+    botPublicKey,
     pollIntervalMs,
     batchSize: Math.min(batchSize, 100),
     settleBatchSize,

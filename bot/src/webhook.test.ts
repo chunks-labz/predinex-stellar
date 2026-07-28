@@ -12,6 +12,7 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
   allowHttp: false,
   contractId: "C" + "A".repeat(55),
   botSecretKey: "S" + "A".repeat(55),
+  botPublicKey: "G" + "A".repeat(55),
   pollIntervalMs: 300000,
   batchSize: 100,
   settleBatchSize: 20,
@@ -29,7 +30,7 @@ const mockConfig = (overrides: Partial<BotConfig> = {}): BotConfig => ({
 
 const mockCycleContext: SettlementCycleContext = {
   cycleNumber: 42,
-  instanceId: "SAAAAAAA...",
+  instanceId: "GAAAAAAAAA",
   settlementTimestamp: "2026-07-24T12:00:00.000Z",
 };
 
@@ -117,7 +118,7 @@ describe("notify", () => {
 
     expect(body.event).toBe("settlement_cycle");
     expect(body.cycleNumber).toBe(42);
-    expect(body.instanceId).toBe("SAAAAAAA...");
+    expect(body.instanceId).toBe("GAAAAAAAAA");
     expect(body.settlementTimestamp).toBe("2026-07-24T12:00:00.000Z");
     expect(body.summary.attempted).toBe(2);
     expect(body.summary.succeeded).toBe(1);
