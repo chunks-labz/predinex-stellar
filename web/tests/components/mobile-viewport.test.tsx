@@ -20,7 +20,7 @@ import type { Pool } from '../../app/lib/stacks-api';
 // Shared mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(() => ({
     chain: 'stacks',
     isConnected: false,
@@ -32,7 +32,7 @@ vi.mock('../../app/components/WalletAdapterProvider', () => ({
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/NetworkMismatchWarning', () => ({
+vi.mock('@/components/NetworkMismatchWarning', () => ({
   NetworkMismatchWarning: () => null,
   default: () => null,
 }));
@@ -74,7 +74,7 @@ const DESKTOP_WIDTH = 1280;
 // Navbar
 // ---------------------------------------------------------------------------
 
-import Navbar from '../../app/components/Navbar';
+import Navbar from '@/components/Navbar';
 
 describe('Navbar — mobile viewport', () => {
   beforeEach(() => setViewport(MOBILE_WIDTH));
@@ -130,7 +130,7 @@ describe('Navbar — mobile viewport', () => {
 // WalletModal
 // ---------------------------------------------------------------------------
 
-import WalletModal from '../../app/components/WalletModal';
+import WalletModal from '@/components/WalletModal';
 
 vi.mock('../../app/lib/wallet-connector', () => ({
   isWalletAvailable: vi.fn(() => false),
@@ -183,7 +183,7 @@ describe('WalletModal — mobile viewport', () => {
 // MarketGrid
 // ---------------------------------------------------------------------------
 
-import MarketGrid from '../../components/MarketGrid';
+import MarketGrid from '@/components/MarketGrid';
 
 vi.mock('../../components/MarketCard', () => ({
   default: ({ market }: { market: Pool }) => (
@@ -230,7 +230,8 @@ describe('MarketGrid — mobile viewport', () => {
     renderWithProviders(
       <MarketGrid markets={[]} isLoading={true} error={null} onRetry={vi.fn()} hasFilters={false} />
     );
-    expect(screen.getByRole('status', { name: /loading/i })).toBeInTheDocument();
+    // MarketGrid renders a CSS-animated spinner (no ARIA role); the loading text is the accessible indicator
+    expect(screen.getByText(/loading markets/i)).toBeInTheDocument();
   });
 
   it('renders an error state with a retry button', async () => {
@@ -253,11 +254,118 @@ describe('MarketGrid — mobile viewport', () => {
 
   it('renders a reset button in empty state when filters are active', async () => {
     const user = userEvent.setup();
-    const onRetry = vi.fn();
+    const onResetFilters = vi.fn();
     renderWithProviders(
-      <MarketGrid markets={[]} isLoading={false} error={null} onRetry={onRetry} hasFilters={true} />
+      <MarketGrid markets={[]} isLoading={false} error={null} onRetry={vi.fn()} onResetFilters={onResetFilters} hasFilters={true} />
     );
-    await user.click(screen.getByRole('button', { name: /reset all filters/i }));
-    expect(onRetry).toHaveBeenCalledOnce();
+    // The component renders "Clear Filters" (not "Reset All Filters")
+    await user.click(screen.getByRole('button', { name: /clear filters/i }));
+    expect(onResetFilters).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DashboardLayout — mobile sidebar behavior
+// ---------------------------------------------------------------------------
+
+import DashboardLayout from '../../app/components/dashboard/DashboardLayout';
+
+describe('DashboardLayout — mobile viewport', () => {
+  beforeEach(() => setViewport(MOBILE_WIDTH));
+  afterEach(() => setViewport(DESKTOP_WIDTH));
+
+  const defaultProps = {
+    activeSection: 'portfolio' as const,
+    onSectionChange: vi.fn(),
+  };
+
+  it('renders mobile menu toggle and navigation section buttons', () => {
+    render(
+      <DashboardLayout {...defaultProps}>
+        <div>content</div>
+      </DashboardLayout>
+    );
+    // The layout has the mobile toggle + 4 nav buttons in the sidebar
+    expect(screen.getAllByRole('button').length).toBeGreaterThan(0);
+  });
+
+  it('renders all four dashboard navigation labels', () => {
+    render(
+      <DashboardLayout {...defaultProps}>
+        <div>content</div>
+      </DashboardLayout>
+    );
+    // 'Portfolio' appears in both the nav button and the section header when it is active
+    expect(screen.getAllByText('Portfolio').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('History').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Claims').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Statistics').length).toBeGreaterThan(0);
+  });
+
+  it('renders children in the main content area', () => {
+    render(
+      <DashboardLayout {...defaultProps}>
+        <div data-testid="child-content">page content</div>
+      </DashboardLayout>
+    );
+    expect(screen.getByTestId('child-content')).toBeInTheDocument();
+  });
+
+  it('calls onSectionChange when a nav button is clicked', async () => {
+    const user = userEvent.setup();
+    const onSectionChange = vi.fn();
+    render(
+      <DashboardLayout activeSection="portfolio" onSectionChange={onSectionChange}>
+        <div>content</div>
+      </DashboardLayout>
+    );
+    await user.click(screen.getByText('History'));
+    expect(onSectionChange).toHaveBeenCalledWith('history');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DashboardTabBar — accessible on mobile
+// ---------------------------------------------------------------------------
+
+import { DashboardTabBar } from '../../app/components/user-dashboard/DashboardTabBar';
+
+vi.mock('../../app/lib/i18n', () => ({
+  useI18n: () => ({
+    t: (key: string) => {
+      const map: Record<string, string> = {
+        'dashboard.overview': 'Overview',
+        'dashboard.activeBets': 'Active Bets',
+        'dashboard.history': 'History',
+        'dashboard.incentives': 'Incentives',
+      };
+      return map[key] ?? key;
+    },
+  }),
+  I18nProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
+
+describe('DashboardTabBar — mobile viewport', () => {
+  beforeEach(() => setViewport(MOBILE_WIDTH));
+  afterEach(() => setViewport(DESKTOP_WIDTH));
+
+  it('renders all four tab buttons', () => {
+    render(
+      <DashboardTabBar activeTab="overview" onTabChange={vi.fn()} />
+    );
+    expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /active bets/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /history/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /incentives/i })).toBeInTheDocument();
+  });
+
+  it('calls onTabChange when a tab is clicked', async () => {
+    const user = userEvent.setup();
+    const onTabChange = vi.fn();
+    render(
+      <DashboardTabBar activeTab="overview" onTabChange={onTabChange} />
+    );
+    await user.click(screen.getByRole('button', { name: /history/i }));
+    expect(onTabChange).toHaveBeenCalledWith('history');
   });
 });

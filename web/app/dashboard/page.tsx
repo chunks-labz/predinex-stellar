@@ -1,16 +1,17 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import Navbar from '../components/Navbar';
-import AuthGuard from '../components/AuthGuard';
+import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
 import { useUserActivity } from '../hooks/useUserActivity';
 import { useActiveBets } from '../lib/hooks/useActiveBets';
-import { useWallet } from '../components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useClaimWinnings } from '../lib/hooks/useClaimWinnings';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { EmptyState } from '../../components/EmptyState';
 import { DisconnectedState } from '../../components/DisconnectedState';
-import { TransactionFeeModal } from '../components/TransactionFeeModal';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
+import ExportButton from '../../components/ExportButton';
 
 function StatsSkeleton() {
   return (
@@ -30,7 +31,7 @@ const PlatformStats = dynamic(() => import('../../components/PlatformStats'), {
   loading: () => <StatsSkeleton />,
 });
 
-const PortfolioOverview = dynamic(() => import('../../components/PortfolioOverview'), {
+const PortfolioOverview = dynamic(() => import('@/components/PortfolioOverview'), {
   loading: () => <CardSkeleton className="h-32 mb-8" />,
 });
 
@@ -88,15 +89,21 @@ function DashboardContent() {
             isConfirming={stage === 'signing' || stage === 'submitting' || stage === 'polling'}
           />
 
-          <h1 className="text-4xl font-black mb-8 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+          <h1 className="text-2xl sm:text-4xl font-black mb-8 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
             Institutional Dashboard
           </h1>
 
+          {stxAddress && (
+            <div className="mb-8">
+              <ExportButton address={stxAddress} />
+            </div>
+          )}
+
           <PlatformStats />
-          <PortfolioOverview />
+          <PortfolioOverview portfolio={{ totalBets: 0, activeBets: 0, totalWagered: 0, totalWinnings: 0, totalClaimable: 0, profitLoss: 0, winRate: 0 }} />
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="p-8 rounded-3xl border border-border bg-card/40 glass shadow-xl">
+            <div className="p-4 sm:p-8 rounded-3xl border border-border bg-card/40 glass shadow-xl">
               <FavoritePoolsCard />
               <div className="mt-8">
               <h2 className="text-2xl font-black mb-6 flex items-center gap-3">
@@ -127,7 +134,7 @@ function DashboardContent() {
               )}
               </div>
             </div>
-            <div className="p-8 rounded-3xl border border-border bg-card/40 glass shadow-xl">
+            <div className="p-4 sm:p-8 rounded-3xl border border-border bg-card/40 glass shadow-xl">
               {activities.length === 0 ? (
                 <EmptyState message="No activity yet" />
               ) : (

@@ -143,7 +143,7 @@ export default function BetHistoryTable({
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <h3 className="text-lg font-semibold">Betting History</h3>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
             onClick={() => setShowFilters(!showFilters)}
             className="flex items-center gap-2 px-3 py-2 border border-muted/50 rounded-lg hover:bg-muted/50 transition-colors"
@@ -151,14 +151,14 @@ export default function BetHistoryTable({
             <Filter className="w-4 h-4" />
             Filters
           </button>
-          
+
           <select
             value={`${filters.sortBy}-${filters.sortOrder}`}
             onChange={(e) => {
               const [sortBy, sortOrder] = e.target.value.split('-') as [typeof filters.sortBy, typeof filters.sortOrder];
               onFiltersChange({ sortBy, sortOrder });
             }}
-            className="px-3 py-2 border border-muted/50 rounded-lg bg-background"
+            className="flex-1 sm:flex-none px-3 py-2 border border-muted/50 rounded-lg bg-background min-w-0"
           >
             <option value="date-desc">Newest First</option>
             <option value="date-asc">Oldest First</option>
@@ -178,7 +178,7 @@ export default function BetHistoryTable({
               <label className="block text-sm font-medium mb-2">Outcome</label>
               <select
                 value={filters.historyOutcome}
-                onChange={(e) => onFiltersChange({ historyOutcome: e.target.value as any })}
+                onChange={(e) => onFiltersChange({ historyOutcome: e.target.value as DashboardFilters['historyOutcome'] })}
                 className="w-full px-3 py-2 border border-muted/50 rounded-lg bg-background"
               >
                 <option value="all">All Outcomes</option>
@@ -192,7 +192,7 @@ export default function BetHistoryTable({
               <label className="block text-sm font-medium mb-2">Market Status</label>
               <select
                 value={filters.historyMarketStatus}
-                onChange={(e) => onFiltersChange({ historyMarketStatus: e.target.value as any })}
+                onChange={(e) => onFiltersChange({ historyMarketStatus: e.target.value as DashboardFilters['historyMarketStatus'] })}
                 className="w-full px-3 py-2 border border-muted/50 rounded-lg bg-background"
               >
                 <option value="all">All Markets</option>
@@ -292,7 +292,7 @@ export default function BetHistoryTable({
                           href={`/markets/${bet.poolId}`}
                           className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                         >
-                          <span className="truncate max-w-[200px]">{bet.marketTitle}</span>
+                          <span className="truncate max-w-[120px] sm:max-w-[200px]">{bet.marketTitle}</span>
                           <ExternalLink className="w-3 h-3 flex-shrink-0" />
                         </Link>
                       </td>

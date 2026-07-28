@@ -1,4 +1,4 @@
-mport sys,json import { createScopedLogger } from '@/app/lib/logger';
+import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('fetchDisputesFromContract');
 import { getPool } from '../stacks-api';
 import type { Dispute } from './types';

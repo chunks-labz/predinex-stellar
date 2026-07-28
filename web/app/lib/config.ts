@@ -3,6 +3,9 @@
  * Centralized configuration for the entire application
  */
 
+import { MAX_POOL_DURATION_SECONDS } from './constants';
+import { MIN_POOL_DURATION_SECS } from '@/lib/validators';
+
 /**
  * Token/Currency configuration
  * Configurable token symbol for rewards, incentives, and display
@@ -31,8 +34,8 @@ export const BET_CONFIG = {
  * Pool configuration
  */
 export const POOL_CONFIG = {
-  MINIMUM_DURATION: 10, // blocks
-  MAXIMUM_DURATION: 1_000_000, // blocks
+  MINIMUM_DURATION: MIN_POOL_DURATION_SECS, // seconds — matches the Soroban contract's minimum
+  MAXIMUM_DURATION: MAX_POOL_DURATION_SECONDS, // seconds — matches the Soroban contract's maximum
   TITLE_MAX_LENGTH: 256,
   DESCRIPTION_MAX_LENGTH: 512,
   OUTCOME_MAX_LENGTH: 128,

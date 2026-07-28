@@ -4,6 +4,9 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { createScopedLogger } from '@/app/lib/logger';
+
+const log = createScopedLogger('useLocalStorage');
 
 /**
  * Hook for managing local storage
@@ -11,14 +14,18 @@ import { useState, useEffect, useCallback } from 'react';
  * @param initialValue Initial value if not in storage
  * @returns Value and setter function
  */
-export function useLocalStorage<T>(key: string, initialValue: T) {
+export function useLocalStorage<T>(
+  key: string,
+  initialValue: T,
+  migrate?: (value: unknown) => T
+) {
   const [storedValue, setStoredValue] = useState<T>(() => {
     try {
-      // Get from local storage by key
       const item = typeof window !== 'undefined' ? window.localStorage.getItem(key) : null;
 
       if (item) {
-        return JSON.parse(item);
+        const parsed = JSON.parse(item);
+        return migrate ? migrate(parsed) : parsed;
       }
 
       return initialValue;

@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { NetworkMismatchWarning } from '../app/components/NetworkMismatchWarning';
+import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 import PoolIntegration from '../app/components/PoolIntegration';
 import { renderWithProviders } from './helpers/renderWithProviders';
 import * as AppKitReact from '@reown/appkit/react';
 import * as RuntimeConfig from '../app/lib/runtime-config';
-import * as WalletAdapterProvider from '../app/components/WalletAdapterProvider';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 import * as StacksApi from '../app/lib/stacks-api';
 import { stellarNetworks } from '../lib/appkit-config';
 
@@ -20,7 +20,7 @@ vi.mock('../app/lib/runtime-config', () => ({
   getRuntimeConfig: vi.fn(),
 }));
 
-vi.mock('../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

@@ -30,19 +30,15 @@ export function useDebounce<T>(value: T, delay: number = 500): T {
  * @param delay Delay in milliseconds
  * @returns Debounced callback
  */
-export function useDebouncedCallback<T extends (...args: any[]) => any>(
+export function useDebouncedCallback<T extends (...args: unknown[]) => unknown>(
   callback: T,
   delay: number = 500
 ): T {
   const [timeoutId, setTimeoutId] = useState<NodeJS.Timeout | null>(null);
 
-  const debouncedCallback = ((...args: any[]) => {
+  const debouncedCallback = ((...args: unknown[]) => {
     if (timeoutId) clearTimeout(timeoutId);
-
-    const newTimeoutId = setTimeout(() => {
-      callback(...args);
-    }, delay);
-
+    const newTimeoutId = setTimeout(() => { callback(...args); }, delay);
     setTimeoutId(newTimeoutId);
   }) as T;
 

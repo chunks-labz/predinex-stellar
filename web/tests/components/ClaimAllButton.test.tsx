@@ -4,10 +4,10 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ClaimAllButton, { type ClaimablePool } from '../../components/ClaimAllButton';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import { useWallet } from '../../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));

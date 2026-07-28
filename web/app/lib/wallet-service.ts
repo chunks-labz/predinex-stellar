@@ -5,8 +5,11 @@
 
 import { AppConfig, UserSession, showConnect, FinishedAuthData, UserData } from '@stacks/connect';
 import { STACKS_MAINNET, STACKS_TESTNET, StacksNetwork } from '@stacks/network';
-import { ClarityValue } from '@stacks/transactions';
+import { ClarityValue, type PostCondition, type PostConditionMode } from '@stacks/transactions';
 import { formatDisplayAddress } from './address-display';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('wallet-service');
 
 export type WalletType = 'hiro' | 'xverse' | 'leather' | 'unknown';
 export type NetworkType = 'mainnet' | 'testnet';
@@ -61,6 +64,10 @@ export interface TransactionPayload {
   functionName: string;
   /** The arguments to be passed to the function */
   functionArgs: ClarityValue[];
+  /** Optional post-conditions to constrain token movement. */
+  postConditions?: PostCondition[];
+  /** Optional post-condition mode. Defaults to Deny in the shared transaction helpers. */
+  postConditionMode?: PostConditionMode;
   /** Optional transaction fee override in micro-STX */
   fee?: number;
   /** Optional nonce override for the transaction */
@@ -139,18 +146,18 @@ export class WalletService {
   }
 
   /**
-   * Connect with Xverse (placeholder - would use Xverse SDK)
+   * Connect with Xverse wallet.
+   * Not yet implemented — requires the Xverse SDK.
    */
   private async connectWithXverse(): Promise<FinishedAuthData> {
-    // This would integrate with Xverse's specific connection method
     throw new Error('Xverse integration not yet implemented');
   }
 
   /**
-   * Connect with Leather (placeholder - would use Leather SDK)
+   * Connect with Leather wallet.
+   * Not yet implemented — requires the Leather SDK.
    */
   private async connectWithLeather(): Promise<FinishedAuthData> {
-    // This would integrate with Leather's specific connection method
     throw new Error('Leather integration not yet implemented');
   }
 
@@ -213,6 +220,8 @@ export class WalletService {
       const result = await txService.executeTransaction(payload, userData.appPrivateKey, {
         fee: payload.fee,
         nonce: payload.nonce,
+        postConditions: payload.postConditions,
+        postConditionMode: payload.postConditionMode,
       });
 
       return result.txId;

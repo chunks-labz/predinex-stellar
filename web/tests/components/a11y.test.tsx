@@ -12,7 +12,7 @@ import axe from 'axe-core';
 
 // ── Shared mocks ──────────────────────────────────────────────────────────────
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(() => ({
     isConnected: false,
     isLoading: false,
@@ -39,7 +39,7 @@ vi.mock('../../app/lib/hooks/usePoolFavorites', () => ({
   usePoolFavorites: () => ({ isFavorite: () => false, toggleFavorite: vi.fn() }),
 }));
 
-vi.mock('../../app/components/CountdownTimer', () => ({
+vi.mock('@/components/CountdownTimer', () => ({
   default: () => <span>2h remaining</span>,
 }));
 
@@ -97,7 +97,7 @@ describe('Toast — a11y', () => {
 
 // ── MarketCard ────────────────────────────────────────────────────────────────
 
-import MarketCard from '../../app/components/MarketCard';
+import MarketCard from '@/components/MarketCard';
 import type { ProcessedMarket } from '../../app/lib/market-types';
 
 const mockMarket: ProcessedMarket = {
@@ -145,7 +145,7 @@ describe('MarketCard — a11y', () => {
 
 // ── MarketGrid ────────────────────────────────────────────────────────────────
 
-import MarketGrid from '../../app/components/MarketGrid';
+import MarketGrid from '@/components/MarketGrid';
 
 describe('MarketGrid — a11y', () => {
   it('markets list has aria-label', () => {

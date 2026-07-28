@@ -1,5 +1,7 @@
 # CONTRACT_API.md — Predinex Contract Public Entrypoints
 
+#cool
+
 > **Contract:** `predinex` · **Version:** 0.1.0  
 > **SDK:** Soroban SDK 22 · **Network:** Stellar Testnet / Mainnet  
 > **Source:** `contracts/predinex/src/lib.rs`
@@ -80,7 +82,6 @@ winnings  = floor(user_winning_bet × net_pool / winning_side_total)
 | 10 | `TitleTooLong` | Title exceeds 100-byte limit |
 | 11 | `StringWhitespaceOnly` | String is all whitespace |
 | 12 | `InvalidDuration` | Duration outside allowed range |
-| 13 | `TooManyTemplates` | User exceeded `max_templates_per_user` (default 20) |
 
 ---
 
@@ -241,13 +242,18 @@ pub fn cancel_scheduled_pool(
 ```rust
 pub fn extend_pool_duration(
     env: Env,
-    caller: Address,
+    creator: Address,
     pool_id: u32,
     additional_seconds: u64,
-) -> Result<(), ContractError>
+) -> Result<u64, ContractError>
 ```
 
-**Auth:** `caller` (creator or treasury recipient).
+**Auth:** `creator` (the pool creator only).
+
+**Bounds:** `additional_seconds` must be `> 0` and at most `MAX_EXTENSION_SECS`
+(30 days) per call, and the resulting expiry must not push the pool's total
+lifetime beyond `MAX_POOL_DURATION_SECS` (≈1 year) from creation. Violations
+return `DurationTooShort` / `DurationTooLong`.
 
 ---
 
@@ -471,7 +477,7 @@ pub fn create_pool_template(
 ```
 
 **Auth:** `caller`  
-Saves a named template on-chain. The caller may own at most `max_templates_per_user` templates (default **20**).
+Saves a named template on-chain for reuse.
 
 | Parameter | Type | Description |
 |---|---|---|
@@ -483,7 +489,7 @@ Saves a named template on-chain. The caller may own at most `max_templates_per_u
 | `metadata_uri` | `Option<String>` | Optional metadata link |
 
 **Returns:** `u32` — template ID.  
-**Errors:** `TitleEmpty`, `TitleTooLong`, `InvalidOutcome`, `InvalidDuration`, `TooManyTemplates`.  
+**Errors:** `TitleEmpty`, `TitleTooLong`, `InvalidOutcome`, `InvalidDuration`.  
 **Events:** `template_created(template_id, caller)`.
 
 ---
@@ -536,39 +542,6 @@ pub fn update_pool_template(
 
 **Auth:** `caller` (must be the original template creator).
 
----
-
-### `get_user_templates`
-
-```rust
-pub fn get_user_templates(env: Env, user: Address) -> Vec<PoolTemplate>
-```
-
-**Auth:** None (read-only).  
-Returns all templates owned by `user`, ordered by `id` ascending.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `user` | `Address` | Address to query |
-
-**Returns:** `Vec<PoolTemplate>` — may be empty if the user has no templates.
-
----
-
-### `delete_template`
-
-```rust
-pub fn delete_template(
-    env: Env,
-    caller: Address,
-    template_id: u32,
-) -> Result<(), ContractError>
-```
-
-**Auth:** `caller` (must be the template owner or the treasury recipient).
-
-**Errors:** `PoolNotFound` (template not found), `Unauthorized` (caller is neither owner nor treasury recipient).  
-**Events:** `template_deleted(template_id, caller)`.
 
 ---
 
@@ -687,7 +660,6 @@ pub fn rotate_treasury_recipient(
 | `get_scheduled_pools` | `(start_id: u32, count: u32) → Vec<ScheduledPool>` | Scheduled (not yet open) pools |
 | `get_scheduled_claims` | `(start_id: u32, count: u32) → Vec<ScheduledClaim>` | Pending scheduled claims |
 | `get_wallet_rate_limit_status` | `(user: Address) → WalletRateLimitStatus` | Per-wallet rate-limit state |
-| `get_user_templates` | `(user: Address) → Vec<PoolTemplate>` | All templates owned by a user |
 
 ---
 

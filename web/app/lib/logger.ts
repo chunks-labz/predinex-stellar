@@ -15,7 +15,7 @@ interface LogEntry {
   level: LogLevel;
   message: string;
   context?: string;
-  data?: any;
+  data?: unknown;
 }
 
 class Logger {
@@ -26,35 +26,23 @@ class Logger {
   /**
    * Log debug message
    */
-  debug(message: string, context?: string, data?: any): void {
+  debug(message: string, context?: string, data?: unknown): void {
     this.log(LogLevel.DEBUG, message, context, data);
   }
 
-  /**
-   * Log info message
-   */
-  info(message: string, context?: string, data?: any): void {
+  info(message: string, context?: string, data?: unknown): void {
     this.log(LogLevel.INFO, message, context, data);
   }
 
-  /**
-   * Log warning message
-   */
-  warn(message: string, context?: string, data?: any): void {
+  warn(message: string, context?: string, data?: unknown): void {
     this.log(LogLevel.WARN, message, context, data);
   }
 
-  /**
-   * Log error message
-   */
-  error(message: string, context?: string, data?: any): void {
+  error(message: string, context?: string, data?: unknown): void {
     this.log(LogLevel.ERROR, message, context, data);
   }
 
-  /**
-   * Internal log method
-   */
-  private log(level: LogLevel, message: string, context?: string, data?: any): void {
+  private log(level: LogLevel, message: string, context?: string, data?: unknown): void {
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
@@ -161,9 +149,9 @@ export const logger = new Logger();
  */
 export function createScopedLogger(context: string) {
   return {
-    debug: (message: string, data?: any) => logger.debug(message, context, data),
-    info: (message: string, data?: any) => logger.info(message, context, data),
-    warn: (message: string, data?: any) => logger.warn(message, context, data),
-    error: (message: string, data?: any) => logger.error(message, context, data),
+    debug: (message: string, data?: unknown) => logger.debug(message, context, data),
+    info: (message: string, data?: unknown) => logger.info(message, context, data),
+    warn: (message: string, data?: unknown) => logger.warn(message, context, data),
+    error: (message: string, data?: unknown) => logger.error(message, context, data),
   };
 }

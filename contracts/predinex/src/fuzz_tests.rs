@@ -65,11 +65,9 @@ fn setup_fuzz() -> FuzzEnv<'static> {
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
     let contract_id = env.register(PredinexContract, ());
-    let client = PredinexContractClient::new(&env, &contract_id);
+    let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
 
-    client.initialize(&token_id.address(), &token_admin);
-
-    let client: PredinexContractClient<'static> = unsafe { core::mem::transmute(client) };
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
 
     FuzzEnv {
         env,
@@ -93,6 +91,8 @@ fn make_pool_fuzz(t: &FuzzEnv) -> (u32, Address) {
         &String::from_str(&t.env, "Yes"),
         &String::from_str(&t.env, "No"),
         &3_600u64,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     (pool_id, creator)
 }

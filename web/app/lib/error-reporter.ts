@@ -44,6 +44,8 @@ export interface ErrorReporterConfig {
  * - XDR blobs (base64 ≥ 64 chars)
  */
 const REDACT_PATTERNS: Array<[RegExp, string]> = [
+  // Truncated Stellar-style addresses (e.g. GBXXX...ABC123)
+  [/[GC][A-Z0-9]{1,}\.\.\.[A-Z0-9]{1,}/g, '[STELLAR_ADDRESS]'],
   // Stellar public keys (G...) and contract IDs (C...) — 55–56 char base32 strkeys
   [/(?<![A-Z2-7])[GC][A-Z2-7]{54,55}(?![A-Z2-7])/g, '[STELLAR_ADDRESS]'],
   // Stellar secret keys (S...) — 55–56 char base32 strkeys
@@ -54,6 +56,8 @@ const REDACT_PATTERNS: Array<[RegExp, string]> = [
   [/[A-Za-z0-9+/]{32,}={1,2}|[A-Za-z0-9+/]*[+/][A-Za-z0-9+/]{31,}/g, '[BASE64_REDACTED]'],
   // Long pure-hex strings — signatures, hashes, private keys
   [/\b[0-9a-fA-F]{32,}\b/g, '[HEX_REDACTED]'],
+  // 0x-prefixed hex strings
+  [/0x[0-9a-fA-F]{8,}/g, '[HEX_REDACTED]'],
 ];
 
 export function redactSensitiveData(text: string): string {

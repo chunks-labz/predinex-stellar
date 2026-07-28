@@ -1,9 +1,11 @@
 'use client';
 
 import { RotateCcw, SlidersHorizontal } from 'lucide-react';
-import SearchBar from './SearchBar';
+import SearchBar from '@/components/SearchBar';
+import FilterPresets from './FilterPresets';
+import type { FilterPreset } from '../lib/hooks/useFilterPresets';
 import type { MarketFilters, MarketStatusFilter, SortOption, TimeRangeFilter } from '../lib/market-types';
-import { TOKEN_SYMBOL } from '../lib/formatting';
+import { TOKEN_SYMBOL } from '@/lib/formatting';
 
 interface MarketFilterBarProps {
   filters: MarketFilters;
@@ -17,6 +19,13 @@ interface MarketFilterBarProps {
   onSortChange: (sort: SortOption) => void;
   onReset: () => void;
   hasActiveFilters: boolean;
+  // Filter preset props — optional so existing usages without presets still compile.
+  presets?: FilterPreset[];
+  canSavePreset?: boolean;
+  maxPresets?: number;
+  onApplyPreset?: (filters: MarketFilters) => void;
+  onSavePreset?: (name: string, filters: MarketFilters) => void;
+  onDeletePreset?: (id: string) => void;
 }
 
 const statusOptions: Array<{ value: MarketStatusFilter; label: string }> = [
@@ -24,6 +33,7 @@ const statusOptions: Array<{ value: MarketStatusFilter; label: string }> = [
   { value: 'open', label: 'Open' },
   { value: 'settled', label: 'Settled' },
   { value: 'disputed', label: 'Disputed' },
+  { value: 'frozen', label: 'Frozen' },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
@@ -64,6 +74,12 @@ export default function MarketFilterBar({
   onSortChange,
   onReset,
   hasActiveFilters,
+  presets,
+  canSavePreset,
+  maxPresets,
+  onApplyPreset,
+  onSavePreset,
+  onDeletePreset,
 }: MarketFilterBarProps) {
   const visibleAssetOptions = Array.from(
     new Set([
@@ -192,6 +208,18 @@ export default function MarketFilterBar({
           />
         </div>
       </div>
+
+      {onApplyPreset && onSavePreset && onDeletePreset && (
+        <FilterPresets
+          presets={presets ?? []}
+          currentFilters={filters}
+          canSave={canSavePreset ?? false}
+          maxPresets={maxPresets ?? 5}
+          onApply={onApplyPreset}
+          onSave={onSavePreset}
+          onDelete={onDeletePreset}
+        />
+      )}
     </section>
   );
 }

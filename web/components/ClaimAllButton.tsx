@@ -2,8 +2,8 @@
 
 import { Gift, Loader2 } from 'lucide-react';
 import { useClaimAll, CLAIM_ALL_MAX_POOLS } from '@/app/lib/hooks/useClaimAll';
-import { useWallet } from '../app/components/WalletAdapterProvider';
-import { TransactionFeeModal } from '../app/components/TransactionFeeModal';
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import ClaimAllProgressModal from './ClaimAllProgressModal';
 
 export interface ClaimablePool {

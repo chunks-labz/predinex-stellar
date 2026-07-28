@@ -45,6 +45,7 @@ export function useIncentives() {
         else if (breakdown.loyalty > 0) bonusType = 'loyalty';
 
         const incentive: BetterIncentive = {
+          id: `inc-${betterId}-${poolId}-${bonusType}-${Date.now()}`,
           betterId,
           poolId,
           betAmount,
@@ -62,21 +63,39 @@ export function useIncentives() {
     [config]
   );
 
-  const addIncentive = useCallback(
-    (incentive: BetterIncentive) => {
-      setIncentives(prev => [...prev, incentive]);
+  const setIncentivesNormalized = useCallback(
+    (action: BetterIncentive[] | ((prev: BetterIncentive[]) => BetterIncentive[])) => {
+      setIncentives(prev => {
+        const next = typeof action === 'function' ? action(prev) : action;
+        return next.map((inc, idx) => ({
+          ...inc,
+          id: inc.id || `inc-${inc.betterId}-${inc.poolId}-${inc.bonusType}-${idx}`,
+        }));
+      });
     },
     []
   );
 
+  const addIncentive = useCallback(
+    (incentive: BetterIncentive) => {
+      const incWithId = {
+        ...incentive,
+        id: incentive.id || `inc-${incentive.betterId}-${incentive.poolId}-${incentive.bonusType}-${Date.now()}`,
+      };
+      setIncentivesNormalized(prev => [...prev, incWithId]);
+    },
+    [setIncentivesNormalized]
+  );
+
   const claimIncentive = useCallback(
-    (incentiveId: number) => {
+    (incentiveId: string | number) => {
       setIncentives(prev =>
-        prev.map((inc, idx) =>
-          idx === incentiveId
+        prev.map((inc, idx) => {
+          const isMatch = inc.id !== undefined ? inc.id === incentiveId : idx === incentiveId;
+          return isMatch
             ? { ...inc, status: 'claimed', claimedAt: Date.now() }
-            : inc
-        )
+            : inc;
+        })
       );
     },
     []

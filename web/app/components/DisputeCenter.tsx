@@ -7,12 +7,17 @@ import { AlertCircle, Vote, TrendingUp, Lock } from 'lucide-react';
 interface DisputeCenterProps {
   poolId?: number;
   userId?: string;
+  /** Voter's STX balance. Used to calculate voting power and validate eligibility.
+   *  Defaults to 100 STX until wallet integration supplies the real value. */
+  voterBalance?: number;
 }
 
-export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
-  const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted } = useDisputes();
+export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: DisputeCenterProps) {
+  const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted, addVote } = useDisputes();
   const [selectedTab, setSelectedTab] = useState<'active' | 'resolved'>('active');
   const [selectedDispute, setSelectedDispute] = useState<string | null>(null);
+  const [voteError, setVoteError] = useState<string | null>(null);
+  const [votingDisputeId, setVotingDisputeId] = useState<string | null>(null);
 
   if (!poolId) {
     return (
@@ -26,6 +31,22 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
   const poolDisputes = getPoolDisputes(poolId);
   const activeDisputes = poolDisputes.filter(d => d.status === 'active' || d.status === 'voting');
   const resolvedDisputes = poolDisputes.filter(d => d.status === 'resolved');
+
+  const handleVote = (e: React.MouseEvent, disputeId: string, vote: boolean) => {
+    // Prevent the card's onClick from toggling collapse while voting
+    e.stopPropagation();
+    if (!userId) return;
+
+    setVoteError(null);
+    setVotingDisputeId(disputeId);
+    try {
+      addVote(disputeId, userId, vote, voterBalance);
+    } catch (err) {
+      setVoteError(err instanceof Error ? err.message : 'Failed to cast vote');
+    } finally {
+      setVotingDisputeId(null);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -160,15 +181,31 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
 
                         {/* Vote Button */}
                         {userId && !userVoted && (
-                          <div className="flex gap-2">
-                            <button className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded transition-all">
-                              <Vote className="w-4 h-4 inline mr-1" />
-                              Uphold
-                            </button>
-                            <button className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded transition-all">
-                              <Vote className="w-4 h-4 inline mr-1" />
-                              Reject
-                            </button>
+                          <div className="space-y-2">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => handleVote(e, dispute.id, true)}
+                                disabled={votingDisputeId === dispute.id}
+                                className="flex-1 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded transition-all"
+                              >
+                                <Vote className="w-4 h-4 inline mr-1" />
+                                Uphold
+                              </button>
+                              <button
+                                onClick={(e) => handleVote(e, dispute.id, false)}
+                                disabled={votingDisputeId === dispute.id}
+                                className="flex-1 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded transition-all"
+                              >
+                                <Vote className="w-4 h-4 inline mr-1" />
+                                Reject
+                              </button>
+                            </div>
+                            {voteError && selectedDispute === dispute.id && (
+                              <p className="text-xs text-red-400 text-center flex items-center justify-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                {voteError}
+                              </p>
+                            )}
                           </div>
                         )}
 

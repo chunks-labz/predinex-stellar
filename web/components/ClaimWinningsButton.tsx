@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useClaimWinnings } from '@/app/lib/hooks/useClaimWinnings';
-import { useWallet } from '../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { Loader2, Coins } from 'lucide-react';
 
 interface ClaimWinningsButtonProps {

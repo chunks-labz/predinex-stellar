@@ -6,7 +6,7 @@ import SettledPoolSummary from '../../app/components/SettledPoolSummary';
 import type { Pool } from '../../app/lib/stacks-api';
 
 // Wallet mock — component doesn't use it, but providers need it
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(() => ({
     chain: 'stacks', isConnected: false, isLoading: false,
     address: null, connect: vi.fn(), disconnect: vi.fn(),

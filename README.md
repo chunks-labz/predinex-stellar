@@ -170,3 +170,9 @@ cargo test
 ## 📄 License
 
 This project is licensed under the ISC License.
+
+---
+
+## 🔒 Security
+
+For information about reporting security vulnerabilities, please see our [Security Policy](./SECURITY.md).

@@ -1,24 +1,26 @@
-'use client';
+"use client";
 
-import { useCallback, useState } from 'react';
-import { useToast } from '@/providers/ToastProvider';
-import { predinexContract } from '../adapters/predinex-contract';
-import { invalidateOnClaimWinnings } from '../cache-invalidation';
-import { useWallet } from '../../components/WalletAdapterProvider';
-import { TxStage } from '../soroban-transaction-service';
-import { notifyBrowserEvent } from '../notifications';
+import { useCallback, useState } from "react";
+import { useToast } from "@/providers/ToastProvider";
+import { useTransactionToast } from "@/lib/hooks/useTransactionToast";
+import { predinexContract } from "../adapters/predinex-contract";
+import { invalidateOnClaimWinnings } from "../cache-invalidation";
+import { useWallet } from "@/components/WalletAdapterProvider";
+import { TxStage } from "../soroban-transaction-service";
+import { notifyBrowserEvent } from "../notifications";
 
 /** Maximum pools the contract's `claim_all_winnings` accepts in one batch. */
 export const CLAIM_ALL_MAX_POOLS = 20;
 
-export type ClaimAllPoolStatus = 'pending' | 'claiming' | 'claimed' | 'skipped';
+export type ClaimAllPoolStatus = "pending" | "claiming" | "claimed" | "skipped";
 
 export interface ClaimAllPoolState {
   poolId: number;
   status: ClaimAllPoolStatus;
 }
 
-export type ClaimAllOverallStatus = 'idle' | 'claiming' | 'success' | 'partial' | 'failed';
+export type ClaimAllOverallStatus =
+  "idle" | "claiming" | "success" | "partial" | "failed";
 
 export interface ClaimAllState {
   status: ClaimAllOverallStatus;
@@ -30,7 +32,7 @@ export interface ClaimAllState {
 }
 
 const emptyState: ClaimAllState = {
-  status: 'idle',
+  status: "idle",
   pools: [],
   claimedCount: 0,
 };
@@ -47,15 +49,22 @@ const emptyState: ClaimAllState = {
 export function useClaimAll(userAddress?: string | null) {
   const wallet = useWallet();
   const { showToast } = useToast();
+  const {
+    onStageChange: onTransactionStageChange,
+    showError,
+    showSuccess,
+    dismiss,
+  } = useTransactionToast();
   const [state, setState] = useState<ClaimAllState>(emptyState);
-  const [feePrompt, setFeePrompt] = useState<
-    { feeStroops: string; resolve: (v: boolean) => void } | null
-  >(null);
-  const [stage, setStage] = useState<TxStage>('idle');
+  const [feePrompt, setFeePrompt] = useState<{
+    feeStroops: string;
+    resolve: (v: boolean) => void;
+  } | null>(null);
+  const [stage, setStage] = useState<TxStage>("idle");
 
   const reset = useCallback(() => {
     setState(emptyState);
-    setStage('idle');
+    setStage("idle");
     setFeePrompt(null);
   }, []);
 
@@ -67,26 +76,32 @@ export function useClaimAll(userAddress?: string | null) {
         return;
       }
 
-      setStage('idle');
+      setStage("idle");
       setState({
-        status: 'claiming',
+        status: "claiming",
         claimedCount: 0,
-        pools: batch.map((poolId) => ({ poolId, status: 'claiming' })),
+        pools: batch.map((poolId) => ({ poolId, status: "claiming" })),
       });
 
       try {
-        const { txHash, claimedPoolIds } = await predinexContract.claimAllWinningsSoroban({
-          wallet,
-          poolIds: batch,
-          onStageChange: setStage,
-          onFeeEstimated: (fee) =>
-            new Promise<boolean>((resolve) => {
-              setFeePrompt({ feeStroops: fee, resolve });
-            }),
-        });
+        const { txHash, claimedPoolIds } =
+          await predinexContract.claimAllWinningsSoroban({
+            wallet,
+            poolIds: batch,
+            onStageChange: (s) => {
+              setStage(s);
+              onTransactionStageChange(s);
+            },
+            onFeeEstimated: (fee) =>
+              new Promise<boolean>((resolve) => {
+                setFeePrompt({ feeStroops: fee, resolve });
+              }),
+          });
 
         if (userAddress) {
-          batch.forEach((poolId) => invalidateOnClaimWinnings({ poolId, userAddress }));
+          batch.forEach((poolId) =>
+            invalidateOnClaimWinnings({ poolId, userAddress }),
+          );
         }
 
         // The contract may pay out only a subset (it skips non-claimable pools),
@@ -98,44 +113,44 @@ export function useClaimAll(userAddress?: string | null) {
         const isPartial = claimedCount > 0 && claimedCount < batch.length;
 
         setState({
-          status: isPartial ? 'partial' : 'success',
+          status: isPartial ? "partial" : "success",
           txId: txHash,
           claimedCount,
           pools: batch.map((poolId) => ({
             poolId,
-            status: claimed.has(poolId) ? 'claimed' : 'skipped',
+            status: claimed.has(poolId) ? "claimed" : "skipped",
           })),
         });
-        notifyBrowserEvent('Claim All submitted', {
-          body: `Claimed winnings for ${claimedCount} pool${claimedCount === 1 ? '' : 's'}.`,
-          tag: 'predinex-claim-all',
+        notifyBrowserEvent("Claim All submitted", {
+          body: `Claimed winnings for ${claimedCount} pool${claimedCount === 1 ? "" : "s"}.`,
+          tag: "predinex-claim-all",
         });
-        showToast(
-          isPartial
-            ? `Claimed ${claimedCount} of ${batch.length} pools.`
-            : `Claimed winnings for ${claimedCount} pools!`,
-          isPartial ? 'info' : 'success'
-        );
+        const successMsg = isPartial
+          ? `Claimed ${claimedCount} of ${batch.length} pools.`
+          : `Claimed winnings for ${claimedCount} pools!`;
+        showSuccess(successMsg);
         onSuccess?.();
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to claim winnings';
+        const message =
+          error instanceof Error ? error.message : "Failed to claim winnings";
         setState((prev) => ({
           ...prev,
-          status: 'failed',
+          status: "failed",
           error: message,
-          pools: prev.pools.map((p) => ({ ...p, status: 'pending' })),
+          pools: prev.pools.map((p) => ({ ...p, status: "pending" })),
         }));
-        if (message !== 'Transaction cancelled by user') {
-          showToast(message, 'error');
+        if (message !== "Transaction cancelled by user") {
+          showError(message);
         } else {
-          showToast('Claim All transaction cancelled', 'info');
+          dismiss();
+          showToast("Claim All transaction cancelled", "info");
         }
       } finally {
-        setStage('idle');
+        setStage("idle");
         setFeePrompt(null);
       }
     },
-    [showToast, userAddress, wallet]
+    [showToast, userAddress, wallet],
   );
 
   return { state, claimAll, reset, feePrompt, setFeePrompt, stage, setStage };

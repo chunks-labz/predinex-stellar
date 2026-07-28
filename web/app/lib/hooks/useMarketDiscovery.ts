@@ -38,6 +38,8 @@ interface UseMarketDiscoveryState {
   setMaxVolume: (maxVolume: string) => void;
   setTimeRange: (timeRange: MarketFilters['timeRange']) => void;
   setSortBy: (sortBy: MarketFilters['sortBy']) => void;
+  /** Batch-replaces all filter dimensions at once. Used by preset loading to avoid multiple re-renders. */
+  setFilters: (filters: MarketFilters) => void;
   resetFilters: () => void;
   setPage: (page: number) => void;
   retry: () => void;
@@ -207,6 +209,11 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     updateFilters({ sortBy: value });
   }, [updateFilters]);
 
+  const setFilters = useCallback((next: MarketFilters) => {
+    setFiltersState(normalizeMarketFilters(next));
+    setCurrentPage(1);
+  }, []);
+
   const resetFilters = useCallback(() => {
     setFiltersState({ ...DEFAULT_MARKET_FILTERS });
     setCurrentPage(1);
@@ -241,6 +248,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     setMaxVolume,
     setTimeRange,
     setSortBy,
+    setFilters,
     resetFilters,
     setPage,
     retry,
