@@ -103,6 +103,33 @@ jobs:
           echo "Optimizing $UNOPTIMIZED"
           stellar contract optimize --wasm "$UNOPTIMIZED"
 
+      - name: Verify WASM size
+        # Soroban enforces a hard 64 KiB (65536 bytes) limit on deployed
+        # contract WASM. Fail fast here so we never burn mainnet XLM
+        # attempting to deploy an over-size binary. (#836)
+        working-directory: ./contracts/predinex
+        run: |
+          set -euo pipefail
+          MAX_WASM_BYTES=65536  # 64 KiB — Soroban hard limit
+
+          WASM_FILE=$(find target/wasm32v1-none/release -maxdepth 1 -name '*.optimized.wasm' | head -n1)
+          if [ -z "$WASM_FILE" ]; then
+            echo "::error::no optimized wasm found after optimization step"
+            exit 1
+          fi
+
+          WASM_SIZE=$(stat --format='%s' "$WASM_FILE")
+          echo "Optimized WASM size: $WASM_SIZE bytes (limit: $MAX_WASM_BYTES bytes / 64 KiB)"
+
+          if [ "$WASM_SIZE" -gt "$MAX_WASM_BYTES" ]; then
+            OVER=$(( WASM_SIZE - MAX_WASM_BYTES ))
+            echo "::error::Optimized WASM ($WASM_SIZE bytes) exceeds the Soroban 64 KiB limit by $OVER bytes. Reduce contract size before deploying."
+            exit 1
+          fi
+
+          PCT=$(awk "BEGIN { printf \"%.1f\", ($WASM_SIZE / $MAX_WASM_BYTES) * 100 }")
+          echo "✅ WASM size check passed — $WASM_SIZE / $MAX_WASM_BYTES bytes (${PCT}% of limit)"
+
       - name: Upload optimized WASM artifact
         uses: actions/upload-artifact@v4
         with:
