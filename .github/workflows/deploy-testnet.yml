@@ -149,14 +149,8 @@ jobs:
             --network testnet \
             --source deployer)
           echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
+          echo "deploy_tx=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
           echo "Deployed contract: $CONTRACT_ID"
-
-          DEPLOY_TX=$(stellar contract deploy \
-            --wasm "$WASM_PATH" \
-            --network testnet \
-            --source deployer \
-            --print-tx-hash 2>/dev/null || echo "")
-          echo "deploy_tx=${DEPLOY_TX}" >> "$GITHUB_OUTPUT"
 
           TREASURY="${{ steps.deployer.outputs.treasury }}"
           echo "treasury=$TREASURY" >> "$GITHUB_OUTPUT"
