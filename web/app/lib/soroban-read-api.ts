@@ -12,6 +12,7 @@
  */
 
 import { getRuntimeConfig } from './runtime-config';
+import { fetchHorizon } from './horizon-client';
 import type { Pool, UserBetData } from './stacks-api';
 
 // ---------------------------------------------------------------------------
@@ -215,7 +216,7 @@ async function simulateContractRead(
   };
 
   try {
-    const response = await fetch(rpcUrl, {
+    const response = await fetchHorizon(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
