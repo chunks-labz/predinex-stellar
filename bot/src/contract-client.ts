@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Read-only Soroban contract client.
  *
  * Uses simulateTransaction to call view functions:
@@ -20,12 +20,13 @@ import {
 import type { BotConfig } from "./config.js";
 import type { Pool, PoolStatus } from "./types.js";
 import { logger } from "./logger.js";
+import { withRetry } from "./retry.js";
 
 /** Maximum ledger sequence validity window for simulation txns (5 min at ~5s/ledger) */
 const SIMULATE_TIMEOUT_SECS = 60;
 
 /**
- * Builds and simulates a read-only Soroban call.
+ * Builds and simulates a read-only Soroban call with retry logic for transient RPC errors.
  * Returns the deserialized return value or throws on error.
  */
 async function simulateContractCall(
@@ -36,33 +37,50 @@ async function simulateContractCall(
   sourcePublicKey: string,
   functionName: string,
   args: xdr.ScVal[],
+  config: BotConfig,
 ): Promise<unknown> {
-  const sourceAccount = await server.getAccount(sourcePublicKey);
+  return withRetry(
+    async () => {
+      const sourceAccount = await server.getAccount(sourcePublicKey);
 
-  const contract = new Contract(contractId);
-  const tx = new TransactionBuilder(sourceAccount, {
-    fee: "100",
-    networkPassphrase,
-  })
-    .addOperation(contract.call(functionName, ...args))
-    .setTimeout(SIMULATE_TIMEOUT_SECS)
-    .build();
+      const contract = new Contract(contractId);
+      const tx = new TransactionBuilder(sourceAccount, {
+        fee: "100",
+        networkPassphrase,
+      })
+        .addOperation(contract.call(functionName, ...args))
+        .setTimeout(SIMULATE_TIMEOUT_SECS)
+        .build();
 
-  const result = await server.simulateTransaction(tx);
+      const result = await server.simulateTransaction(tx);
 
-  if (rpc.Api.isSimulationError(result)) {
-    throw new Error(
-      `Simulation error for ${functionName}: ${result.error}`,
-    );
-  }
+      if (rpc.Api.isSimulationError(result)) {
+        throw new Error(
+          `Simulation error for ${functionName}: ${result.error}`,
+        );
+      }
 
-  if (!rpc.Api.isSimulationSuccess(result) || !result.result) {
-    throw new Error(
-      `Simulation returned no result for ${functionName}`,
-    );
-  }
+      if (!rpc.Api.isSimulationSuccess(result) || !result.result) {
+        throw new Error(
+          `Simulation returned no result for ${functionName}`,
+        );
+      }
 
-  return scValToNative(result.result.retval);
+      return scValToNative(result.result.retval);
+    },
+    {
+      maxRetries: config.maxRetries,
+      baseDelayMs: config.retryBaseDelayMs,
+      label: `simulateContractCall [${functionName}]`,
+      shouldRetry: (err) => {
+        const msg = String(err);
+        return (
+          !msg.includes("Simulation error for") &&
+          !msg.includes("Simulation returned no result")
+        );
+      },
+    },
+  );
 }
 
 /**
@@ -75,8 +93,10 @@ export class ContractClient {
   private readonly contractId: string;
   /** Public key used as the simulated source — does not need funds for reads */
   private readonly sourcePublicKey: string;
+  private readonly config: BotConfig;
 
   constructor(config: BotConfig) {
+    this.config = config;
     this.server = new rpc.Server(config.rpcUrl, {
       allowHttp: config.allowHttp,
     });
@@ -98,6 +118,7 @@ export class ContractClient {
       this.sourcePublicKey,
       "get_pool_count",
       [],
+      this.config,
     );
     return Number(result as bigint | number);
   }
@@ -121,6 +142,7 @@ export class ContractClient {
         nativeToScVal(startId, { type: "u32" }),
         nativeToScVal(Math.min(count, 100), { type: "u32" }),
       ],
+      this.config,
     );
 
     // scValToNative returns an array of pool objects or nulls

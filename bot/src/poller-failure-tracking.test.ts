@@ -29,6 +29,7 @@ vi.mock("./contract-client.js", () => ({
 vi.mock("./executor.js", () => ({
   Executor: class {
     settleAll = mocks.settleAll;
+    setSignal = vi.fn();
   },
 }));
 
