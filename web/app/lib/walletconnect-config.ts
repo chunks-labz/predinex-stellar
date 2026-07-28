@@ -1,6 +1,6 @@
 /**
  * WalletConnect Configuration
- * Enhanced configuration for Stacks wallet integration
+ * Configuration for Stellar wallet integration via WalletConnect
  */
 
 export const WALLETCONNECT_CONFIG = {
@@ -45,14 +45,14 @@ export const WALLETCONNECT_CONFIG = {
     },
   },
 
-  // Supported wallet methods
+  // Stellar-compatible WalletConnect RPC methods.
+  // 'stellar_signAndSubmitXDR' covers transaction signing + broadcast;
+  // 'stellar_signXDR' covers offline signing (wallet returns signed XDR to the app).
+  // These match the SEP-43 / Stellar WalletConnect standard used by wallets
+  // such as Freighter, Lobstr, and xBull.
   methods: [
-    'stx_call_read_only',
-    'stx_call_contract_function',
-    'stx_transfer',
-    'stx_sign_message',
-    'stx_get_accounts',
-    'stx_get_balance',
+    'stellar_signAndSubmitXDR',
+    'stellar_signXDR',
   ],
 
   // Supported wallet events
