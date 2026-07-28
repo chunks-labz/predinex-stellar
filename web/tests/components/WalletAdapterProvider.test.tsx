@@ -68,7 +68,18 @@ describe('WalletAdapterProvider', () => {
     expect(screen.getByTestId('address').textContent).toBe('none');
   });
 
-  it('calls connect() on mount when a persisted address exists and Freighter is installed', async () => {
+  it('calls connect() on mount when a persisted connection flag exists and Freighter is installed', async () => {
+    localStorage.setItem('predinex:wallet:connected', 'true');
+    vi.mocked(isFreighterInstalled).mockReturnValue(true);
+
+    renderWithProvider();
+
+    await waitFor(() => {
+      expect(mockConnect).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('calls connect() on mount when legacy persisted address exists and purges it', async () => {
     localStorage.setItem('predinex:wallet:address', 'GCTEST123');
     vi.mocked(isFreighterInstalled).mockReturnValue(true);
 
@@ -80,7 +91,7 @@ describe('WalletAdapterProvider', () => {
   });
 
   it('does NOT call connect() on mount when Freighter is NOT installed', async () => {
-    localStorage.setItem('predinex:wallet:address', 'GCTEST123');
+    localStorage.setItem('predinex:wallet:connected', 'true');
     vi.mocked(isFreighterInstalled).mockReturnValue(false);
 
     renderWithProvider();
@@ -90,7 +101,7 @@ describe('WalletAdapterProvider', () => {
     expect(mockConnect).not.toHaveBeenCalled();
   });
 
-  it('persists address in localStorage when state patch includes an address', async () => {
+  it('persists connected flag and NOT plaintext address in localStorage when state patch includes an address', async () => {
     renderWithProvider();
     await act(async () => {});
 
@@ -99,12 +110,14 @@ describe('WalletAdapterProvider', () => {
       mockStateCallback?.({ address: 'GCABC456', isConnected: true, isLoading: false });
     });
 
-    expect(localStorage.getItem('predinex:wallet:address')).toBe('GCABC456');
+    expect(localStorage.getItem('predinex:wallet:connected')).toBe('true');
+    expect(localStorage.getItem('predinex:wallet:address')).toBeNull();
     expect(screen.getByTestId('address').textContent).toBe('GCABC456');
     expect(screen.getByTestId('connected').textContent).toBe('true');
   });
 
   it('clears localStorage when disconnect() is called', async () => {
+    localStorage.setItem('predinex:wallet:connected', 'true');
     localStorage.setItem('predinex:wallet:address', 'GCABC456');
     renderWithProvider();
     await act(async () => {});
@@ -116,10 +129,12 @@ describe('WalletAdapterProvider', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'disconnect' }));
 
+    expect(localStorage.getItem('predinex:wallet:connected')).toBeNull();
     expect(localStorage.getItem('predinex:wallet:address')).toBeNull();
   });
 
   it('clears localStorage when adapter patches address to null', async () => {
+    localStorage.setItem('predinex:wallet:connected', 'true');
     localStorage.setItem('predinex:wallet:address', 'GCABC456');
     renderWithProvider();
     await act(async () => {});
@@ -128,11 +143,13 @@ describe('WalletAdapterProvider', () => {
       mockStateCallback?.({ address: null, isConnected: false });
     });
 
+    expect(localStorage.getItem('predinex:wallet:connected')).toBeNull();
     expect(localStorage.getItem('predinex:wallet:address')).toBeNull();
     expect(screen.getByTestId('address').textContent).toBe('none');
   });
 
-  it('removes stale persisted address when connect() rejects', async () => {
+  it('removes stale persisted connection flag when connect() rejects', async () => {
+    localStorage.setItem('predinex:wallet:connected', 'true');
     localStorage.setItem('predinex:wallet:address', 'GCSTALE');
     vi.mocked(isFreighterInstalled).mockReturnValue(true);
     mockConnect.mockRejectedValue(new Error('extension rejected'));
@@ -140,6 +157,7 @@ describe('WalletAdapterProvider', () => {
     renderWithProvider();
 
     await waitFor(() => {
+      expect(localStorage.getItem('predinex:wallet:connected')).toBeNull();
       expect(localStorage.getItem('predinex:wallet:address')).toBeNull();
     });
   });

@@ -3,7 +3,8 @@
 import { ReactNode, createContext, useContext, useEffect, useRef, useState } from 'react';
 import { createFreighterAdapter, isFreighterInstalled, FreighterWalletClient } from '@/app/lib/freighter-adapter';
 
-const STORAGE_KEY = 'predinex:wallet:address';
+const STORAGE_KEY = 'predinex:wallet:connected';
+const LEGACY_STORAGE_KEY = 'predinex:wallet:address';
 
 /**
  * Wallet context value exposed to consumers.
@@ -30,9 +31,11 @@ export function WalletAdapterProvider({ children }: { children: ReactNode }) {
       if (patch.address !== undefined) {
         setAddress(patch.address);
         if (patch.address) {
-          localStorage.setItem(STORAGE_KEY, patch.address);
+          localStorage.setItem(STORAGE_KEY, 'true');
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
         } else {
           localStorage.removeItem(STORAGE_KEY);
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
         }
       }
       if (patch.isConnected !== undefined) setIsConnected(patch.isConnected ?? false);
@@ -40,10 +43,11 @@ export function WalletAdapterProvider({ children }: { children: ReactNode }) {
     });
     adapterRef.current = adapter;
 
-    const persisted = localStorage.getItem(STORAGE_KEY);
+    const persisted = localStorage.getItem(STORAGE_KEY) === 'true' || localStorage.getItem(LEGACY_STORAGE_KEY) !== null;
     if (persisted && isFreighterInstalled()) {
       adapter.connect().catch(() => {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
       });
     }
   }, []);
@@ -52,6 +56,7 @@ export function WalletAdapterProvider({ children }: { children: ReactNode }) {
   const disconnect = () => {
     adapterRef.current?.disconnect();
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
   };
 
   // Delegate signing to the adapter so context satisfies FreighterWalletClient
