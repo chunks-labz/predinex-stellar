@@ -17,13 +17,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: contracts/predinex
 
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
       - name: Run Fuzz Harness
+        working-directory: ./contracts/predinex
         run: |
-          cargo test --manifest-path contracts/predinex/Cargo.toml -- fuzz_
+          cargo fuzz --version || true
+          cargo test --features testutils -- fuzz_
