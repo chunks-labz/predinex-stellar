@@ -121,16 +121,16 @@ vi.mock('../../app/lib/adapters/predinex-read-api', () => ({
   },
 }));
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: mockUseWallet,
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/Navbar', () => ({
+vi.mock('@/components/Navbar', () => ({
   default: () => <nav data-testid="navbar" />,
 }));
 
-vi.mock('../../app/components/AuthGuard', () => ({
+vi.mock('@/components/AuthGuard', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -146,7 +146,7 @@ vi.mock('../../components/PortfolioOverview', () => ({
   default: () => <div data-testid="portfolio-overview" />,
 }));
 
-vi.mock('../../app/components/BettingSection', () => ({
+vi.mock('@/components/BettingSection', () => ({
   default: () => <div data-testid="betting-section" />,
 }));
 

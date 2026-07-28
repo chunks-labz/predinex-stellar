@@ -11,6 +11,11 @@ on:
         description: 'Type DEPLOY to confirm mainnet deployment'
         required: true
         type: string
+      run_lifecycle_smoke:
+        description: 'Run the full place_bet -> settle -> claim smoke cycle (uses real XLM, a pre-funded bettor, and a ~5min wait)'
+        required: false
+        default: false
+        type: boolean
 
 # Only deploy from the canonical upstream repo. Forks that pull this
 # workflow do not have the secrets configured and would fail noisily.
@@ -206,7 +211,8 @@ jobs:
             --source deployer \
             -- initialize \
             --token "$XLM_TOKEN_MAINNET" \
-            --treasury_recipient "$TREASURY")
+            --treasury_recipient "$TREASURY" \
+            --admin "$TREASURY")
           echo "init_tx=$INIT_TX" >> "$GITHUB_OUTPUT"
           echo "Initialized contract."
 
@@ -262,6 +268,10 @@ jobs:
       create_tx: ${{ steps.run.outputs.create_tx }}
       pool_count_before: ${{ steps.run.outputs.before }}
       pool_count_after: ${{ steps.run.outputs.after }}
+      pool_id: ${{ steps.run.outputs.pool_id }}
+      bet_placed: ${{ steps.run.outputs.bet }}
+      settled: ${{ steps.run.outputs.settle }}
+      claim_amount: ${{ steps.run.outputs.claim }}
     steps:
       - uses: actions/checkout@v4
 
@@ -296,6 +306,24 @@ jobs:
             --secret-key "$STELLAR_MAINNET_SECRET_KEY" \
             --network mainnet
 
+      # The full betting lifecycle on mainnet spends real XLM and needs a second
+      # funded account (there is no friendbot on mainnet). It is therefore opt-in
+      # via the `run_lifecycle_smoke` input and uses a pre-funded bettor key
+      # supplied through the STELLAR_MAINNET_BETTOR_SECRET_KEY secret.
+      - name: Register bettor key (optional lifecycle smoke)
+        if: github.event.inputs.run_lifecycle_smoke == 'true'
+        env:
+          STELLAR_MAINNET_BETTOR_SECRET_KEY: ${{ secrets.STELLAR_MAINNET_BETTOR_SECRET_KEY }}
+        run: |
+          if [ -z "$STELLAR_MAINNET_BETTOR_SECRET_KEY" ]; then
+            echo "::error::run_lifecycle_smoke=true but STELLAR_MAINNET_BETTOR_SECRET_KEY is not configured. Add a pre-funded bettor key or run with the lifecycle smoke disabled."
+            exit 1
+          fi
+          stellar keys add bettor \
+            --secret-key "$STELLAR_MAINNET_BETTOR_SECRET_KEY" \
+            --network mainnet
+          echo "Bettor address: $(stellar keys address bettor)"
+
       - name: Run smoke checks
         id: run
         env:
@@ -303,6 +331,7 @@ jobs:
           TREASURY: ${{ needs.deploy.outputs.treasury }}
           INPUT_GIT_TAG: ${{ github.event.inputs.git_tag }}
           SMOKE_COMMIT: ${{ github.sha }}
+          RUN_LIFECYCLE: ${{ github.event.inputs.run_lifecycle_smoke }}
         run: |
           set -euo pipefail
           BEFORE=$(stellar contract invoke \
@@ -313,7 +342,9 @@ jobs:
           echo "Pool count before: $BEFORE"
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
 
-          CREATE_TX=$(stellar contract invoke \
+          # Minimum allowed pool duration (300s) so the optional lifecycle smoke
+          # can settle within the job. create_pool returns the new pool id.
+          POOL_ID=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
             --source deployer \
@@ -323,9 +354,12 @@ jobs:
             --description "Automated mainnet smoke test from tag $INPUT_GIT_TAG commit $SMOKE_COMMIT" \
             --outcome_a "Yes" \
             --outcome_b "No" \
-            --duration 600)
-          echo "Create tx: $CREATE_TX"
-          echo "create_tx=$CREATE_TX" >> "$GITHUB_OUTPUT"
+            --duration 300 \
+            --amount 10000000)
+          POOL_ID=$(echo "$POOL_ID" | tr -d '"')
+          echo "Created pool id: $POOL_ID"
+          echo "pool_id=$POOL_ID" >> "$GITHUB_OUTPUT"
+          echo "create_tx=$POOL_ID" >> "$GITHUB_OUTPUT"
 
           AFTER=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
@@ -337,6 +371,64 @@ jobs:
 
           if [ "$AFTER" = "$BEFORE" ]; then
             echo "::error::create_pool did not increment pool count (before=$BEFORE, after=$AFTER)"
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          if [ "$RUN_LIFECYCLE" != "true" ]; then
+            echo "Lifecycle smoke (place_bet -> settle -> claim) skipped. Enable it via the run_lifecycle_smoke input."
+            echo "bet=skipped" >> "$GITHUB_OUTPUT"
+            echo "settle=skipped" >> "$GITHUB_OUTPUT"
+            echo "claim=skipped" >> "$GITHUB_OUTPUT"
+            echo "passed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BETTOR=$(stellar keys address bettor)
+          echo "Bettor address: $BETTOR"
+
+          # place_bet — the bettor stakes on outcome 0 before the pool expires.
+          # The optional referrer argument is omitted (defaults to None).
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network mainnet \
+            --source bettor \
+            -- place_bet \
+            --user "$BETTOR" \
+            --pool_id "$POOL_ID" \
+            --outcome 0 \
+            --amount 2000000
+          echo "Placed bet of 2000000 stroops on outcome 0"
+          echo "bet=true" >> "$GITHUB_OUTPUT"
+
+          echo "Waiting 330s for pool $POOL_ID to expire before settling..."
+          sleep 330
+
+          # settle_pool — only the admin (the deployer) may settle.
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network mainnet \
+            --source deployer \
+            -- settle_pool \
+            --caller "$TREASURY" \
+            --pool_id "$POOL_ID" \
+            --winning_outcome 0
+          echo "Settled pool $POOL_ID with winning outcome 0"
+          echo "settle=true" >> "$GITHUB_OUTPUT"
+
+          # claim_winnings — the winning bettor claims; payout must be positive.
+          CLAIM=$(stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network mainnet \
+            --source bettor \
+            -- claim_winnings \
+            --user "$BETTOR" \
+            --pool_id "$POOL_ID")
+          CLAIM=$(echo "$CLAIM" | tr -d '"')
+          echo "Claimed winnings: $CLAIM stroops"
+          echo "claim=$CLAIM" >> "$GITHUB_OUTPUT"
+          if [ -z "$CLAIM" ] || [ "$CLAIM" -le 0 ]; then
+            echo "::error::claim_winnings returned a non-positive payout ($CLAIM)"
             echo "passed=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
@@ -393,6 +485,10 @@ jobs:
           CREATE_TX: ${{ needs.smoke.outputs.create_tx }}
           POOL_BEFORE: ${{ needs.smoke.outputs.pool_count_before }}
           POOL_AFTER: ${{ needs.smoke.outputs.pool_count_after }}
+          POOL_ID: ${{ needs.smoke.outputs.pool_id }}
+          BET_PLACED: ${{ needs.smoke.outputs.bet_placed }}
+          SETTLED: ${{ needs.smoke.outputs.settled }}
+          CLAIM_AMOUNT: ${{ needs.smoke.outputs.claim_amount }}
           GIT_TAG: ${{ github.event.inputs.git_tag }}
           REPORT_RUN_ID: ${{ github.run_id }}
           REPORT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -421,8 +517,11 @@ jobs:
             echo "| Contract ID | \`${CONTRACT_ID:-—}\` |"
             echo "| Deploy tx | \`${DEPLOY_TX:-—}\` |"
             echo "| Initialize tx | \`${INIT_TX:-—}\` |"
-            echo "| Smoke create_pool tx | \`${CREATE_TX:-—}\` |"
+            echo "| Smoke pool id | \`${POOL_ID:-${CREATE_TX:-—}}\` |"
             echo "| Pool count (before → after) | \`${POOL_BEFORE:-—} → ${POOL_AFTER:-—}\` |"
+            echo "| place_bet | \`${BET_PLACED:-—}\` |"
+            echo "| settle_pool | \`${SETTLED:-—}\` |"
+            echo "| claim_winnings (stroops) | \`${CLAIM_AMOUNT:-—}\` |"
             echo "| Workflow run | [$REPORT_RUN_ID]($REPORT_RUN_URL) |"
             echo ""
             if [ "$SMOKE_OUTCOME" != "success" ]; then
@@ -466,9 +565,7 @@ jobs:
           if [ "$SMOKE_OUTCOME" != "success" ]; then
             SMOKE_NOTE=" (smoke tests failed — verify manually before directing traffic)"
           fi
-          RELEASE_NOTES="Mainnet deployment of contract \`${CONTRACT_ID:-—}\`${SMOKE_NOTE}.
-
-Deployment artifact attached. See workflow run for full details."
+          RELEASE_NOTES="Mainnet deployment of contract \`${CONTRACT_ID:-—}\`${SMOKE_NOTE}. Deployment artifact attached. See workflow run for full details."
           gh release create "$GIT_TAG" \
             --title "Mainnet release $GIT_TAG" \
             --notes "$RELEASE_NOTES" \

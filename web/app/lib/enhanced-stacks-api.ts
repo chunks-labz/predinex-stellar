@@ -43,6 +43,8 @@ function logMarketDiscoveryNetworkOnce(): void {
  * Get total number of pools from the contract.
  * Retries up to 4 times with exponential backoff on transient failures.
  * Returns 0 and logs when all attempts are exhausted.
+ *
+ * @returns Total pool count, or 0 if all retries fail
  */
 export async function getPoolCount(): Promise<number> {
   try {
@@ -55,7 +57,7 @@ export async function getPoolCount(): Promise<number> {
         fetchCallReadOnlyFunction({
           contractAddress: cfg.contract.address,
           contractName: cfg.contract.name,
-          functionName: 'get-pool-count',
+          functionName: 'get_pool_count',
           functionArgs: [],
           senderAddress: cfg.contract.address,
           network,
@@ -75,6 +77,9 @@ export async function getPoolCount(): Promise<number> {
  * Get individual pool data with enhanced type safety.
  * Retries up to 4 times with exponential backoff on transient failures.
  * Returns null and logs when all attempts are exhausted.
+ *
+ * @param poolId - ID of the pool to fetch
+ * @returns The pool's data, or null if not found or all retries fail
  */
 export async function getEnhancedPool(poolId: number): Promise<PoolData | null> {
   try {
@@ -87,7 +92,7 @@ export async function getEnhancedPool(poolId: number): Promise<PoolData | null> 
         fetchCallReadOnlyFunction({
           contractAddress: cfg.contract.address,
           contractName: cfg.contract.name,
-          functionName: 'get-pool',
+          functionName: 'get_pool',
           functionArgs: [uintCV(poolId)],
           senderAddress: cfg.contract.address,
           network,
@@ -115,6 +120,7 @@ export async function getEnhancedPool(poolId: number): Promise<PoolData | null> 
       participantCount: Number(value['participant-count'] ?? value.participant_count ?? 0),
       assetType: typeof value['asset-type'] === 'string' ? value['asset-type'] : undefined,
       disputed: Boolean(value.disputed ?? value['is-disputed'] ?? false),
+      frozen: Boolean(value.frozen ?? value['is-frozen'] ?? value.status === 'Frozen'),
     };
   } catch (e) {
     log.error(`Failed to fetch pool ${poolId} after retries`, e);
@@ -126,6 +132,15 @@ export async function getEnhancedPool(poolId: number): Promise<PoolData | null> 
  * Get multiple pools efficiently using batch fetching.
  * Retries up to 4 times with exponential backoff on transient failures.
  * Falls back to individual fetching when the batch function is unavailable or returns unexpected data.
+ *
+ * @param startId - ID of the first pool in the range to fetch
+ * @param count - Number of pools to fetch starting from `startId`
+ * @returns Array of pool data for the requested range
+ *
+ * @example
+ * ```ts
+ * const pools = await getPoolsBatch(0, 20);
+ * ```
  */
 export async function getPoolsBatch(startId: number, count: number): Promise<PoolData[]> {
   try {
@@ -139,7 +154,7 @@ export async function getPoolsBatch(startId: number, count: number): Promise<Poo
         fetchCallReadOnlyFunction({
           contractAddress: cfg.contract.address,
           contractName: cfg.contract.name,
-          functionName: 'get-pools-batch',
+          functionName: 'get_pools_batch',
           functionArgs: [uintCV(startId), uintCV(count)],
           senderAddress: cfg.contract.address,
           network,
@@ -174,6 +189,7 @@ export async function getPoolsBatch(startId: number, count: number): Promise<Poo
           participantCount: Number(poolData['participant-count'] ?? poolData.participant_count ?? 0),
           assetType: typeof poolData['asset-type'] === 'string' ? poolData['asset-type'] : undefined,
           disputed: Boolean(poolData.disputed ?? poolData['is-disputed'] ?? false),
+          frozen: Boolean(poolData.frozen ?? poolData['is-frozen'] ?? poolData.status === 'Frozen'),
         });
       }
     }
@@ -251,12 +267,21 @@ async function getPoolsIndividually(
 
 /**
  * Fetch all pools with pagination support
+ *
+ * @param page - Zero-indexed page number to fetch
+ * @param pageSize - Number of pools per page
+ * @returns Pools for the requested page, sorted newest first
+ *
+ * @example
+ * ```ts
+ * const latest = await fetchAllPools(0, 50);
+ * ```
  */
 export async function fetchAllPools(page: number = 0, pageSize: number = 50): Promise<PoolData[]> {
   const totalCount = await getPoolCount();
   if (totalCount === 0) return [];
 
-  const startId = Math.max(0, totalCount - 1 - (page * pageSize));
+  const startId = Math.max(0, totalCount - (page * pageSize));
   const endId = Math.max(0, startId - pageSize + 1);
   const actualCount = startId - endId + 1;
 
@@ -270,6 +295,9 @@ export async function fetchAllPools(page: number = 0, pageSize: number = 50): Pr
 
 /**
  * Get pool statistics using enhanced contract function
+ *
+ * @param poolId - ID of the pool to get stats for
+ * @returns Total pool size and each outcome's percentage share, or null if unavailable
  */
 export async function getPoolStats(poolId: number): Promise<{
   totalPool: number;
@@ -283,7 +311,7 @@ export async function getPoolStats(poolId: number): Promise<{
     const result = await fetchCallReadOnlyFunction({
       contractAddress: cfg.contract.address,
       contractName: cfg.contract.name,
-      functionName: 'get-pool-stats',
+      functionName: 'get_pool_stats',
       functionArgs: [uintCV(poolId)],
       senderAddress: cfg.contract.address,
       network,

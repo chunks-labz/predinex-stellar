@@ -7,10 +7,38 @@ import { useI18n } from '@/app/lib/i18n';
 
 interface DashboardStatsSectionsProps {
   stats: DashboardStats;
+  isLoading?: boolean;
 }
 
-export function DashboardStatsSections({ stats }: DashboardStatsSectionsProps) {
+function StatCardSkeleton() {
+  return (
+    <div className="glass p-6 rounded-xl border border-border animate-pulse">
+      <div className="h-4 w-24 bg-muted/40 rounded mb-3" />
+      <div className="h-8 w-20 bg-muted/50 rounded" />
+    </div>
+  );
+}
+
+export function DashboardStatsSections({ stats, isLoading = false }: DashboardStatsSectionsProps) {
   const { t } = useI18n();
+
+  if (isLoading) {
+    return (
+      <div className="animate-fade-in" role="status" aria-busy="true">
+        <span className="sr-only">Loading dashboard stats…</span>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <StatCardSkeleton key={`top-${i}`} />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <StatCardSkeleton key={`bottom-${i}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

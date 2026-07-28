@@ -12,6 +12,9 @@
  */
 
 import { SUPPORTED_EVENT_SCHEMA_VERSION, type SorobanEventServiceConfig } from './soroban-event-service';
+import { createScopedLogger } from '@/app/lib/logger';
+
+const log = createScopedLogger('dispute-history');
 
 export type DisputeEventType = 'frozen' | 'disputed' | 'unfrozen' | 'resolved';
 

@@ -1,5 +1,9 @@
 # Frontend Utilities Library
 
+Shared, framework-agnostic helpers should live in [`../../lib`](../../lib) and
+be imported with `@/lib/...`. This directory is for App Router-specific data
+access, contract adapters, route state, and compatibility re-exports.
+
 This directory contains reusable utilities, hooks, and configurations for the Predinex frontend application.
 
 ## Files Overview

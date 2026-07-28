@@ -6,6 +6,8 @@
 import { UserBet, BetHistory, UserPortfolio, MarketStatistics, PlatformMetrics } from './dashboard-types';
 import { PoolData } from './market-types';
 import { getCurrentBlockHeight } from './market-utils';
+import { formatNumberCompact, formatPercentage, TOKEN_SYMBOL } from '@/lib/formatting';
+export { formatPercentage };
 
 /**
  * Calculates a consolidated user portfolio from a list of user bets.
@@ -54,24 +56,24 @@ export function calculatePortfolio(bets: UserBet[]): UserPortfolio {
  * @returns The estimated profit (total payout minus bet amount)
  */
 export function calculatePotentialWinnings(
-  betAmount: number,
-  totalPoolA: number,
-  totalPoolB: number,
+  betAmount: bigint,
+  totalPoolA: bigint,
+  totalPoolB: bigint,
   chosenOutcome: 'A' | 'B'
 ): number {
-  const totalPool = totalPoolA + totalPoolB;
-  if (totalPool === 0) return betAmount; // No other bets yet
+  const totalPool = Number(totalPoolA + totalPoolB);
+  if (totalPool === 0) return Number(betAmount);
 
-  const winningPool = chosenOutcome === 'A' ? totalPoolA : totalPoolB;
-  const losingPool = chosenOutcome === 'A' ? totalPoolB : totalPoolA;
+  const winningPool = chosenOutcome === 'A' ? Number(totalPoolA) : Number(totalPoolB);
+  const losingPool = chosenOutcome === 'A' ? Number(totalPoolB) : Number(totalPoolA);
 
-  if (winningPool === 0) return totalPool; // Only bet on this outcome
+  if (winningPool === 0) return totalPool;
 
-  // Calculate share of losing pool based on proportion of winning pool
-  const userShare = betAmount / (winningPool + betAmount);
-  const winnings = betAmount + (losingPool * userShare);
+  const b = Number(betAmount);
+  const userShare = b / (winningPool + b);
+  const winnings = b + (losingPool * userShare);
 
-  return Math.max(0, winnings - betAmount); // Potential profit
+  return Math.max(0, winnings - b);
 }
 
 /**
@@ -85,21 +87,21 @@ export function calculatePotentialWinnings(
  * @returns Total STX to be returned (principal + profit) or 0 if lost
  */
 export function calculateActualWinnings(
-  betAmount: number,
-  totalPoolA: number,
-  totalPoolB: number,
+  betAmount: bigint,
+  totalPoolA: bigint,
+  totalPoolB: bigint,
   chosenOutcome: 'A' | 'B',
   winningOutcome: 'A' | 'B'
 ): number {
-  if (chosenOutcome !== winningOutcome) return 0; // Lost bet
+  if (chosenOutcome !== winningOutcome) return 0;
 
-  const totalPool = totalPoolA + totalPoolB;
-  const winningPool = winningOutcome === 'A' ? totalPoolA : totalPoolB;
+  const totalPool = Number(totalPoolA + totalPoolB);
+  const winningPool = winningOutcome === 'A' ? Number(totalPoolA) : Number(totalPoolB);
 
-  if (winningPool === 0) return 0; // Should not happen
+  if (winningPool === 0) return 0;
 
-  // Calculate proportional share of total pool
-  const userShare = betAmount / winningPool;
+  const b = Number(betAmount);
+  const userShare = b / winningPool;
   const totalWinnings = totalPool * userShare;
 
   return Math.max(0, totalWinnings);
@@ -221,28 +223,15 @@ export function calculatePlatformMetrics(
  * Formats STX amounts into human-readable strings with K/M suffixes.
  * 
  * @param amount - The raw amount
- * @param currency - The currency symbol to append (default: 'STX')
+ * @param currency - The currency symbol to append
  * @returns Formatted string (e.g., "1.25M STX")
  */
-export function formatCurrency(amount: number, currency: string = 'STX'): string {
-  if (amount >= 1000000) {
-    return `${(amount / 1000000).toFixed(2)}M ${currency}`;
-  } else if (amount >= 1000) {
-    return `${(amount / 1000).toFixed(2)}K ${currency}`;
-  } else {
-    return `${amount.toLocaleString()} ${currency}`;
-  }
-}
+export function formatCurrency(amount: number, currency: string = TOKEN_SYMBOL): string {
+  const formatted = Math.abs(amount) >= 1000
+    ? formatNumberCompact(amount, 2)
+    : amount.toLocaleString();
 
-/**
- * Formats a number as a percentage string.
- * 
- * @param value - The numerical value (0-100)
- * @param decimals - Number of decimal places to include (default: 1)
- * @returns Formatted percentage string
- */
-export function formatPercentage(value: number, decimals: number = 1): string {
-  return `${value.toFixed(decimals)}%`;
+  return `${formatted} ${currency}`;
 }
 
 /**
@@ -259,7 +248,7 @@ export function formatProfitLoss(amount: number): {
 } {
   const isProfit = amount > 0;
   const isBreakeven = amount === 0;
-  const formatted = isBreakeven ? '±0 STX' : `${isProfit ? '+' : ''}${formatCurrency(Math.abs(amount))}`;
+  const formatted = isBreakeven ? `±0 ${TOKEN_SYMBOL}` : `${isProfit ? '+' : ''}${formatCurrency(Math.abs(amount))}`;
 
   return { formatted, isProfit, isBreakeven };
 }

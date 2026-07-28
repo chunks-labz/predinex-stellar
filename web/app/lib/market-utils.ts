@@ -15,6 +15,8 @@ import { getRuntimeConfig } from './runtime-config';
  */
 export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number): MarketStatus {
   if (pool.settled) return 'settled';
+  if (pool.disputed) return 'disputed';
+  if (pool.frozen) return 'frozen';
   if (currentBlockHeight > pool.expiry) return 'expired';
   return 'active';
 }
@@ -28,12 +30,12 @@ export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number
  * @returns Object with oddsA and oddsB (defaulting to 50/50 for empty pools)
  */
 export function calculateOdds(totalA: bigint, totalB: bigint): { oddsA: number; oddsB: number } {
-  const total = Number(totalA + totalB);
-  if (total === 0) return { oddsA: 50, oddsB: 50 };
+  const total = totalA + totalB;
+  if (total === BigInt(0)) return { oddsA: 50, oddsB: 50 };
 
   return {
-    oddsA: Math.round((Number(totalA) / total) * 100),
-    oddsB: Math.round((Number(totalB) / total) * 100)
+    oddsA: Math.round((Number(totalA) / Number(total)) * 100),
+    oddsB: Math.round((Number(totalB) / Number(total)) * 100)
   };
 }
 
@@ -246,7 +248,13 @@ export async function fetchCurrentBlockHeightLive(options?: {
 
     writeBlockHeightCache(height);
     return { height, warning: null };
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      // Expected: the timeout above intentionally aborts the request. The
+      // fallback cache already covers this case, so no warning is needed.
+      return { height: getCurrentBlockHeight(), warning: null };
+    }
+
     const fallbackHeight = getCurrentBlockHeight();
     const warning =
       fallbackHeight > 0

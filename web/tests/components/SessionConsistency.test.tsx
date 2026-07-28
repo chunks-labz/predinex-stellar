@@ -2,18 +2,18 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import Navbar from '../../app/components/Navbar';
-import AuthGuard from '../../app/components/AuthGuard';
-import BettingSection from '../../app/components/BettingSection';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
+import BettingSection from '@/components/BettingSection';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 
 // Mock all external dependencies
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/StacksProvider', () => ({
+vi.mock('@/components/StacksProvider', () => ({
   useStacks: vi.fn(() => ({
     userData: null,
     authenticate: vi.fn(),
@@ -31,7 +31,7 @@ vi.mock('../../providers/ToastProvider', () => ({
   ToastProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
-vi.mock('../../app/components/NetworkMismatchWarning', () => ({
+vi.mock('@/components/NetworkMismatchWarning', () => ({
   NetworkMismatchWarning: () => null,
   default: () => null,
 }));

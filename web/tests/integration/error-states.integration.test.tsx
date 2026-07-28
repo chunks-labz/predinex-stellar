@@ -19,7 +19,7 @@ import React from 'react';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderWithProviders } from '../../helpers/renderWithProviders';
+import { renderWithProviders } from '../helpers/renderWithProviders';
 
 import {
   ACTIVE_POOL,

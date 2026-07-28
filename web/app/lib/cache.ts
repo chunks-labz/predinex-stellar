@@ -10,7 +10,7 @@ interface CacheEntry<T> {
 }
 
 class Cache {
-  private store = new Map<string, CacheEntry<any>>();
+  private store = new Map<string, CacheEntry<unknown>>();
 
   /**
    * Set a value in cache with TTL

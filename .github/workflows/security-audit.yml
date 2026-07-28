@@ -6,6 +6,9 @@ on:
     - cron: '0 8 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   npm-audit:
     name: npm dependency audit
@@ -27,11 +30,7 @@ jobs:
         run: npm ci
 
       - name: Audit (high and critical only)
-        # --audit-level=high surfaces high/critical findings without blocking on moderate/low.
-        # The step is marked continue-on-error so unrelated PRs are never blocked;
-        # findings are still visible in the workflow summary.
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - name: Generate audit report
         run: npm audit --json > npm-audit-report.json || true
@@ -62,7 +61,6 @@ jobs:
 
       - name: Audit
         run: cargo audit
-        continue-on-error: true
 
       - name: Generate audit report
         run: cargo audit --json > cargo-audit-report.json || true

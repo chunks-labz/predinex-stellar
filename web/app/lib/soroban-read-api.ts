@@ -12,30 +12,52 @@
  */
 
 import { getRuntimeConfig } from './runtime-config';
-import { fetchHorizon } from './horizon-client';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('soroban-read-api');
 import type { Pool, UserBetData } from './stacks-api';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Runtime configuration for Soroban RPC read operations.
+ */
 export interface SorobanReadConfig {
+  /** Soroban RPC endpoint URL (e.g. `https://soroban-testnet.stellar.org`). */
   rpcUrl: string;
+  /** Deployed contract ID in `C...` strkey format. */
   contractId: string;
 }
 
+/**
+ * Result wrapper returned by single-pool Soroban reads.
+ */
 export interface PoolReadResult {
+  /** Normalized pool data, or `null` when the pool is missing or unreadable. */
   pool: Pool | null;
+  /** Human-readable error message when the read fails. */
   error?: string;
 }
 
+/**
+ * Result wrapper returned by user-bet Soroban reads.
+ */
 export interface UserBetReadResult {
+  /** User stake breakdown, or `null` when no bet exists or the read fails. */
   bet: UserBetData | null;
+  /** Human-readable error message when the read fails. */
   error?: string;
 }
 
+/**
+ * Per-pool minimum and maximum bet amounts enforced by the Soroban contract.
+ */
 export interface PoolBetLimits {
+  /** Minimum bet in raw token units (stroops). */
   minBet: number;
+  /** Maximum bet in raw token units (stroops); `0` may mean unlimited. */
   maxBet: number;
 }
 
@@ -490,6 +512,12 @@ function normalizePool(raw: RawSorobanPool | null, poolId: number): Pool | null 
       } else if (raw.status === 'Voided' || raw.status === 'Cancelled') {
         settled = true;
         status = 'settled';
+      } else if (raw.status === 'Frozen' || raw.status === 'frozen') {
+        settled = false;
+        status = 'frozen';
+      } else if (raw.status === 'Disputed' || raw.status === 'disputed') {
+        settled = true;
+        status = 'disputed';
       }
     } else if (typeof raw.status === 'object' && 'tag' in raw.status) {
       const tag = raw.status.tag;
@@ -499,8 +527,14 @@ function normalizePool(raw: RawSorobanPool | null, poolId: number): Pool | null 
       } else if (tag === 'Open') {
         settled = false;
         status = 'active';
-      } else if (tag === 'Voided' || tag === 'Cancelled' || tag === 'Frozen' || tag === 'Disputed') {
-        // These are terminal/frozen states - treat as settled for UI purposes
+      } else if (tag === 'Frozen') {
+        settled = false;
+        status = 'frozen';
+      } else if (tag === 'Disputed') {
+        settled = true;
+        status = 'disputed';
+      } else if (tag === 'Voided' || tag === 'Cancelled') {
+        // These are terminal states - treat as settled for UI purposes
         settled = true;
         status = 'settled';
       }
@@ -520,6 +554,7 @@ function normalizePool(raw: RawSorobanPool | null, poolId: number): Pool | null 
     winningOutcome,
     expiry: toNumber(raw.expiry),
     status,
+    participant_count: raw.participant_count ?? 0,
   };
 }
 
@@ -544,8 +579,17 @@ function normalizeUserBet(raw: RawSorobanUserBet | null): UserBetData | null {
 }
 
 /**
- * Get pool data from the Soroban contract.
- * Returns null if the pool doesn't exist or on error.
+ * Reads a single pool from the Soroban contract via `get_pool`.
+ *
+ * @param poolId - Numeric pool identifier (1-based in the Predinex contract).
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns {@link PoolReadResult} with normalized pool data or an error message.
+ *
+ * @example
+ * ```ts
+ * const { pool, error } = await getPoolFromSoroban(1);
+ * if (pool) console.log(pool.title);
+ * ```
  */
 export async function getPoolFromSoroban(
   poolId: number,
@@ -595,8 +639,20 @@ export async function getPoolFromSoroban(
 }
 
 /**
- * Fetch multiple pools in a single batch call via get_pools_batch.
- * Reduces RPC calls from N+1 to 2 (pool count + batch fetch).
+ * Reads a contiguous range of pools in one RPC call via `get_pools_batch`.
+ *
+ * Reduces round-trips from N individual reads to a single batch simulation.
+ *
+ * @param startId - First pool ID in the range (inclusive).
+ * @param count - Number of consecutive pools to fetch.
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns Array of normalized pools; shorter than `count` when some slots are empty.
+ *
+ * @example
+ * ```ts
+ * const total = await getPoolCountFromSoroban();
+ * const pools = await getPoolsBatchFromSoroban(1, total);
+ * ```
  */
 export async function getPoolsBatchFromSoroban(
   startId: number,
@@ -640,8 +696,12 @@ export async function getPoolsBatchFromSoroban(
 }
 
 /**
- * Get user bet data from the Soroban contract.
- * Returns null if no bet exists or on error.
+ * Reads a user's stake for a pool via `get_user_bet`.
+ *
+ * @param poolId - Numeric pool identifier.
+ * @param userAddress - Stellar account address (`G...` strkey).
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns {@link UserBetReadResult} with per-outcome amounts or an error message.
  */
 export async function getUserBetFromSoroban(
   poolId: number,
@@ -689,8 +749,11 @@ export async function getUserBetFromSoroban(
 }
 
 /**
- * Get per-pool bet limits from the Soroban contract.
- * Returns null if the pool doesn't exist or on error.
+ * Reads per-pool bet limits via `get_pool_bet_limits`.
+ *
+ * @param poolId - Numeric pool identifier.
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns Min/max bet limits, or `null` when the pool is missing or the read fails.
  */
 export async function getPoolBetLimitsFromSoroban(
   poolId: number,
@@ -745,7 +808,10 @@ export async function getPoolBetLimitsFromSoroban(
 }
 
 /**
- * Get the total pool count from the Soroban contract.
+ * Reads the total number of pools via `get_pool_count`.
+ *
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns Total pool count, or `0` when unconfigured or on RPC failure.
  */
 export async function getPoolCountFromSoroban(
   config?: SorobanReadConfig
@@ -780,6 +846,91 @@ export async function getPoolCountFromSoroban(
 }
 
 /**
+ * Reads the freeze admin address via `get_freeze_admin`.
+ *
+ * @param config - Optional RPC/contract override; defaults to `getRuntimeConfig().soroban`.
+ * @returns Freeze admin address string (`G...`), or null if not set or on RPC failure.
+ */
+export async function getFreezeAdminFromSoroban(
+  config?: SorobanReadConfig
+): Promise<string | null> {
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      return null;
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_freeze_admin',
+      []
+    );
+
+    if (rawResult === null) {
+      return null;
+    }
+
+    // rawResult could be an array if it's an Option<Address>
+    let addressVal: unknown = rawResult;
+    if (Array.isArray(rawResult)) {
+      if (rawResult.length === 0) return null;
+      addressVal = rawResult[0];
+    }
+
+    if (typeof addressVal === 'string' && addressVal.startsWith('G')) {
+      return addressVal;
+    }
+
+    return null;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    log.error('Failed to fetch freeze admin from Soroban:', error);
+    return null;
+  }
+}
+
+export async function getAdminFromSoroban(
+  config?: SorobanReadConfig
+): Promise<string | null> {
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      return null;
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_admin',
+      []
+    );
+
+    if (rawResult === null) {
+      return null;
+    }
+
+    let addressVal: unknown = rawResult;
+    if (Array.isArray(rawResult)) {
+      if (rawResult.length === 0) return null;
+      addressVal = rawResult[0];
+    }
+
+    if (typeof addressVal === 'string' && addressVal.startsWith('G')) {
+      return addressVal;
+    }
+
+    return null;
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    log.error('Failed to fetch admin from Soroban:', error);
+    return null;
+  }
+}
+
+/**
  * Get Soroban configuration from runtime config.
  */
 function getSorobanConfig(): SorobanReadConfig {
@@ -791,12 +942,126 @@ function getSorobanConfig(): SorobanReadConfig {
 }
 
 // ---------------------------------------------------------------------------
+// LP Read Functions
+// ---------------------------------------------------------------------------
+
+export interface LpPositionData {
+  shares: number;
+  rewardDebt: number;
+}
+
+export async function getLpPositionFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<LpPositionData | null> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return null;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_lp_position',
+      [poolId, userAddress],
+    );
+
+    if (rawResult === null || typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      shares: toNum(raw.shares ?? raw[0]),
+      rewardDebt: toNum(raw.reward_debt ?? raw[1]),
+    };
+  } catch (e) {
+    log.error(`Failed to fetch LP position for pool ${poolId}:`, e);
+    return null;
+  }
+}
+
+export async function getPendingLpRewardsFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<number> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return 0;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_pending_lp_rewards',
+      [poolId, userAddress],
+    );
+
+    return toNum(rawResult as bigint | number | string | undefined);
+  } catch (e) {
+    log.error(`Failed to fetch pending LP rewards for pool ${poolId}:`, e);
+    return 0;
+  }
+}
+
+export async function getLpStakeFromSoroban(
+  poolId: number,
+  userAddress: string,
+  config?: SorobanReadConfig,
+): Promise<{ shares: number; lockUntil: number } | null> {
+  const toNum = (v: bigint | number | string | undefined): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    return v;
+  };
+  try {
+    const cfg = config ?? getSorobanConfig();
+    if (!cfg.contractId) return null;
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_lp_stake',
+      [poolId, userAddress],
+    );
+
+    if (rawResult === null) return null;
+    if (typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      shares: toNum(raw.shares),
+      lockUntil: toNum(raw.lock_until),
+    };
+  } catch (e) {
+    log.error(`Failed to fetch LP stake for pool ${poolId}:`, e);
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Canonical Soroban read API for pool data.
- * Use this for all pool and user bet reads from the Stellar/Soroban chain.
+ * Canonical Soroban read API object for pool and user-bet data.
+ *
+ * Prefer this namespace (or the named exports) over deprecated Stacks reads in `stacks-api.ts`.
+ *
+ * @example
+ * ```ts
+ * const count = await sorobanReadApi.getPoolCount();
+ * const { pool } = await sorobanReadApi.getPool(1);
+ * ```
  */
 export const sorobanReadApi = {
   getPool: getPoolFromSoroban,
@@ -804,6 +1069,46 @@ export const sorobanReadApi = {
   getPoolBetLimits: getPoolBetLimitsFromSoroban,
   getPoolCount: getPoolCountFromSoroban,
   getPoolsBatch: getPoolsBatchFromSoroban,
+  getLpPosition: getLpPositionFromSoroban,
+  getPendingLpRewards: getPendingLpRewardsFromSoroban,
+  getLpStake: getLpStakeFromSoroban,
 };
 
+/** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */
 export type { Pool, UserBetData };
+
+// ---------------------------------------------------------------------------
+// #721 — Extended pool metadata
+// ---------------------------------------------------------------------------
+
+/** Decoded extended pool metadata from `get_pool_ext_metadata`. */
+export interface PoolExtendedMetadata {
+  resolutionCriteria?: string;
+  externalLinks?: string;
+  coverImage?: string;
+}
+
+/**
+ * Read optional extended metadata for a pool via `get_pool_ext_metadata`.
+ * Returns null when no metadata is stored or the read fails.
+ */
+export async function getPoolExtMetadataFromSoroban(
+  poolId: number,
+  config?: SorobanReadConfig,
+): Promise<PoolExtendedMetadata | null> {
+  const cfg = config ?? getSorobanConfig();
+  if (!cfg.contractId) return null;
+  try {
+    const rawResult = await simulateContractRead(cfg.rpcUrl, cfg.contractId, 'get_pool_ext_metadata', [poolId]);
+    if (rawResult === null || typeof rawResult !== 'object') return null;
+    const raw = rawResult as Record<string, unknown>;
+    return {
+      resolutionCriteria: typeof raw['resolution_criteria'] === 'string' ? raw['resolution_criteria'] : undefined,
+      externalLinks: typeof raw['external_links'] === 'string' ? raw['external_links'] : undefined,
+      coverImage: typeof raw['cover_image'] === 'string' ? raw['cover_image'] : undefined,
+    };
+  } catch (e) {
+    log.error('Failed to fetch pool ext metadata from Soroban:', e);
+    return null;
+  }
+}

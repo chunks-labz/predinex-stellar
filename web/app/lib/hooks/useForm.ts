@@ -4,6 +4,9 @@
  */
 
 import { useState, useCallback } from 'react';
+import { createScopedLogger } from '@/app/lib/logger';
+
+const log = createScopedLogger('useForm');
 
 interface FormErrors {
   [key: string]: string;
@@ -20,7 +23,7 @@ interface UseFormOptions<T> {
  * @param options Form configuration
  * @returns Form state and handlers
  */
-export function useForm<T extends Record<string, any>>({
+export function useForm<T extends Record<string, unknown>>({
   initialValues,
   onSubmit,
   validate,
@@ -107,7 +110,7 @@ export function useForm<T extends Record<string, any>>({
     setIsSubmitting(false);
   }, [initialValues]);
 
-  const setFieldValue = useCallback((name: string, value: any) => {
+  const setFieldValue = useCallback((name: string, value: unknown) => {
     setValues(prev => ({
       ...prev,
       [name]: value,
@@ -142,8 +145,8 @@ export function useForm<T extends Record<string, any>>({
  * @returns Field state and handlers
  */
 export function useField(
-  initialValue: any = '',
-  validate?: (value: any) => string | undefined
+  initialValue: unknown = '',
+  validate?: (value: unknown) => string | undefined
 ) {
   const [value, setValue] = useState(initialValue);
   const [error, setError] = useState<string | undefined>();

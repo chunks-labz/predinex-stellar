@@ -9,7 +9,9 @@ import {
   AnchorMode,
   PostConditionMode,
   ClarityValue,
+  type PostCondition,
   StacksTransactionWire,
+  getAddressFromPrivateKey,
 } from '@stacks/transactions';
 import { StacksNetwork } from '@stacks/network';
 import { TransactionPayload } from './wallet-service';
@@ -22,6 +24,7 @@ export interface TransactionOptions {
   nonce?: number;
   anchorMode?: AnchorMode;
   postConditionMode?: PostConditionMode;
+  postConditions?: PostCondition[];
 }
 
 /**
@@ -83,18 +86,42 @@ export class TransactionService {
     senderAddress: string
   ): Promise<TransactionEstimate> {
     try {
-      // Mocked for unblocking build - in real app would use @stacks/blockchain-api-client
-      const feeEstimate = 1000;
-      const nonceResponse = 0;
+      // Use @stacks/blockchain-api-client to get real fee and nonce estimates
+      const net = this.network as { coreApiUrl?: string; baseUrl?: string };
+      const apiUrl = net.coreApiUrl ?? net.baseUrl;
+
+      // Fetch current nonce for the sender address
+      const nonceResponse = await fetch(`${apiUrl}/extended/v1/address/${senderAddress}/nonces`);
+      if (!nonceResponse.ok) {
+        throw new Error(`Failed to fetch nonce: ${nonceResponse.status}`);
+      }
+      const nonceData = await nonceResponse.json();
+      const nonce = nonceData.possible_nonce || 0;
+
+      // Fetch fee estimate from network
+      const feeEstimate = await this.estimateFeeFromNetwork(apiUrl);
 
       return {
         estimatedFee: Number(feeEstimate),
-        estimatedNonce: Number(nonceResponse),
+        estimatedNonce: Number(nonce),
         totalCost: Number(feeEstimate),
       };
     } catch (error) {
       log.error('Transaction estimation failed', error);
       return { estimatedFee: 1000, estimatedNonce: 0, totalCost: 1000 };
+    }
+  }
+
+  private async estimateFeeFromNetwork(apiUrl: string): Promise<number> {
+    try {
+      const feeResponse = await fetch(`${apiUrl}/v2/fees`);
+      if (!feeResponse.ok) {
+        return 10000;
+      }
+      const feeData = await feeResponse.json();
+      return feeData.middle?.fee_rate || 10000;
+    } catch {
+      return 10000;
     }
   }
 
@@ -159,7 +186,8 @@ export class TransactionService {
         senderKey,
         network: this.network,
         anchorMode: options.anchorMode || AnchorMode.Any,
-        postConditionMode: options.postConditionMode || PostConditionMode.Allow,
+        postConditionMode: options.postConditionMode ?? PostConditionMode.Deny,
+        ...(options.postConditions?.length ? { postConditions: options.postConditions } : {}),
         fee,
         nonce,
       };
@@ -297,7 +325,12 @@ export class TransactionService {
   }
 
   private getAddressFromPrivateKey(privateKey: string): string {
-    return 'SP1EXAMPLE';
+    try {
+      return getAddressFromPrivateKey(privateKey);
+    } catch (error) {
+      console.error('Failed to derive address from private key:', error);
+      throw new Error('Invalid private key or derivation failed');
+    }
   }
 
   private isValidStellarAddress(address: string): boolean {

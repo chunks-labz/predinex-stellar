@@ -167,7 +167,8 @@ jobs:
             --source deployer \
             -- initialize \
             --token "$XLM_TOKEN_TESTNET" \
-            --treasury_recipient "$TREASURY")
+            --treasury_recipient "$TREASURY" \
+            --admin "$TREASURY")
           echo "init_tx=$INIT_TX" >> "$GITHUB_OUTPUT"
           echo "Initialized contract."
 
@@ -208,6 +209,10 @@ jobs:
       create_tx: ${{ steps.run.outputs.create_tx }}
       pool_count_before: ${{ steps.run.outputs.before }}
       pool_count_after: ${{ steps.run.outputs.after }}
+      pool_id: ${{ steps.run.outputs.pool_id }}
+      bet_placed: ${{ steps.run.outputs.bet }}
+      settled: ${{ steps.run.outputs.settle }}
+      claim_amount: ${{ steps.run.outputs.claim }}
     steps:
       - uses: actions/checkout@v4
 
@@ -242,6 +247,14 @@ jobs:
             --secret-key "$STELLAR_TESTNET_SECRET_KEY" \
             --network testnet
 
+      - name: Create and fund smoke bettor account
+        run: |
+          # Exercising place_bet -> settle -> claim needs a second account that
+          # is distinct from the deployer. On testnet we generate one and fund
+          # it for free via friendbot.
+          stellar keys generate bettor --network testnet --fund
+          echo "Bettor address: $(stellar keys address bettor)"
+
       - name: Run smoke checks
         id: run
         env:
@@ -249,6 +262,9 @@ jobs:
           TREASURY: ${{ needs.deploy.outputs.treasury }}
         run: |
           set -euo pipefail
+          BETTOR=$(stellar keys address bettor)
+          echo "Bettor address: $BETTOR"
+
           BEFORE=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network testnet \
@@ -257,7 +273,10 @@ jobs:
           echo "Pool count before: $BEFORE"
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
 
-          CREATE_TX=$(stellar contract invoke \
+          # Use the minimum allowed pool duration (300s) so the pool can expire
+          # within the job after a short synthetic wait. create_pool returns the
+          # new pool id on stdout.
+          POOL_ID=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network testnet \
             --source deployer \
@@ -267,9 +286,12 @@ jobs:
             --description "Automated smoke deployment from commit ${{ github.sha }}" \
             --outcome_a "Yes" \
             --outcome_b "No" \
-            --duration 600)
-          echo "Create tx: $CREATE_TX"
-          echo "create_tx=$CREATE_TX" >> "$GITHUB_OUTPUT"
+            --duration 300 \
+            --amount 10000000)
+          POOL_ID=$(echo "$POOL_ID" | tr -d '"')
+          echo "Created pool id: $POOL_ID"
+          echo "pool_id=$POOL_ID" >> "$GITHUB_OUTPUT"
+          echo "create_tx=$POOL_ID" >> "$GITHUB_OUTPUT"
 
           AFTER=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
@@ -281,6 +303,57 @@ jobs:
 
           if [ "$AFTER" = "$BEFORE" ]; then
             echo "::error::create_pool did not increment pool count (before=$BEFORE, after=$AFTER)"
+            echo "passed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+          # place_bet — the bettor stakes on outcome 0. Must happen before the
+          # pool expires. The optional referrer argument is omitted (defaults to
+          # None). The bettor signs as --source so user.require_auth() passes.
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source bettor \
+            -- place_bet \
+            --user "$BETTOR" \
+            --pool_id "$POOL_ID" \
+            --outcome 0 \
+            --amount 2000000
+          echo "Placed bet of 2000000 stroops on outcome 0"
+          echo "bet=true" >> "$GITHUB_OUTPUT"
+
+          # Wait for the pool to expire (minimum duration is 300s) so it can be
+          # settled. This is the synthetic wait the smoke test previously skipped.
+          echo "Waiting 330s for pool $POOL_ID to expire before settling..."
+          sleep 330
+
+          # settle_pool — only the admin (the deployer) may settle. Outcome 0
+          # wins, so the bettor becomes the sole winner.
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source deployer \
+            -- settle_pool \
+            --caller "$TREASURY" \
+            --pool_id "$POOL_ID" \
+            --winning_outcome 0
+          echo "Settled pool $POOL_ID with winning outcome 0"
+          echo "settle=true" >> "$GITHUB_OUTPUT"
+
+          # claim_winnings — the winning bettor claims their payout. The return
+          # value is the payout in stroops and must be positive.
+          CLAIM=$(stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source bettor \
+            -- claim_winnings \
+            --user "$BETTOR" \
+            --pool_id "$POOL_ID")
+          CLAIM=$(echo "$CLAIM" | tr -d '"')
+          echo "Claimed winnings: $CLAIM stroops"
+          echo "claim=$CLAIM" >> "$GITHUB_OUTPUT"
+          if [ -z "$CLAIM" ] || [ "$CLAIM" -le 0 ]; then
+            echo "::error::claim_winnings returned a non-positive payout ($CLAIM)"
             echo "passed=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
@@ -330,6 +403,10 @@ jobs:
           CREATE_TX: ${{ needs.smoke.outputs.create_tx }}
           BEFORE: ${{ needs.smoke.outputs.pool_count_before }}
           AFTER: ${{ needs.smoke.outputs.pool_count_after }}
+          POOL_ID: ${{ needs.smoke.outputs.pool_id }}
+          BET_PLACED: ${{ needs.smoke.outputs.bet_placed }}
+          SETTLED: ${{ needs.smoke.outputs.settled }}
+          CLAIM_AMOUNT: ${{ needs.smoke.outputs.claim_amount }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT: ${{ github.sha }}
         run: |
@@ -355,8 +432,11 @@ jobs:
             echo "| Contract ID | \`${CONTRACT_ID:-—}\` |"
             echo "| Deploy tx | \`${DEPLOY_TX:-—}\` |"
             echo "| Initialize tx | \`${INIT_TX:-—}\` |"
-            echo "| Smoke create_pool tx | \`${CREATE_TX:-—}\` |"
+            echo "| Smoke pool id | \`${POOL_ID:-${CREATE_TX:-—}}\` |"
             echo "| Pool count (before → after) | \`${BEFORE:-—} → ${AFTER:-—}\` |"
+            echo "| place_bet | \`${BET_PLACED:-—}\` |"
+            echo "| settle_pool | \`${SETTLED:-—}\` |"
+            echo "| claim_winnings (stroops) | \`${CLAIM_AMOUNT:-—}\` |"
             echo "| Workflow run | [${{ github.run_id }}]($RUN_URL) |"
             echo ""
             if [ "$SMOKE_OUTCOME" != "success" ]; then

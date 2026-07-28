@@ -13,7 +13,7 @@ import {
   type FallbackStatus,
 } from '../lib/fixtures/automatedResolution';
 import { useSettlePool } from '../lib/hooks/useSettlePool';
-import { TransactionFeeModal } from './TransactionFeeModal';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 
 export default function AutomatedResolutionStatus() {
   const [pools, setPools] = useState<Pool[]>([]);

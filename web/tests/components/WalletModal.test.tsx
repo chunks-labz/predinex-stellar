@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import WalletModal from '../../app/components/WalletModal';
+import WalletModal from '@/components/WalletModal';
 
 describe('WalletModal Component', () => {
     const mockOnClose = vi.fn();

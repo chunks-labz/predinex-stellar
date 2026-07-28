@@ -5,7 +5,7 @@ import { isDisputeMockDataEnabled } from '@/app/lib/feature-flags';
 import * as useDisputeManagementModule from '@/app/lib/disputes/useDisputeManagement';
 
 // Mock the wallet provider
-vi.mock('@/app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: () => ({
     address: '0x1234567890123456789012345678901234567890',
     isConnected: true,

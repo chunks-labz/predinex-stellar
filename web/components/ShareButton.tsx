@@ -189,7 +189,8 @@ export default function ShareButton({ url, title, text, className }: ShareButton
             </div>
 
             {qrDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
+              // Plain <img>, not next/image: the QR code is a runtime-generated
+              // data URL, which the Next image optimizer cannot process.
               <img
                 src={qrDataUrl}
                 alt={`QR code for ${url}`}

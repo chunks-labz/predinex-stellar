@@ -53,7 +53,7 @@ export interface SorobanEventServiceConfig {
 // Raw Soroban event shapes (from RPC getEvents response)
 // ---------------------------------------------------------------------------
 
-interface RawSorobanEvent {
+export interface RawSorobanEvent {
   /** Hex-encoded ledger sequence + tx index, used as a stable ID */
   id: string;
   /** Ledger close time as Unix timestamp (seconds) */
@@ -82,14 +82,23 @@ interface GetEventsResponse {
 // Typed event payloads (after decoding)
 // ---------------------------------------------------------------------------
 
+/**
+ * Names of contract events the SDK can decode from Soroban event logs.
+ */
 export type SorobanEventName =
   | 'create_pool'
   | 'place_bet'
   | 'settle_pool'
   | 'claim_winnings'
   | 'fee_collected'
-  | 'treasury_withdrawal';
+  | 'treasury_withdrawal'
+  | 'pool_frozen'
+  | 'pool_disputed'
+  | 'pool_unfrozen';
 
+/**
+ * Normalized, typed shape of a decoded Soroban contract event.
+ */
 export interface DecodedSorobanEvent {
   name: SorobanEventName;
   /** Schema version of the event payload (issue #175). */
@@ -150,10 +159,12 @@ function toString(raw: unknown): string | undefined {
 /**
  * Decode a raw Soroban event into a typed DecodedSorobanEvent.
  *
- * Returns `null` if the event name is unrecognised, topics are malformed, or
- * the schema version at topic position 1 does not match
+ * Only decodes events matching the contract's current
  * `SUPPORTED_EVENT_SCHEMA_VERSION`. Skipped events are logged so operators
  * can detect a contract upgrade that the frontend has not caught up with.
+ *
+ * @param raw - Raw event payload from the Soroban RPC `getEvents` response
+ * @returns The decoded event, or null if unrecognized or schema-mismatched
  */
 export function decodeSorobanEvent(raw: RawSorobanEvent): DecodedSorobanEvent | null {
   const topics = raw.topic ?? [];
@@ -234,6 +245,14 @@ export function decodeSorobanEvent(raw: RawSorobanEvent): DecodedSorobanEvent | 
       return base;
     }
 
+    case 'pool_frozen':
+    case 'pool_disputed':
+    case 'pool_unfrozen': {
+      // topics: [name, version, pool_id]
+      base.poolId = toNumber(topics[2]);
+      return base;
+    }
+
     case 'fee_collected':
     case 'treasury_withdrawal':
       // Not surfaced in the activity feed
@@ -251,6 +270,10 @@ export function decodeSorobanEvent(raw: RawSorobanEvent): DecodedSorobanEvent | 
 /**
  * Maps a decoded Soroban event to the ActivityItem UI model.
  * Returns null for event types that don't map to a user-visible activity.
+ *
+ * @param event - Decoded Soroban event to map
+ * @param explorerUrl - Base URL used to build the transaction explorer link
+ * @returns The corresponding ActivityItem, or null if not user-visible
  */
 export function mapEventToActivityItem(
   event: DecodedSorobanEvent,
@@ -323,6 +346,19 @@ export function mapEventToActivityItem(
           poolId: event.poolId,
           outcome: event.winningOutcome,
         },
+      };
+
+    case 'pool_frozen':
+    case 'pool_disputed':
+    case 'pool_unfrozen':
+      return {
+        txId: event.txHash,
+        type: 'contract-call',
+        functionName: event.name,
+        timestamp: event.timestamp,
+        status: 'success',
+        poolId: event.poolId,
+        explorerUrl: txUrl,
       };
 
     default:
@@ -402,6 +438,7 @@ async function triggerWebhookNotification(event: DecodedSorobanEvent): Promise<v
  * @param userAddress - Stellar address (G... strkey) of the user
  * @param limit       - Maximum number of activity items to return
  * @param config      - Injectable service config (enables test isolation)
+ * @returns Array of activity items, newest first; empty array on missing config or fetch failure
  */
 export async function getUserActivityFromSoroban(
   userAddress: string,
@@ -491,6 +528,70 @@ export async function getUserActivityFromSoroban(
     return items.slice(0, limit);
   } catch (e) {
     log.error('Failed to fetch Soroban activity events', e);
+    return [];
+  }
+}
+
+/**
+ * Fetches pool freeze/dispute events specifically for the admin dashboard.
+ *
+ * @param poolId - The pool ID to query events for
+ * @param limit  - Maximum number of events
+ * @param config - Soroban configuration
+ */
+export async function getPoolAdminActivityFromSoroban(
+  poolId: number,
+  limit: number = 20,
+  config: SorobanEventServiceConfig
+): Promise<ActivityItem[]> {
+  const { rpcUrl, explorerUrl, contractId } = config;
+  if (!rpcUrl || !explorerUrl || !contractId) return [];
+
+  try {
+    const body = {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'getEvents',
+      params: {
+        filters: [
+          {
+            type: 'contract',
+            contractIds: [contractId],
+            topics: [
+              ['pool_frozen', 'pool_disputed', 'pool_unfrozen'],
+              [SUPPORTED_EVENT_SCHEMA_VERSION]
+            ],
+          },
+        ],
+        pagination: { limit },
+      },
+    };
+
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) return [];
+    const json: GetEventsResponse = await response.json();
+    if (json.error) return [];
+
+    const rawEvents: RawSorobanEvent[] = json.result?.events ?? [];
+    const items: ActivityItem[] = [];
+
+    for (const raw of rawEvents) {
+      const decoded = decodeSorobanEvent(raw);
+      if (!decoded || decoded.poolId !== poolId) continue;
+      
+      const item = mapEventToActivityItem(decoded, explorerUrl);
+      if (item) items.push(item);
+    }
+
+    items.sort((a, b) => b.timestamp - a.timestamp);
+    return items.slice(0, limit);
+  } catch (e) {
+    log.error('Failed to fetch pool admin activity events', e);
     return [];
   }
 }
