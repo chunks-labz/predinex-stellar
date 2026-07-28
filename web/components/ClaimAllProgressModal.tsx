@@ -8,6 +8,8 @@ interface ClaimAllProgressModalProps {
   state: ClaimAllState;
   /** Pool id → market title, for friendlier per-pool labels. */
   titles?: Record<number, string>;
+  /** Total number of claimable pools available to user before batch slicing. */
+  totalClaimableCount?: number;
   onClose: () => void;
 }
 
@@ -22,11 +24,14 @@ export default function ClaimAllProgressModal({
   isOpen,
   state,
   titles = {},
+  totalClaimableCount,
   onClose,
 }: ClaimAllProgressModalProps) {
   if (!isOpen) return null;
 
   const total = state.pools.length;
+  const hasMorePools = typeof totalClaimableCount === 'number' && totalClaimableCount > total;
+  const remainingCount = hasMorePools ? totalClaimableCount - total : 0;
   const inFlight = state.status === 'claiming';
   const isDone = state.status === 'success' || state.status === 'partial';
   const isFailed = state.status === 'failed';
@@ -96,6 +101,15 @@ export default function ClaimAllProgressModal({
               </li>
             ))}
           </ul>
+
+          {hasMorePools && (
+            <div
+              data-testid="claim-all-limit-notice"
+              className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-600 dark:text-amber-400"
+            >
+              Batch size is limited to {total} pools per transaction. {remainingCount} remaining pool{remainingCount === 1 ? '' : 's'} can be claimed in a subsequent transaction.
+            </div>
+          )}
 
           {isFailed && state.error && (
             <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-500">
