@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { withRetry, computeBackoffDelay, ResolvedRetryOptions } from '../../app/lib/retry';
+import { withRetry, computeBackoffDelay, ResolvedRetryOptions, CircuitBreaker, CircuitBreakerOpenError } from '../../app/lib/retry';
 
 // Deterministic backoff for tests — remove jitter by mocking Math.random
 // and replace setTimeout with an immediate fake so tests don't wait.
@@ -130,5 +130,61 @@ describe('withRetry', () => {
     expect(result.status).toBe('rejected');
     if (result.status === 'rejected') expect(result.reason.message).toBe('fail');
     expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast when circuit breaker is OPEN', async () => {
+    const cb = new CircuitBreaker({ failureThreshold: 2, resetTimeoutMs: 10000 });
+    cb.onFailure();
+    cb.onFailure();
+
+    expect(cb.getState()).toBe('OPEN');
+
+    const fn = vi.fn().mockResolvedValue('ok');
+    const result = await runWithRetrySettled(fn, { circuitBreaker: cb });
+
+    expect(result.status).toBe('rejected');
+    if (result.status === 'rejected') {
+      expect(result.reason).toBeInstanceOf(CircuitBreakerOpenError);
+    }
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
+describe('CircuitBreaker', () => {
+  it('starts in CLOSED state', () => {
+    const cb = new CircuitBreaker({ failureThreshold: 3 });
+    expect(cb.getState()).toBe('CLOSED');
+    expect(cb.canExecute()).toBe(true);
+  });
+
+  it('opens after reaching failure threshold', () => {
+    const cb = new CircuitBreaker({ failureThreshold: 2 });
+    cb.onFailure();
+    expect(cb.getState()).toBe('CLOSED');
+    cb.onFailure();
+    expect(cb.getState()).toBe('OPEN');
+    expect(cb.canExecute()).toBe(false);
+  });
+
+  it('transitions to HALF_OPEN after reset timeout', () => {
+    const cb = new CircuitBreaker({ failureThreshold: 2, resetTimeoutMs: 1000 });
+    cb.onFailure();
+    cb.onFailure();
+    expect(cb.getState()).toBe('OPEN');
+
+    vi.advanceTimersByTime(1001);
+    expect(cb.getState()).toBe('HALF_OPEN');
+    expect(cb.canExecute()).toBe(true);
+  });
+
+  it('resets to CLOSED on success', () => {
+    const cb = new CircuitBreaker({ failureThreshold: 2 });
+    cb.onFailure();
+    cb.onFailure();
+    expect(cb.getState()).toBe('OPEN');
+
+    cb.onSuccess();
+    expect(cb.getState()).toBe('CLOSED');
+    expect(cb.canExecute()).toBe(true);
   });
 });
