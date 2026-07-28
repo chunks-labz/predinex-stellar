@@ -13,6 +13,8 @@ import { toastMessages, showToastPayload } from '@/lib/toast-messages';
 import { TransactionFeeModal } from '@/app/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
+import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
+import { calcBetFromPercentage, BET_TX_FEE_RESERVE_XLM } from '@/app/lib/contract-utils';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
 
 interface BettingSectionProps {
@@ -21,10 +23,19 @@ interface BettingSectionProps {
     onBetSuccess?: (outcome: number, amount: number) => void;
 }
 
+/** Quick-select bet percentage presets. */
+const BET_PERCENTAGES = [
+    { label: '25%', value: 25 },
+    { label: '50%', value: 50 },
+    { label: '75%', value: 75 },
+    { label: 'Max', value: 100 },
+] as const;
+
 export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSectionProps) {
     const wallet = useWallet();
     const { isConnected, address, connect } = wallet;
     const { showToast } = useToast();
+    const { balance: balanceStr } = useWalletAccount();
     const [betAmount, setBetAmount] = useState('');
     const [isBetting, setIsBetting] = useState(false);
     const [feePrompt, setFeePrompt] = useState<{ feeStroops: string; resolve: (v: boolean) => void } | null>(null);
@@ -40,10 +51,34 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
     const hasMaxBet = maxBetStroops > 0;
     const maxBetXlm = hasMaxBet ? maxBetStroops / STROOPS_PER_XLM : null;
 
-    // Derived wallet balance (placeholder — replace with real balance hook if available).
-    const walletBalance: number | null = isConnected ? 100.0 : null;
+    // Real wallet balance from Horizon API (via useWalletAccount).
+    const walletBalance: number | null = isConnected ? parseFloat(balanceStr) : null;
 
     const { isMismatch, expectedNetworkName } = useNetworkMismatch();
+
+    /**
+     * Handle a quick-select percentage button click.
+     * Uses calcBetFromPercentage which reserves BET_TX_FEE_RESERVE_XLM from
+     * the wallet balance before applying the percentage, preventing 429 /
+     * transaction failures due to insufficient funds for fees (#837).
+     */
+    const handlePercentageSelect = (pct: number) => {
+        if (walletBalance === null || walletBalance <= 0) return;
+        const amount = calcBetFromPercentage(
+            walletBalance,
+            pct,
+            hasMinBet ? minBetXlm : 0,
+            maxBetXlm,
+        );
+        if (amount > 0) {
+            setBetAmount(amount.toString());
+        } else {
+            showToast(
+                `Insufficient spendable balance (${BET_TX_FEE_RESERVE_XLM} XLM reserved for fees)`,
+                'error'
+            );
+        }
+    };
 
     const placeBet = async (outcome: number) => {
         if (!isConnected) {
@@ -72,6 +107,15 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
 
         if (walletBalance !== null && amountXlm > walletBalance) {
             showToastPayload(showToast, toastMessages.bet.insufficientBalance(walletBalance));
+            return;
+        }
+
+        // Guard: ensure enough balance remains for fees after bet.
+        if (walletBalance !== null && walletBalance - amountXlm < BET_TX_FEE_RESERVE_XLM) {
+            showToast(
+                `Please keep at least ${BET_TX_FEE_RESERVE_XLM} XLM in your wallet to cover transaction fees.`,
+                'error'
+            );
             return;
         }
 
@@ -146,6 +190,11 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
     const oddsA = totalPool > 0 ? ((pool.totalA / totalPool) * 100).toFixed(1) : '50.0';
     const oddsB = totalPool > 0 ? ((pool.totalB / totalPool) * 100).toFixed(1) : '50.0';
 
+    // Spendable balance after fee reserve — shown to the user in the balance display.
+    const spendableXlm = walletBalance !== null
+        ? Math.max(0, walletBalance - BET_TX_FEE_RESERVE_XLM)
+        : null;
+
     return (
         <div className="bg-muted/30 p-6 rounded-xl border border-border space-y-4">
             <h3 className="font-bold">Place Bet</h3>
@@ -201,6 +250,11 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
                         <div className="text-right">
                             <p className="text-sm text-muted-foreground">Balance</p>
                             <p className="font-bold">{walletBalance?.toFixed(2) ?? '0'} XLM</p>
+                            {spendableXlm !== null && (
+                                <p className="text-xs text-muted-foreground">
+                                    {spendableXlm.toFixed(2)} spendable
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -249,8 +303,42 @@ export default function BettingSection({ pool, poolId, onBetSuccess }: BettingSe
                     Bet limits:{' '}
                     {hasMinBet ? `Min ${minBetXlm} XLM` : 'No minimum'}
                     {hasMaxBet && maxBetXlm !== null ? `, Max ${maxBetXlm} XLM` : ', No maximum'}
+                    {' · '}
+                    <span title={`${BET_TX_FEE_RESERVE_XLM} XLM reserved for Stellar transaction fees`}>
+                        {BET_TX_FEE_RESERVE_XLM} XLM reserved for fees
+                    </span>
                 </p>
             </div>
+
+            {/* Quick-select percentage buttons (#837 — reserves tx fees before computing) */}
+            {walletBalance !== null && walletBalance > BET_TX_FEE_RESERVE_XLM && !isMismatch && (
+                <div
+                    className="grid grid-cols-4 gap-2"
+                    role="group"
+                    aria-label="Quick-select bet percentage"
+                >
+                    {BET_PERCENTAGES.map(({ label, value }) => {
+                        const previewAmount = calcBetFromPercentage(
+                            walletBalance,
+                            value,
+                            hasMinBet ? minBetXlm : 0,
+                            maxBetXlm,
+                        );
+                        return (
+                            <button
+                                key={label}
+                                type="button"
+                                onClick={() => handlePercentageSelect(value)}
+                                disabled={isBetting || previewAmount <= 0}
+                                aria-label={`Set bet to ${label} of spendable balance (${previewAmount > 0 ? previewAmount.toFixed(2) : '0'} XLM)`}
+                                className="py-2 text-sm font-medium rounded-lg bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                                {label}
+                            </button>
+                        );
+                    })}
+                </div>
+            )}
 
             {/* Bet buttons */}
             <div className="grid grid-cols-2 gap-4" role="group" aria-label="Place your bet">
