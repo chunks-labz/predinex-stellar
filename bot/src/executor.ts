@@ -126,7 +126,7 @@ async function submitTransaction(
     if (signal?.aborted) {
       throw new Error("Transaction polling aborted");
     }
-    const txResult = await server.getTransaction(hash);
+    const txResult = await server.getTransaction(hash, { signal });
 
     if (txResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       return { hash, returnValue: txResult.returnValue };

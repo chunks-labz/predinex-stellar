@@ -205,7 +205,10 @@ export async function notify(
         maxRetries: WEBHOOK_MAX_RETRIES,
         baseDelayMs: WEBHOOK_RETRY_BASE_DELAY_MS,
         label: "webhook-delivery",
-        shouldRetry: () => true,
+        shouldRetry: (err) => {
+          const msg = String(err);
+          return !msg.includes("returned 4");
+        },
       },
     );
   } catch (err) {

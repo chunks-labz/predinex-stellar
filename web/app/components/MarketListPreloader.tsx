@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { readMarketListCache, warmMarketListCache } from '../lib/market-list-cache';
 
 /**
@@ -8,12 +8,17 @@ import { readMarketListCache, warmMarketListCache } from '../lib/market-list-cac
  * from cached data immediately on first navigation.
  */
 export default function MarketListPreloader() {
+  const mountedRef = useRef(true);
+
   useEffect(() => {
+    mountedRef.current = true;
+
     // If cache is already fresh, avoid any extra network/contract calls.
     const cache = readMarketListCache();
     if (cache.isFresh) return;
 
     const warmCache = async () => {
+      if (!mountedRef.current) return;
       try {
         await warmMarketListCache();
       } catch {
@@ -29,11 +34,24 @@ export default function MarketListPreloader() {
       ) => number;
     };
 
+    let handle: number | undefined;
+
     if (typeof idleWindow.requestIdleCallback === 'function') {
-      idleWindow.requestIdleCallback(() => void warmCache(), { timeout: 2000 });
+      handle = idleWindow.requestIdleCallback(() => void warmCache(), { timeout: 2000 });
     } else {
-      window.setTimeout(() => void warmCache(), 1000);
+      handle = window.setTimeout(() => void warmCache(), 1000);
     }
+
+    return () => {
+      mountedRef.current = false;
+      if (handle !== undefined) {
+        if (typeof idleWindow.requestIdleCallback === 'function') {
+          cancelIdleCallback(handle);
+        } else {
+          clearTimeout(handle);
+        }
+      }
+    };
   }, []);
 
   return null;

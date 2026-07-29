@@ -274,25 +274,7 @@ pub enum DataKey {
     UserLargeBetCooldownSecs,
     /// #705 — Threshold (stroops) above which cooldown applies.
     UserLargeBetThreshold,
-    /// LP Staking & Rewards
-    LpPosition(u32, Address),
-    LpFeePerShare(u32),
-    LpTotalLiquidity(u32),
-    LpTotalShares(u32),
-    LpFeeAllocationBps,
-    LpStakeBoostBps,
-    LpStake(u32, Address),
-    LpRewardDust(u32),
-    LpRewardPool(u32),
-    /// Cross-chain & Mirror
-    PoolMirror(u32),
-    MirrorByUnifiedId(u32),
-    UnifiedPoolCounter,
-    BridgeTimeout,
-    CrossChainDisputeWindow,
-    DisputeWindow,
-    PoolSettlementTime(u32),
-    PoolExtMetadata(u32),
+
     LastLargeBetTimestamp(Address, u32),
     PoolCategory(u32),
     PoolTags(u32),
