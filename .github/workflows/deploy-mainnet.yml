@@ -364,23 +364,46 @@ jobs:
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
 
           # Minimum allowed pool duration (300s) so the optional lifecycle smoke
-          # can settle within the job. create_pool returns the new pool id.
+          # can settle within the job. Simulate create_pool first to obtain the
+          # predicted pool id, then send it on-chain and capture the actual
+          # transaction hash returned by the CLI (#929).
+          # NOTE: a pool creation interleaving between the simulation and the
+          # send would desync the predicted POOL_ID. In CI this is negligible;
+          # if the pool count check below fails, re-run the workflow.
+          SMOKE_TS=$(date -u +%Y%m%d-%H%M%S)
+
           POOL_ID=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
             --source deployer \
             -- create_pool \
             --creator "$TREASURY" \
-            --title "Mainnet smoke: $(date -u +%Y%m%d-%H%M%S)" \
+            --title "Mainnet smoke: $SMOKE_TS" \
             --description "Automated mainnet smoke test from tag $INPUT_GIT_TAG commit $SMOKE_COMMIT" \
             --outcome_a "Yes" \
             --outcome_b "No" \
             --duration 300 \
             --amount 10000000)
           POOL_ID=$(echo "$POOL_ID" | tr -d '"')
-          echo "Created pool id: $POOL_ID"
+          echo "Predicted pool id (from simulation): $POOL_ID"
           echo "pool_id=$POOL_ID" >> "$GITHUB_OUTPUT"
-          echo "create_tx=$POOL_ID" >> "$GITHUB_OUTPUT"
+
+          TX_HASH=$(stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network mainnet \
+            --source deployer \
+            --send=yes \
+            --output hash \
+            -- create_pool \
+            --creator "$TREASURY" \
+            --title "Mainnet smoke: $SMOKE_TS" \
+            --description "Automated mainnet smoke test from tag $INPUT_GIT_TAG commit $SMOKE_COMMIT" \
+            --outcome_a "Yes" \
+            --outcome_b "No" \
+            --duration 300 \
+            --amount 10000000)
+          echo "Create pool tx hash: $TX_HASH"
+          echo "create_tx=$TX_HASH" >> "$GITHUB_OUTPUT"
 
           AFTER=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
@@ -538,7 +561,8 @@ jobs:
             echo "| Contract ID | \`${CONTRACT_ID:-—}\` |"
             echo "| Deploy tx | \`${DEPLOY_TX:-—}\` |"
             echo "| Initialize tx | \`${INIT_TX:-—}\` |"
-            echo "| Smoke pool id | \`${POOL_ID:-${CREATE_TX:-—}}\` |"
+            echo "| Smoke pool id | \`${POOL_ID:-—}\` |"
+            echo "| Create pool tx | \`${CREATE_TX:-—}\` |"
             echo "| Pool count (before → after) | \`${POOL_BEFORE:-—} → ${POOL_AFTER:-—}\` |"
             echo "| place_bet | \`${BET_PLACED:-—}\` |"
             echo "| settle_pool | \`${SETTLED:-—}\` |"
