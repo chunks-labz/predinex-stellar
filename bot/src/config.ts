@@ -126,6 +126,13 @@ function validateContractId(id: string): void {
     );
     process.exit(1);
   }
+  // Valid Stellar base32: A-Z, 2-7
+  if (!/^[C][A-Z2-7]{55}$/.test(id)) {
+    console.error(
+      `[config] CONTRACT_ID="${id}" contains invalid base32 characters (must be A-Z, 2-7)`,
+    );
+    process.exit(1);
+  }
 }
 
 export function deriveBotPublicKey(secretKey: string): string {

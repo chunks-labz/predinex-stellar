@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Clock, AlertTriangle, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { Clock, AlertTriangle, RefreshCw } from "lucide-react";
 
 interface StaleDataIndicatorProps {
   /** Timestamp (ms since epoch) when the data was last fetched */
@@ -28,7 +28,7 @@ export default function StaleDataIndicator({
   forceStale = false,
   compact = false,
 }: StaleDataIndicatorProps) {
-  const [currentTime, setCurrentTime] = useState(lastFetchedAt ?? 0);
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   useEffect(() => {
     if (!lastFetchedAt) return;
@@ -71,8 +71,8 @@ export default function StaleDataIndicator({
     <div
       className={`flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg ${
         isStale && !isRefreshing
-          ? 'bg-yellow-500/10 text-yellow-600 border border-yellow-500/20'
-          : 'bg-blue-500/10 text-blue-500 border border-blue-500/20'
+          ? "bg-yellow-500/10 text-yellow-600 border border-yellow-500/20"
+          : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
       }`}
     >
       {isStale && !isRefreshing && (
@@ -102,8 +102,11 @@ export default function StaleDataIndicator({
 /**
  * Hook to track staleness of data based on timestamp
  */
-export function useStaleData(lastFetchedAt: number | undefined, maxAgeMs: number = DEFAULT_MAX_AGE) {
-  const [currentTime, setCurrentTime] = useState(lastFetchedAt ?? 0);
+export function useStaleData(
+  lastFetchedAt: number | undefined,
+  maxAgeMs: number = DEFAULT_MAX_AGE,
+) {
+  const [currentTime, setCurrentTime] = useState(Date.now());
 
   useEffect(() => {
     if (!lastFetchedAt) return;
