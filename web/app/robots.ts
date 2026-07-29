@@ -1,8 +1,11 @@
 import type { MetadataRoute } from 'next';
 
-const SITE_URL = (process.env['NEXT_PUBLIC_APP_URL'] ?? 'https://predinex.io').replace(/\/$/, '');
+import { getSiteUrl } from '../lib/site-url';
 
 export default function robots(): MetadataRoute.Robots {
+  // Resolved per deployment so previews advertise their own sitemap, not production's.
+  const siteUrl = getSiteUrl();
+
   return {
     rules: {
       userAgent: '*',
@@ -16,6 +19,6 @@ export default function robots(): MetadataRoute.Robots {
         '/oracle-management/',
       ],
     },
-    sitemap: `${SITE_URL}/sitemap.xml`,
+    sitemap: `${siteUrl}/sitemap.xml`,
   };
 }

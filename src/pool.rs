@@ -162,8 +162,12 @@ impl Pool {
             .instance()
             .set(&DataKey::FeeManager, &fee_manager);
 
-        let event_payload = (Symbol::new(&env, "fee_manager_updated"), fee_manager.clone());
-        env.events().publish(event_payload);
+        // publish(topics, data): the symbol must be a topic so indexers can filter
+        // on `fee_manager_updated`; bundling it into the data payload hides it.
+        env.events().publish(
+            (Symbol::new(&env, "fee_manager_updated"),),
+            (fee_manager.clone(),),
+        );
 
         log!(&env, "info", "Fee manager set to {:?}", fee_manager);
         Ok(())
@@ -310,8 +314,9 @@ impl Pool {
         env.storage().instance().set(&DataKey::FeeTiers, &tiers);
 
         // ── Emit event ──
-        let event_payload = (Symbol::new(&env, "fee_tiers_updated"), tiers.clone());
-        env.events().publish(event_payload);
+        // publish(topics, data) — see `set_fee_manager`.
+        env.events()
+            .publish((Symbol::new(&env, "fee_tiers_updated"),), (tiers.clone(),));
 
         log!(&env, "info", "Fee tiers updated (count: {})", tiers.len());
         Ok(())

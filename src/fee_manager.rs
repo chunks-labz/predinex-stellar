@@ -138,20 +138,19 @@ impl FeeManagerContract {
     ///
     /// # Events
     ///
-    /// Emits `fee_tiers_updated` with the new tiers as the event value.
+    /// Emits `fee_tiers_updated` as the event topic, with the new tiers as the data.
     pub fn set_volume_fee_tiers(env: Env, tiers: Vec<(u128, u32)>) {
         Self::validate_tiers(&env, &tiers);
 
-        // Persist (tiers is moved, no clone needed)
-        let tiers_clone = tiers.clone(); // keep for event emission before write? we can write then emit
+        // Keep a copy for the event: write_tiers borrows, the event consumes.
+        let tiers_clone = tiers.clone();
         Self::write_tiers(&env, &tiers);
 
-        // Log and emit event
+        // Log and emit event. publish(topics, data): the symbol goes in the topic
+        // tuple so indexers filtering on `fee_tiers_updated` actually match.
         log!(&env, "Fee tiers updated: {} tiers set", tiers.len());
-        env.events().publish(
-            Symbol::new(&env, "fee_tiers_updated"),
-            tiers_clone.into_val(&env),
-        );
+        env.events()
+            .publish((Symbol::new(&env, "fee_tiers_updated"),), (tiers_clone,));
     }
 
     /// Calculates the fee in basis points for a given volume and default fee.
@@ -360,14 +359,18 @@ mod test {
 
         client.set_volume_fee_tiers(&tiers);
 
-        // Check that event was emitted with the correct topic and data
+        // The symbol must arrive as a TOPIC (so indexers can filter on it),
+        // with the tiers as the data payload.
         let events = env.events().all();
         assert_eq!(events.len(), 1);
-        let (contract, topic, data) = &events.get(0).unwrap();
+        let (contract, topics, data) = &events.get(0).unwrap();
         assert_eq!(contract, &contract_id);
-        assert_eq!(topic, &Symbol::new(&env, "fee_tiers_updated"));
         assert_eq!(
-            data.clone().try_into_val::<Vec<(u128, u32)>>().unwrap(),
+            topics,
+            &vec![&env, Symbol::new(&env, "fee_tiers_updated").into_val(&env)]
+        );
+        assert_eq!(
+            data.clone().try_into_val::<(Vec<(u128, u32)>,)>().unwrap().0,
             tiers
         );
     }

@@ -1,6 +1,6 @@
 import type { MetadataRoute } from 'next';
 
-const SITE_URL = (process.env['NEXT_PUBLIC_APP_URL'] ?? 'https://predinex.io').replace(/\/$/, '');
+import { getSiteUrl } from '../lib/site-url';
 
 const STATIC_ROUTES: Array<{
   path: string;
@@ -19,9 +19,11 @@ const STATIC_ROUTES: Array<{
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();
+  // Same per-deployment origin robots.txt advertises.
+  const siteUrl = getSiteUrl();
 
   return STATIC_ROUTES.map(({ path, changeFrequency, priority }) => ({
-    url: `${SITE_URL}${path}`,
+    url: `${siteUrl}${path}`,
     lastModified,
     changeFrequency,
     priority,
