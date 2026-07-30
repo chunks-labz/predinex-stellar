@@ -51,6 +51,7 @@ export function useTransactionToast() {
         toastIdRef.current = null; // Clear ref so next transaction starts fresh
         break;
       case "error":
+        toastIdRef.current = null;
         // Errors are usually handled via showError for more detail
         break;
     }
