@@ -3,8 +3,9 @@ import Hero from "./components/Hero";
 import { TrendingUp } from "lucide-react";
 import Link from "next/link";
 import FeaturedMarkets from "./components/FeaturedMarkets";
+import RouteErrorBoundary from "./components/RouteErrorBoundary";
 
-export default function Home() {
+function HomeContent() {
   return (
     <main className="min-h-screen bg-background text-foreground selection:bg-primary/20 animate-in fade-in duration-700">
       <Navbar />
@@ -47,5 +48,13 @@ export default function Home() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function Home() {
+  return (
+    <RouteErrorBoundary routeName="Home">
+      <HomeContent />
+    </RouteErrorBoundary>
   );
 }
