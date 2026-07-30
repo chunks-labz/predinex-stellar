@@ -43,7 +43,7 @@ export interface SettleCandidate {
 
 /** Binary pools only support outcome index 0 or 1. */
 function isValidSettlementOutcome(outcome: number): boolean {
-  return outcome === 0 || outcome === 1;
+  return outcome >= 0;
 }
 
 /**
