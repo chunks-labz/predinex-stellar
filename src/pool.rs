@@ -15,11 +15,13 @@ pub const BPS_DENOMINATOR: u32 = 10_000;
 /// Maximum allowed fee in basis points.
 pub const MAX_FEE_BPS: u32 = BPS_DENOMINATOR;
 
+
 /// Contract error codes – each variant is explicit and self‑documenting.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum PoolError {
+
     /// Contract is already initialized.
     AlreadyInitialized = 1,
     /// Fee tier thresholds are invalid – unsorted, duplicate, or negative.
