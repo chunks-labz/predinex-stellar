@@ -28,6 +28,8 @@ export type SorobanConfig = {
   explorerUrl: string;
   /** Deployed Soroban contract ID (C... strkey). */
   contractId: string;
+  /** Bridge contract ID (C... strkey) that settles cross-chain pool mirrors. Optional until a mirror is created. */
+  bridgeContractId?: string;
 };
 
 export type WebhookSettings = {
@@ -166,6 +168,7 @@ export function getRuntimeConfig(): RuntimeConfig {
       rpcUrl: sorobanNet.rpcUrl,
       explorerUrl: sorobanNet.explorerUrl,
       contractId: sorobanContractId,
+      bridgeContractId: getOptionalEnv('NEXT_PUBLIC_SOROBAN_BRIDGE_CONTRACT_ID'),
     },
     // Webhook configuration from environment
     webhook: parseWebhookConfig(),

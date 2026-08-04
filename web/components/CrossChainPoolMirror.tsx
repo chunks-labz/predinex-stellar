@@ -1,9 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useWallet } from './WalletAdapterProvider';
 import Card from './ui/Card';
-import { Link as LinkIcon, Plus, AlertCircle, Clock } from 'lucide-react';
+import { Link as LinkIcon, Plus, AlertCircle, Clock, CheckCircle2 } from 'lucide-react';
+import { predinexContract } from '@/lib/contract';
+import { getRuntimeConfig } from '@/app/lib/runtime-config';
+import type { ChainIdValue } from '@/app/lib/soroban-transaction-service';
 
 interface PoolMirror {
   chain: string;
@@ -19,43 +22,73 @@ interface CrossChainPoolMirrorProps {
   existingMirrors?: PoolMirror[];
 }
 
-const SUPPORTED_CHAINS = [
+/**
+ * Target chains offered by the mirror UI.
+ *
+ * Restricted to the chains the on-chain `ChainId` enum supports
+ * (`contracts/predinex/src/lib.rs`). Chains not in the enum (e.g. BSC,
+ * Avalanche) would be rejected by the contract, so they are not offered.
+ */
+const SUPPORTED_CHAINS: { id: ChainIdValue; name: string; icon: string }[] = [
   { id: 'stellar', name: 'Stellar', icon: '⭐' },
   { id: 'ethereum', name: 'Ethereum', icon: '🔵' },
   { id: 'polygon', name: 'Polygon', icon: '🟣' },
-  { id: 'bsc', name: 'BSC', icon: '🟡' },
-  { id: 'avalanche', name: 'Avalanche', icon: '🔴' },
+  { id: 'arbitrum', name: 'Arbitrum', icon: '🌀' },
+  { id: 'solana', name: 'Solana', icon: '🌴' },
 ];
+
+const SOURCE_CHAIN: ChainIdValue = 'stellar';
+
+function getChainName(id: string): string {
+  return SUPPORTED_CHAINS.find(c => c.id === id)?.name ?? id;
+}
 
 export default function CrossChainPoolMirror({
   poolId,
   isCreator,
   existingMirrors = [],
 }: CrossChainPoolMirrorProps) {
-  const { address } = useWallet();
+  const wallet = useWallet();
   const [showMirrorForm, setShowMirrorForm] = useState(false);
-  const [selectedTargetChain, setSelectedTargetChain] = useState('ethereum');
-  const [bridgeTimeout, setBridgeTimeout] = useState(86400); // 24 hours default
+  const [selectedTargetChain, setSelectedTargetChain] = useState<ChainIdValue>('ethereum');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const availableTargetChains = SUPPORTED_CHAINS.filter(
-    chain => !existingMirrors.some(m => m.chain.toLowerCase() === chain.id)
+    chain =>
+      chain.id !== SOURCE_CHAIN &&
+      !existingMirrors.some(m => m.chain.toLowerCase() === chain.id)
   );
 
   const handleCreateMirror = async () => {
-    if (!address || !isCreator) return;
+    if (!wallet.address || !isCreator) return;
 
     try {
       setLoading(true);
       setError(null);
-      // TODO: Call contract to create_pool_mirror
-      // const result = await predinexContract.createPoolMirrorSoroban({
-      //   wallet: freighterWallet,
-      //   poolId,
-      //   targetChain: selectedTargetChain,
-      //   bridgeTimeout,
-      // });
+      setSuccess(null);
+
+      const { soroban } = getRuntimeConfig();
+      if (!soroban.bridgeContractId) {
+        throw new Error(
+          'Cross-chain mirroring is not configured. Set NEXT_PUBLIC_SOROBAN_BRIDGE_CONTRACT_ID to enable it.'
+        );
+      }
+
+      const { unifiedPoolId } = await predinexContract.createPoolMirrorSoroban({
+        wallet,
+        poolId,
+        sourceChain: SOURCE_CHAIN,
+        targetChain: selectedTargetChain,
+        bridgeContractId: soroban.bridgeContractId,
+      });
+
+      setSuccess(
+        unifiedPoolId > 0
+          ? `Mirror to ${getChainName(selectedTargetChain)} created (unified pool #${unifiedPoolId}). The bridge will settle it once the target chain confirms the registration.`
+          : `Mirror to ${getChainName(selectedTargetChain)} created. The bridge will settle it once the target chain confirms the registration.`
+      );
       setShowMirrorForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create mirror');
@@ -64,21 +97,14 @@ export default function CrossChainPoolMirror({
     }
   };
 
-  const handleCancelMirror = async (mirrorPoolId: number) => {
-    if (!address || !isCreator) return;
+  const handleCancelMirror = () => {
+    if (!wallet.address || !isCreator) return;
 
-    try {
-      setLoading(true);
-      // TODO: Call contract to cancel pending mirror
-      // const result = await predinexContract.cancelPoolMirrorSoroban({
-      //   wallet: freighterWallet,
-      //   poolId: mirrorPoolId,
-      // });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to cancel mirror');
-    } finally {
-      setLoading(false);
-    }
+    // The on-chain contract has no `cancel_pool_mirror` entry point yet.
+    // Surface an explicit error instead of silently doing nothing.
+    setError(
+      'Cancelling a pending mirror is not yet supported by the on-chain contract. The mirror will remain active until the bridge settles it.'
+    );
   };
 
   return (
@@ -103,6 +129,13 @@ export default function CrossChainPoolMirror({
         <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-start gap-2">
           <AlertCircle className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />
           <p className="text-sm text-red-200">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-4 p-3 bg-green-500/10 border border-green-500/20 rounded-lg flex items-start gap-2">
+          <CheckCircle2 className="h-4 w-4 text-green-400 flex-shrink-0 mt-0.5" />
+          <p className="text-sm text-green-200">{success}</p>
         </div>
       )}
 
@@ -135,7 +168,7 @@ export default function CrossChainPoolMirror({
                     </span>
                     {isCreator && mirror.status === 'pending' && (
                       <button
-                        onClick={() => handleCancelMirror(mirror.poolId)}
+                        onClick={handleCancelMirror}
                         className="px-2 py-1 text-xs text-red-300 hover:bg-red-500/10 rounded transition-colors"
                       >
                         Cancel
@@ -180,24 +213,11 @@ export default function CrossChainPoolMirror({
 
           {availableTargetChains.length > 0 && (
             <>
-              <div>
-                <label className="text-sm font-medium block mb-2">Bridge Timeout (seconds)</label>
-                <input
-                  type="number"
-                  value={bridgeTimeout}
-                  onChange={(e) => setBridgeTimeout(Number(e.target.value))}
-                  placeholder="86400"
-                  className="w-full px-4 py-2 bg-background border border-border/50 rounded-lg text-foreground focus:border-primary outline-none text-sm"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {Math.floor(bridgeTimeout / 3600)} hours
-                </p>
-              </div>
-
               <div className="flex gap-2">
                 <button
                   onClick={handleCreateMirror}
                   disabled={loading}
+                  data-testid="mirror-create-submit"
                   className="flex-1 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:brightness-110 disabled:opacity-50 transition-all"
                 >
                   {loading ? 'Creating...' : 'Create Mirror'}

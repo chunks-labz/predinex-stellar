@@ -48,6 +48,36 @@ export type TxStage =
   | "error";
 
 /**
+ * Supported chain identifiers for cross-chain pool mirroring (#928).
+ *
+ * Mirrors the on-chain `ChainId` enum variants in
+ * `contracts/predinex/src/lib.rs`. Keep in sync when the contract adds or
+ * removes chains.
+ */
+export type ChainIdValue =
+  | "stellar"
+  | "ethereum"
+  | "polygon"
+  | "arbitrum"
+  | "solana";
+
+const CHAIN_ID_SYMBOLS: Record<ChainIdValue, string> = {
+  stellar: "Stellar",
+  ethereum: "Ethereum",
+  polygon: "Polygon",
+  arbitrum: "Arbitrum",
+  solana: "Solana",
+};
+
+/**
+ * Encode a `ChainIdValue` as the Soroban union ScVal used for `ChainId`
+ * (`#[contracttype]` unit enum → `Vec<Symbol>`).
+ */
+export function chainIdToScVal(chain: ChainIdValue): xdr.ScVal {
+  return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(CHAIN_ID_SYMBOLS[chain])]);
+}
+
+/**
  * Main SDK client for executing transactions on the Predinex Soroban contract.
  * Provides high-level methods with built-in simulation, fee prompting, signing,
  * and status polling.
@@ -741,6 +771,43 @@ export class SorobanTransactionService {
           "claim_lp_rewards",
           new Address(wallet.address).toScVal(),
           nativeToScVal(params.poolId, { type: "u32" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
+  async createPoolMirror(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: {
+      sourcePoolId: number;
+      sourceChain: ChainIdValue;
+      targetChain: ChainIdValue;
+      bridgeContractId: string;
+    },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    if (!wallet.address) throw new Error("Wallet not connected");
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "create_pool_mirror",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.sourcePoolId, { type: "u32" }),
+          chainIdToScVal(params.sourceChain),
+          chainIdToScVal(params.targetChain),
+          new Address(params.bridgeContractId).toScVal(),
         ),
       )
       .setTimeout(30)
