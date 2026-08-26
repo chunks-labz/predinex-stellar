@@ -1,6 +1,6 @@
 import { BarChart3, Calendar, DollarSign, Target, Trophy, TrendingUp, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import type { PlatformMetrics, UserPortfolio } from './dashboard-types';
+import type { PlatformMetrics, UserPortfolio } from './market-types';
 import { formatCurrency, formatPercentage, formatProfitLoss } from './dashboard-utils';
 
 export interface PortfolioMetricCard {

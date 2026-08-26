@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Clock, TrendingUp, ExternalLink, Gift } from 'lucide-react';
-import type { UserBet } from '../../lib/dashboard-types';
+import type { UserBet } from '../../lib/market-types';
 import type { ClaimTxState } from '../../lib/hooks/useClaimWinnings';
 import { formatPercentage, formatCurrency } from '../../lib/dashboard-utils';
 import ClaimAllButton from '../../../components/ClaimAllButton';

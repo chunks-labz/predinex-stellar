@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ActivityFeed from '../../app/components/ActivityFeed';
-import { ActivityItem } from '../../app/lib/stacks-api';
+import { ActivityItem } from '../../app/lib/market-types';
 
 const mockActivities: ActivityItem[] = [
     {

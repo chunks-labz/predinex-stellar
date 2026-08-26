@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
-import { formatTokenAmount } from '@/lib/formatting';
+import { formatTokenAmount } from '@/app/lib/formatting';
 import { blocksToSeconds } from '@/app/lib/countdown-utils';
 import { formatDisplayAddress } from '@/app/lib/address-display';
 import { usePoolFavorites } from '@/app/lib/hooks/usePoolFavorites';
@@ -203,7 +203,7 @@ export default function MarketCard({ market }: MarketCardProps) {
           <div className="flex justify-between items-center text-sm">
             <div className="flex items-center gap-1 text-muted-foreground truncate min-w-0">
               <TrendingUp className="w-4 h-4 shrink-0" aria-hidden="true" />
-              <span className="truncate">{formatTokenAmount(market.totalVolume)}</span>
+              <span className="truncate">{formatTokenAmount(BigInt(Math.round(market.totalVolume)))}</span>
             </div>
             <div className="flex items-center gap-1 text-muted-foreground shrink-0">
               <CountdownTimer

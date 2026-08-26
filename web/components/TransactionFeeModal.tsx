@@ -2,7 +2,7 @@
 
 import { useId, useRef } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { formatTokenAmount } from '@/lib/formatting';
+import { formatTokenAmount } from '@/app/lib/formatting';
 import { useFocusTrap } from '@/app/lib/hooks/useFocusTrap';
 import { useEscapeDismiss } from '@/app/lib/hooks/useEscapeDismiss';
 
@@ -33,7 +33,7 @@ export function TransactionFeeModal({
 
   if (!isOpen) return null;
 
-  const feeLabel = formatTokenAmount(Number(BigInt(feeStroops)));
+  const feeLabel = formatTokenAmount(BigInt(feeStroops));
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">

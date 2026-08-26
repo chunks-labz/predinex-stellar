@@ -7,7 +7,7 @@ import { renderWithProviders } from './helpers/renderWithProviders';
 import * as AppKitReact from '@reown/appkit/react';
 import * as RuntimeConfig from '../app/lib/runtime-config';
 import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
-import * as StacksApi from '../app/lib/stacks-api';
+import * as SorobanReadApi from '../app/lib/soroban-read-api';
 import { stellarNetworks } from '../lib/appkit-config';
 
 // Mock the dependencies
@@ -25,7 +25,7 @@ vi.mock('@/components/WalletAdapterProvider', () => ({
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../app/lib/stacks-api', () => ({
+vi.mock('../app/lib/soroban-read-api', () => ({
   getMarkets: vi.fn(),
 }));
 
@@ -60,7 +60,7 @@ describe('Network Mismatch Recovery Integration', () => {
     vi.mocked(RuntimeConfig.getRuntimeConfig).mockReturnValue({ network: 'testnet' } as any);
     
     // Mock API
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool as any]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool as any]);
   });
 
   it('detects mismatch, shows warning, and recovers when network is switched', async () => {

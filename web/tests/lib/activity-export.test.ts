@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ActivityItem } from '../../app/lib/stacks-api';
+import type { ActivityItem } from '../../app/lib/market-types';
 import {
   EXPORT_MAX_WINDOW_DAYS,
   activitiesToCSV,

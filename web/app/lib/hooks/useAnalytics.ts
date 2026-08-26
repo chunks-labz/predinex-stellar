@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getMarkets, getTotalVolume } from '../stacks-api';
+import { getMarkets } from '../soroban-read-api';
 import type { PlatformMetrics } from '../analytics/types';
 
 interface AnalyticsData {
@@ -22,10 +22,8 @@ export function useAnalytics(): AnalyticsData {
   useEffect(() => {
     async function load() {
       try {
-        const [markets, totalVolume] = await Promise.all([
-          getMarkets('all'),
-          getTotalVolume(),
-        ]);
+        const markets = await getMarkets('all');
+        const totalVolume = markets.reduce((sum, m) => sum + Number(m.totalA ?? 0) + Number(m.totalB ?? 0), 0);
 
         const activePools = markets.filter((m) => m.status === 'active').length;
         const settledPools = markets.filter((m) => m.status === 'settled').length;

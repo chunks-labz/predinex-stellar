@@ -2,7 +2,7 @@
 
 import { fetchCallReadOnlyFunction, cvToValue, principalCV, uintCV } from "@stacks/transactions";
 import { STACKS_MAINNET, STACKS_TESTNET, type StacksNetwork } from "@stacks/network";
-import { UserBet, BetHistory, DashboardData } from "./dashboard-types";
+import { UserBet, BetHistory, DashboardData } from "./market-types";
 import { PoolData } from "./market-types";
 import { fetchAllPools, getEnhancedPool } from "./enhanced-stacks-api";
 import { getCurrentBlockHeight } from './market-utils';

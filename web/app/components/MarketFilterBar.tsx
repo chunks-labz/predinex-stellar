@@ -5,7 +5,7 @@ import SearchBar from '@/components/SearchBar';
 import FilterPresets from './FilterPresets';
 import type { FilterPreset } from '../lib/hooks/useFilterPresets';
 import type { MarketFilters, MarketStatusFilter, SortOption, TimeRangeFilter } from '../lib/market-types';
-import { TOKEN_SYMBOL } from '@/lib/formatting';
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface MarketFilterBarProps {
   filters: MarketFilters;

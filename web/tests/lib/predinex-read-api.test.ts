@@ -35,10 +35,10 @@ vi.mock('../../app/lib/runtime-config', () => ({
   })),
 }));
 
-vi.mock('../../app/lib/stacks-api', () => ({
+vi.mock('../../app/lib/soroban-read-api', () => ({
   getTotalVolume: mockGetTotalVolume,
   getMarkets: mockGetMarkets,
-  getUserActivity: mockGetUserActivity,
+  getUserActivityFromSoroban: mockGetUserActivityFromSoroban,
 }));
 
 vi.mock('../../app/lib/soroban-event-service', () => ({
@@ -108,6 +108,5 @@ describe('predinexReadApi', () => {
     expect(predinexReadApi.getUserActivity).toBe(predinexReadApi.getUserActivitySoroban);
     expect(predinexReadApi.getTotalVolume).toBe(mockGetTotalVolume);
     expect(predinexReadApi.getMarkets).toBe(mockGetMarkets);
-    expect(predinexReadApi.getStacksActivity).toBe(mockGetUserActivity);
   });
 });

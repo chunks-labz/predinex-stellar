@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Download, FileJson, FileSpreadsheet, ChevronDown } from 'lucide-react';
-import type { ActivityItem } from '../lib/stacks-api';
+import type { ActivityItem } from '../lib/market-types';
 import {
   EXPORT_MAX_WINDOW_DAYS,
   type ExportFormat,

@@ -13,7 +13,7 @@ import {
   XCircle,
   Clock
 } from 'lucide-react';
-import { BetHistory, DashboardFilters } from '../../lib/dashboard-types';
+import { BetHistory, DashboardFilters } from '../../lib/market-types';
 import { formatCurrency, formatProfitLoss } from '../../lib/dashboard-utils';
 
 interface BetHistoryTableProps {

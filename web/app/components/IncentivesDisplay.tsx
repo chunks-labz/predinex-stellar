@@ -7,7 +7,7 @@ import { useIncentives } from '../lib/hooks/useIncentives';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { getStacksCoreApiBaseUrl, predinexReadApi } from '../lib/adapters/predinex-read-api';
 import { calculateTotalIncentive, DEFAULT_INCENTIVE_CONFIG, BetterIncentive } from '../lib/liquidity-incentives';
-import { TOKEN_SYMBOL } from '@/lib/formatting';
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { Gift, TrendingUp, Award, Zap } from 'lucide-react';
 
 interface IncentivesDisplayProps {

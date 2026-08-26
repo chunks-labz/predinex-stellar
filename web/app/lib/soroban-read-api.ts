@@ -15,7 +15,7 @@ import { getRuntimeConfig } from './runtime-config';
 import { createScopedLogger } from './logger';
 
 const log = createScopedLogger('soroban-read-api');
-import type { Pool, UserBetData } from './stacks-api';
+import type { Pool, UserBetData } from './market-types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -1076,6 +1076,45 @@ export const sorobanReadApi = {
 
 /** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */
 export type { Pool, UserBetData };
+
+// ---------------------------------------------------------------------------
+// getMarkets — delegates to Soroban read layer
+// ---------------------------------------------------------------------------
+
+/**
+ * Lists pools with optional settlement filtering.
+ * Internally delegates to Soroban batch reads.
+ *
+ * @param filter - Which pools to include: 'active', 'settled', or 'all' (default 'all').
+ * @returns Array of matching pools; empty when count is unavailable or no pools match.
+ */
+export async function getMarkets(filter: 'active' | 'settled' | 'all' = 'all'): Promise<Pool[]> {
+  const count = await getPoolCountFromSoroban();
+  if (count === 0) return [];
+
+  const rawPools = await getPoolsBatchFromSoroban(1, count);
+  const pools: Pool[] = [];
+
+  for (const pool of rawPools) {
+    if (pool) {
+      if (filter === 'active' && pool.settled) continue;
+      if (filter === 'settled' && !pool.settled) continue;
+      pools.push(pool);
+    }
+  }
+  return pools;
+}
+
+/**
+ * Computes total volume across all pools by summing totalA + totalB.
+ * Replaces the deprecated Stacks-only getTotalVolume from stacks-api.ts.
+ */
+export async function getTotalVolume(): Promise<number> {
+  const count = await getPoolCountFromSoroban();
+  if (count === 0) return 0;
+  const pools = await getPoolsBatchFromSoroban(1, count);
+  return pools.reduce((sum, p) => sum + (p?.totalA ?? 0) + (p?.totalB ?? 0), 0);
+}
 
 // ---------------------------------------------------------------------------
 // #721 — Extended pool metadata
