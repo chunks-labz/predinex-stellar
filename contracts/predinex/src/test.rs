@@ -5012,14 +5012,17 @@ fn m1_create_pool_emits_pool_created_event() {
     let events = env.events().all();
     let event = events.events().last().expect("must emit create_pool event");
 
-    // Topics: [create_pool, pool_id]
+    // Topics: [create_pool, event_version, pool_id]
     let topic0: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 0)).unwrap();
-    let topic1: u32 =
+    let topic1: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 1)).unwrap();
+    let topic2: u32 =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 2)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "create_pool"));
-    assert_eq!(topic1, pool_id);
+    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+    assert_eq!(topic2, pool_id);
 
     let data_val: Val = match &event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<

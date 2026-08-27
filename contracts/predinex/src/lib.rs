@@ -2939,7 +2939,7 @@ impl PredinexContract {
             .set(&DataKey::PoolCounter, &pool_id);
 
         env.events().publish(
-            (Symbol::new(env, "create_pool"), pool_id),
+            (Symbol::new(env, "create_pool"), event_version(env), pool_id),
             CreatePoolEvent {
                 creator,
                 expiry,
