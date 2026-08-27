@@ -407,6 +407,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "deposit_deadline"
+                    },
+                    "val": {
+                      "u64": "2596600"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "description"
                     },
                     "val": {

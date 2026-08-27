@@ -79,7 +79,8 @@
                 },
                 {
                   "i128": "10000000"
-                }
+                },
+                "void"
               ]
             }
           },
@@ -353,6 +354,14 @@
                     },
                     "val": {
                       "i128": "3000000"
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "deposit_deadline"
+                    },
+                    "val": {
+                      "u64": "3600"
                     }
                   },
                   {
@@ -981,6 +990,36 @@
                     }
                   }
                 ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "UserExposurePerPool"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "i128": "3000000"
               }
             }
           },

@@ -319,7 +319,6 @@ const MIN_POOL_DURATION_SECS: u64 = 300;
 /// #151 — Maximum pool lifetime in seconds (matches web validators / tests).
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
 /// #570 — Maximum pool lifetime in seconds (~1 year).
-const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
 /// Maximum duration a single `extend_pool_duration` call may add (30 days).
 ///
 /// The total-lifetime cap (`MAX_POOL_DURATION_SECS`) already bounds how far a
@@ -716,6 +715,14 @@ pub enum ScheduledClaimStatus {
     Cancelled,
 }
 
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub enum UserClaimStatus {
+    Paid,
+    Pending,
+    Refunded,
+}
+
 #[derive(Clone)]
 #[contracttype]
 pub struct ScheduledClaim {
@@ -961,6 +968,7 @@ pub struct UserClaimEntry {
     pub fee: i128,
     pub timestamp: u64,
     pub winning_outcome: u32,
+    pub status: UserClaimStatus,
 }
 
 /// #193 — Global contract configuration returned by `get_config`.
@@ -4840,10 +4848,33 @@ impl PredinexContract {
                 Symbol::new(&env, "claim_refund"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             refund,
         );
+
+        // Record refund in user claim history for analytics.
+        let history_key = DataKey::UserClaimHistory(user.clone());
+        let mut history: Vec<UserClaimEntry> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(UserClaimEntry {
+            pool_id,
+            amount: refund,
+            fee: 0,
+            timestamp: env.ledger().timestamp(),
+            winning_outcome: 0,
+            status: UserClaimStatus::Refunded,
+        });
+        while history.len() > 50 {
+            history.remove(0);
+        }
+        env.storage().persistent().set(&history_key, &history);
+        env.storage()
+            .persistent()
+            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
 
         Ok(refund)
     }
@@ -5284,6 +5315,7 @@ impl PredinexContract {
             fee,
             timestamp: env.ledger().timestamp(),
             winning_outcome,
+            status: UserClaimStatus::Paid,
         });
         while history.len() > 50 {
             history.remove(0);
@@ -5379,10 +5411,34 @@ impl PredinexContract {
                 Symbol::new(&env, "claim_scheduled"),
                 event_version(&env),
                 pool_id,
-                user,
+                user.clone(),
             ),
             (id, claim_at),
         );
+        // Record a pending history entry so frontends/off-chain bots can
+        // distinguish scheduled claims from completed payouts.
+        let history_key = DataKey::UserClaimHistory(user.clone());
+        let mut history: Vec<UserClaimEntry> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(UserClaimEntry {
+            pool_id,
+            amount: 0,
+            fee: 0,
+            timestamp: env.ledger().timestamp(),
+            winning_outcome: 0,
+            status: UserClaimStatus::Pending,
+        });
+        while history.len() > 50 {
+            history.remove(0);
+        }
+        env.storage().persistent().set(&history_key, &history);
+        env.storage()
+            .persistent()
+            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
         Ok(id)
     }
 
@@ -8556,6 +8612,7 @@ impl PredinexContract {
             fee: 0,
             timestamp: env.ledger().timestamp(),
             winning_outcome,
+            status: UserClaimStatus::Paid,
         });
         while history.len() > 50 {
             history.remove(0);

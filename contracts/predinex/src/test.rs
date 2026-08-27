@@ -5929,6 +5929,7 @@ fn n3_get_user_claim_history_returns_correct_entries() {
     assert!(entry.fee > 0);
     assert_eq!(entry.timestamp, 4000);
     assert_eq!(entry.winning_outcome, 0);
+    assert_eq!(entry.status, super::UserClaimStatus::Paid);
 }
 
 /// N4: get_user_claim_history respects pagination (start_cursor, limit).
