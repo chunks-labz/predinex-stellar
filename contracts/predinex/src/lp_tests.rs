@@ -291,3 +291,58 @@ fn test_lp_reward_dust_accumulator_recovers_rounding() {
     let pending = ctx.client.get_pending_lp_rewards(&pool_id, &lp);
     assert_eq!(pending, 3);
 }
+
+/// Issue #1022 — when the LP reward pool is capped below a user's accrued
+/// rewards, `claim_lp_rewards` must only record debt for the amount actually
+/// paid out. The unpaid remainder has to stay claimable once the pool is
+/// topped up again.
+#[test]
+fn test_capped_reward_pool_keeps_residual_claimable() {
+    let ctx = LpCtx::new();
+    let lp = Address::generate(&ctx.env);
+    let deposit = 10_000_000i128;
+    let reward_amount = 1_000_000i128;
+    ctx.mint(&lp, deposit);
+    ctx.mint(&ctx.admin, reward_amount);
+
+    let pool_id = ctx.create_pool(&ctx.admin);
+    ctx.client.deposit_liquidity(&lp, &pool_id, &deposit);
+    ctx.client
+        .distribute_lp_rewards(&ctx.admin, &pool_id, &reward_amount);
+
+    assert_eq!(ctx.client.get_pending_lp_rewards(&pool_id, &lp), reward_amount);
+
+    // Simulate the reward pool being drained below the LP's accrued rewards
+    // (e.g. a boosted staker claimed ahead of them, or the pool was funded
+    // in tranches). Only 400k of the 1_000k entitlement can be paid now.
+    let capped = 400_000i128;
+    ctx.env.as_contract(&ctx.client.address, || {
+        ctx.env
+            .storage()
+            .persistent()
+            .set(&DataKey::LpRewardPool(pool_id), &capped);
+    });
+
+    let claimed = ctx.client.claim_lp_rewards(&lp, &pool_id);
+    assert_eq!(claimed, capped);
+
+    // The un-paid remainder must still be claimable, not silently lost.
+    let residual = reward_amount - capped;
+    assert_eq!(
+        ctx.client.get_pending_lp_rewards(&pool_id, &lp),
+        residual,
+        "residual LP rewards were lost when the reward pool was capped"
+    );
+
+    // Top the reward pool back up; the residual should now pay out in full.
+    ctx.env.as_contract(&ctx.client.address, || {
+        ctx.env
+            .storage()
+            .persistent()
+            .set(&DataKey::LpRewardPool(pool_id), &residual);
+    });
+
+    let claimed_again = ctx.client.claim_lp_rewards(&lp, &pool_id);
+    assert_eq!(claimed_again, residual);
+    assert_eq!(ctx.client.get_pending_lp_rewards(&pool_id, &lp), 0);
+}

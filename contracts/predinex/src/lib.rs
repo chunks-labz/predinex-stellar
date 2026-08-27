@@ -9508,11 +9508,20 @@ impl PredinexContract {
             &DataKey::LpRewardPool(pool_id),
             &(reward_pool - actual_reward),
         );
-        position.reward_debt = position
+        // Only advance reward_debt by the amount actually disbursed. When the
+        // reward pool is capped below `pending`, the unpaid remainder must stay
+        // claimable on a later call (once the pool is topped up), so we never
+        // record debt beyond the user's full fee-per-share entitlement.
+        let full_debt = position
             .shares
             .checked_mul(fee_per_share)
             .ok_or(ContractError::PoolTotalOverflow)?
             / LP_PRECISION;
+        position.reward_debt = position
+            .reward_debt
+            .checked_add(actual_reward)
+            .ok_or(ContractError::PoolTotalOverflow)?
+            .min(full_debt);
         env.storage()
             .persistent()
             .set(&DataKey::LpPosition(pool_id, user.clone()), &position);
