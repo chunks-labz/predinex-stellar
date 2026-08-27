@@ -1705,6 +1705,28 @@ impl PredinexContract {
             .unwrap_or_else(|| Self::get_protocol_fee(env.clone())) as i128
     }
 
+    /// Pure payout calculation shared by `preview_claimable_amount` and
+    /// `claim_winnings_internal` to prevent logic drift (#1030).
+    ///
+    /// Returns `None` on overflow or when the pool has zero balance / no
+    /// winning bets, which callers translate to their respective error /
+    /// "unclaimable" signals.
+    fn compute_winnings(
+        user_winning_bet: i128,
+        total_pool_balance: i128,
+        pool_winning_total: i128,
+        fee_bps: i128,
+    ) -> Option<i128> {
+        if total_pool_balance == 0 || pool_winning_total == 0 {
+            return None;
+        }
+        let fee = total_pool_balance.checked_mul(fee_bps)? / 10_000;
+        let net_pool_balance = total_pool_balance.checked_sub(fee)?;
+        user_winning_bet
+            .checked_mul(net_pool_balance)?
+            .checked_div(pool_winning_total)
+    }
+
     /// Set per-pool bet limits.
     ///
     /// Only the treasury recipient may call this (same permission model as
@@ -3972,8 +3994,9 @@ impl PredinexContract {
             None => return Ok(current_odds),
         };
         let elapsed_since_update = now.saturating_sub(state.last_updated_at) as i128;
-        let current_cumulative = state
-            .last_odds
+        // #1031 — use current odds (not last snapshot) for the elapsed window
+        // to avoid stale extrapolation when odds have moved since last update.
+        let current_cumulative = current_odds
             .checked_mul(elapsed_since_update)
             .and_then(|weighted| state.cumulative_odds_time.checked_add(weighted))
             .ok_or(ContractError::PoolTotalOverflow)?;
@@ -5177,10 +5200,14 @@ impl PredinexContract {
             / 10000;
         let net_pool_balance = total_pool_balance - fee;
 
-        let winnings = user_winning_bet
-            .checked_mul(net_pool_balance)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / pool_winning_total;
+        // #1030 — use shared payout calculation
+        let winnings = Self::compute_winnings(
+            user_winning_bet,
+            total_pool_balance,
+            pool_winning_total,
+            fee_bps,
+        )
+        .ok_or(ContractError::PoolTotalOverflow)?;
 
         // #158 — load (or default) the per-pool payout state and figure out
         // (a) whether this is the first claim (so we credit the fee), and
@@ -5966,6 +5993,17 @@ impl PredinexContract {
         }
 
         Self::record_treasury_withdrawal_rate_limit(&env, amount)?;
+
+        // #1027 — re-read treasury after rate-limit check to close TOCTOU race.
+        let current_treasury: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Treasury)
+            .unwrap_or(0);
+
+        if amount > current_treasury {
+            return Err(ContractError::InsufficientTreasuryBalance);
+        }
 
         let token_address = env
             .storage()
@@ -7406,17 +7444,17 @@ impl PredinexContract {
             return ClaimPreview::Claimable(0);
         }
         let fee_bps = Self::pool_effective_fee_bps(&env, pool_id);
-        let fee = match total_pool_balance.checked_mul(fee_bps) {
-            Some(f) => f / 10000,
-            None => return ClaimPreview::Unclaimable,
-        };
-        let net_pool_balance = total_pool_balance - fee;
-        let amount = match user_winning_bet.checked_mul(net_pool_balance) {
-            Some(a) => a / pool_winning_total,
-            None => return ClaimPreview::Unclaimable,
-        };
 
-        ClaimPreview::Claimable(amount)
+        // #1030 — use shared payout calculation
+        match Self::compute_winnings(
+            user_winning_bet,
+            total_pool_balance,
+            pool_winning_total,
+            fee_bps,
+        ) {
+            Some(amount) => ClaimPreview::Claimable(amount),
+            None => ClaimPreview::Unclaimable,
+        }
     }
 
     /// Return the number of unique participants who have placed at least one
@@ -8657,6 +8695,39 @@ impl PredinexContract {
 
         if amount <= 0 {
             return Err(ContractError::InvalidWithdrawalAmount);
+        }
+
+        // #1028 — prevent rescue from sweeping LP reward obligations.
+        // When rescuing the contract's main staking token, compute the sum of
+        // all pending LP reward pools and ensure the rescue amount leaves enough
+        // to cover those obligations.
+        let main_token: Option<Address> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Token);
+        if let Some(ref mt) = main_token {
+            if *mt == token {
+                let pool_count = Self::get_pool_count(env.clone());
+                let mut total_lp_obligations: i128 = 0;
+                for pid in 1..=pool_count {
+                    let obligation: i128 = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::LpRewardPool(pid))
+                        .unwrap_or(0);
+                    total_lp_obligations = total_lp_obligations
+                        .checked_add(obligation)
+                        .ok_or(ContractError::PoolTotalOverflow)?;
+                }
+                let contract_balance = token::Client::new(&env, &token)
+                    .balance(&env.current_contract_address());
+                let available = contract_balance
+                    .checked_sub(total_lp_obligations)
+                    .ok_or(ContractError::InsufficientTreasuryBalance)?;
+                if amount > available {
+                    return Err(ContractError::InsufficientTreasuryBalance);
+                }
+            }
         }
 
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
