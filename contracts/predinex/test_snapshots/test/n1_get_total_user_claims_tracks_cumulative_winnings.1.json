@@ -728,14 +728,6 @@
                   },
                   {
                     "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3700"
-                    }
-                  },
-                  {
-                    "key": {
                       "symbol": "description"
                     },
                     "val": {
@@ -2324,6 +2316,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "status"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "symbol": "Paid"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "timestamp"
                         },
                         "val": {
@@ -2364,6 +2368,18 @@
                         },
                         "val": {
                           "u32": 2
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "status"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "symbol": "Paid"
+                            }
+                          ]
                         }
                       },
                       {

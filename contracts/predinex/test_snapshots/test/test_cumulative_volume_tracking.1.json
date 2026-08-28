@@ -605,14 +605,6 @@
                   },
                   {
                     "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
-                    }
-                  },
-                  {
-                    "key": {
                       "symbol": "description"
                     },
                     "val": {
@@ -762,14 +754,6 @@
                     },
                     "val": {
                       "i128": "400"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
                     }
                   },
                   {
@@ -2033,6 +2017,18 @@
                         },
                         "val": {
                           "u32": 1
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "status"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "symbol": "Paid"
+                            }
+                          ]
                         }
                       },
                       {

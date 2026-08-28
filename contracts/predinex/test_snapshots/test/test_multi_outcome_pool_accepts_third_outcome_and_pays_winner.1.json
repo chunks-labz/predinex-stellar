@@ -40,7 +40,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "10000"
+                  "i128": "100000000"
                 }
               ]
             }
@@ -643,14 +643,6 @@
                     },
                     "val": {
                       "i128": "600"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
                     }
                   },
                   {
@@ -1692,6 +1684,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "status"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "symbol": "Paid"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "timestamp"
                         },
                         "val": {
@@ -1991,7 +1995,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "9900"
+                      "i128": "99999900"
                     }
                   },
                   {

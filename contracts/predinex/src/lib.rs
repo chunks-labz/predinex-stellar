@@ -7431,16 +7431,12 @@ impl PredinexContract {
     /// While paused, sensitive operations (place_bet, settle_pool, claim_winnings,
     /// claim_refund, void_pool) are blocked. Treasury withdrawals and admin functions
     /// remain operational.
+    ///
+    /// Emits `contract_paused` or `contract_unpaused` with `event_version()` in the
+    /// topic tuple so indexers can filter by version like every other event.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &paused);
 
         let event_name = if paused {
@@ -7453,32 +7449,18 @@ impl PredinexContract {
         Ok(())
     }
 
-    /// #456 — Pause the contract. Convenience wrapper around `set_paused(true)`.
+    /// #456 — Pause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolPaused` event.
+    /// Emits a `contract_paused` event.
     pub fn pause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
-        caller.require_auth();
-        Self::require_treasury_recipient(&env, &caller)?;
-        env.storage().persistent().set(&DataKey::Paused, &true);
-        env.events().publish(
-            (Symbol::new(&env, "PoolPaused"), event_version(&env)),
-            caller,
-        );
-        Ok(())
+        Self::set_paused(env, caller, true)
     }
 
-    /// #456 — Unpause the contract. Convenience wrapper around `set_paused(false)`.
+    /// #456 — Unpause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolUnpaused` event.
+    /// Emits a `contract_unpaused` event.
     pub fn unpause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
-        caller.require_auth();
-        Self::require_treasury_recipient(&env, &caller)?;
-        env.storage().persistent().set(&DataKey::Paused, &false);
-        env.events().publish(
-            (Symbol::new(&env, "PoolUnpaused"), event_version(&env)),
-            caller,
-        );
-        Ok(())
+        Self::set_paused(env, caller, false)
     }
 
     /// Return whether the contract is currently paused.

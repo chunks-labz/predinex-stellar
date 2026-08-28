@@ -491,14 +491,6 @@
                   },
                   {
                     "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
-                    }
-                  },
-                  {
-                    "key": {
                       "symbol": "description"
                     },
                     "val": {
@@ -643,14 +635,6 @@
                     },
                     "val": {
                       "i128": "600"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
                     }
                   },
                   {

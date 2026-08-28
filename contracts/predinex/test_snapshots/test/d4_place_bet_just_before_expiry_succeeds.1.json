@@ -40,7 +40,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "10000"
+                  "i128": "100000000"
                 }
               ]
             }
@@ -388,14 +388,6 @@
                     },
                     "val": {
                       "i128": "100"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
                     }
                   },
                   {
@@ -1154,7 +1146,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "9900"
+                      "i128": "99999900"
                     }
                   },
                   {

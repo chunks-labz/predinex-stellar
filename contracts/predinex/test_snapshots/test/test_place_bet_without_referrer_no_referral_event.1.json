@@ -40,7 +40,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "i128": "10000"
+                  "i128": "100000000"
                 }
               ]
             }
@@ -106,7 +106,7 @@
                   "u32": 0
                 },
                 {
-                  "i128": "100"
+                  "i128": "1000000"
                 },
                 "void"
               ]
@@ -126,7 +126,7 @@
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                     },
                     {
-                      "i128": "100"
+                      "i128": "1000000"
                     }
                   ]
                 }
@@ -386,15 +386,7 @@
                       "symbol": "cumulative_volume"
                     },
                     "val": {
-                      "i128": "100"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "deposit_deadline"
-                    },
-                    "val": {
-                      "u64": "3600"
+                      "i128": "1000000"
                     }
                   },
                   {
@@ -484,7 +476,7 @@
                       "symbol": "total_a"
                     },
                     "val": {
-                      "i128": "100"
+                      "i128": "1000000"
                     }
                   },
                   {
@@ -574,87 +566,6 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "PoolLargePoolCoolingPeriod"
-                  },
-                  {
-                    "u32": 1
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "u64": "0"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PoolLargePoolThreshold"
-                  },
-                  {
-                    "u32": 1
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "i128": "0"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "vec": [
-                  {
-                    "symbol": "PoolMaxPoolSize"
-                  },
-                  {
-                    "u32": 1
-                  }
-                ]
-              },
-              "durability": "persistent",
-              "val": {
-                "i128": "0"
-              }
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 518400
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4",
-              "key": {
-                "vec": [
-                  {
                     "symbol": "PoolOutcomeTotals"
                   },
                   {
@@ -666,7 +577,7 @@
               "val": {
                 "vec": [
                   {
-                    "i128": "100"
+                    "i128": "1000000"
                   },
                   {
                     "i128": "0"
@@ -780,7 +691,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "100"
+                "i128": "1000000"
               }
             }
           },
@@ -1092,7 +1003,7 @@
                       "symbol": "amount_a"
                     },
                     "val": {
-                      "i128": "100"
+                      "i128": "1000000"
                     }
                   },
                   {
@@ -1108,7 +1019,7 @@
                       "symbol": "total_bet"
                     },
                     "val": {
-                      "i128": "100"
+                      "i128": "1000000"
                     }
                   }
                 ]
@@ -1141,7 +1052,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "100"
+                "i128": "1000000"
               }
             }
           },
@@ -1173,7 +1084,7 @@
               "val": {
                 "vec": [
                   {
-                    "i128": "100"
+                    "i128": "1000000"
                   },
                   {
                     "i128": "0"
@@ -1234,7 +1145,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "9900"
+                      "i128": "99000000"
                     }
                   },
                   {
@@ -1286,7 +1197,7 @@
                       "symbol": "amount"
                     },
                     "val": {
-                      "i128": "100"
+                      "i128": "1000000"
                     }
                   },
                   {
@@ -1455,7 +1366,7 @@
               }
             ],
             "data": {
-              "i128": "100"
+              "i128": "1000000"
             }
           }
         }
@@ -1490,7 +1401,7 @@
                     "symbol": "amount"
                   },
                   "val": {
-                    "i128": "100"
+                    "i128": "1000000"
                   }
                 },
                 {
@@ -1514,7 +1425,7 @@
                     "symbol": "total_yes"
                   },
                   "val": {
-                    "i128": "100"
+                    "i128": "1000000"
                   }
                 }
               ]
