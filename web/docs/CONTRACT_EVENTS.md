@@ -470,3 +470,10 @@ Lower-volume operational events (batch daily):
 - 4 legacy events without version marker for backward compatibility
 - Full typed event payloads for indexer reliability
 
+### Recent fixes
+- **#1054** — `PoolPaused` / `PoolUnpaused` removed. All three pause entry
+  points (`set_paused`, `pause_contract`, `unpause_contract`) now emit the
+  canonical `contract_paused` / `contract_unpaused` with `event_version()` via
+  a single code path in `set_paused`. Off-chain indexers need only subscribe to
+  `contract_paused` / `contract_unpaused`.
+
