@@ -7310,10 +7310,16 @@ impl PredinexContract {
             }
             let key = DataKey::UserBet(pool_id, user.clone());
             if let Some(bet) = env.storage().persistent().get::<_, UserBet>(&key) {
-                // #189 — extend position TTL on read so dashboard queries keep entries alive.
-                env.storage()
-                    .persistent()
-                    .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+                // #1053 — Only extend TTL if remaining lifetime is below threshold.
+                // This avoids metered write amplification from dashboard polling; reads
+                // now trigger writes only when the entry is approaching expiration.
+                if let Some(remaining_ttl) = env.storage().persistent().get_ttl(&key) {
+                    if remaining_ttl < POOL_BUMP_THRESHOLD {
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+                    }
+                }
                 result.push_back(UserPoolPosition {
                     pool_id,
                     amount_a: bet.amount_a,
@@ -7856,6 +7862,25 @@ impl PredinexContract {
             return Err(ContractError::InvalidWebhookUrl);
         }
 
+        // #1050 — Validate URL has a host after the scheme.
+        // A valid HTTPS URL must have at least "https://a" (10+ bytes) and contain
+        // a character after "https://" that is not a colon or slash.
+        if url.len() < 10 {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        let url_bytes = url.to_string();
+        let after_scheme = &url_bytes.as_bytes()[8..]; // skip "https://"
+        if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        // Ensure the URL contains valid ASCII/UTF-8 hostname characters after scheme.
+        // Reject control characters and non-printable bytes.
+        for &byte in after_scheme.iter().take(after_scheme.len().min(64)) {
+            if byte < 0x20 || byte > 0x7E {
+                return Err(ContractError::InvalidWebhookUrl);
+            }
+        }
+
         let mut webhooks: Vec<Webhook> = env
             .storage()
             .persistent()
@@ -7988,6 +8013,15 @@ impl PredinexContract {
         Self::require_treasury_recipient(&env, &caller)?;
 
         if rate_bps <= 0 {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+
+        // #1051 — Clamp rate_bps to a sane range (1_000 to 1_000_000) to prevent
+        // accidental or malicious extreme rate changes that would break multi-asset
+        // bet normalization and payouts.
+        const MIN_RATE_BPS: i128 = 1_000;      // 0.1x (10%)
+        const MAX_RATE_BPS: i128 = 1_000_000;  // 100x (10,000%)
+        if rate_bps < MIN_RATE_BPS || rate_bps > MAX_RATE_BPS {
             return Err(ContractError::FeeOutOfBounds);
         }
 
@@ -9172,6 +9206,21 @@ impl PredinexContract {
         if mirror.is_settled {
             return Err(ContractError::PoolAlreadySettled);
         }
+        
+        // #1052 — Validate winning_outcome is within the source pool's outcome set bounds.
+        // Fetch the source pool to check its outcome count.
+        let source_pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(source_pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        
+        // Reject any outcome index >= num_outcomes to prevent settling to an
+        // out-of-bounds outcome that would break payout calculations.
+        if winning_outcome >= source_pool.num_outcomes {
+            return Err(ContractError::InvalidOutcome);
+        }
+        
         let timeout: u64 = env
             .storage()
             .persistent()
