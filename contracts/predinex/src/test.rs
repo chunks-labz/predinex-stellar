@@ -3253,6 +3253,32 @@ fn i3_non_creator_cannot_cancel_pool() {
         .cancel_pool(&other, &pool_id, &String::from_str(&t.env, "attempt"));
 }
 
+#[test]
+fn i3b_non_creator_cannot_cancel_expired_open_pool() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+
+    t.client
+        .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
+    expire_pool(&t.env);
+
+    let other = Address::generate(&t.env);
+    let result = t
+        .client
+        .try_cancel_pool(&other, &pool_id, &String::from_str(&t.env, "attempt"));
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+    let pool = t.client.get_pool(&pool_id).expect("pool must remain");
+    assert_eq!(pool.status, PoolStatus::Open);
+    assert!(t.client.get_user_bet(&pool_id, &t.user).is_some());
+
+    t.client.settle_pool(&t.admin, &pool_id, &0u32);
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Settled(0)
+    );
+}
+
 /// I4: Pool records survive cancellation; storage is not silently deleted.
 #[test]
 fn i4_cancelled_pool_record_is_retained() {
@@ -4421,11 +4447,69 @@ fn test_multi_outcome_pool_accepts_third_outcome_and_pays_winner() {
     assert_eq!(outcome_state.len(), 3);
     assert_eq!(outcome_state.get(2).unwrap().total, 300i128);
 
+    let pool = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.total_a, 100i128);
+    assert_eq!(pool.total_b, 200i128);
+
+    let third_outcome_bet = t.client.get_user_bet(&pool_id, &user3).unwrap();
+    assert_eq!(third_outcome_bet.amount_a, 0i128);
+    assert_eq!(third_outcome_bet.amount_b, 0i128);
+    assert_eq!(third_outcome_bet.total_bet, 300i128);
+
     expire_pool(&t.env);
     t.client.settle_pool(&t.admin, &pool_id, &2u32);
 
+    assert_eq!(
+        t.client.preview_claimable_amount(&pool_id, &user3),
+        ClaimPreview::Claimable(588i128)
+    );
+
     let payout = t.client.claim_winnings(&user3, &pool_id);
     assert_eq!(payout, 588i128);
+}
+
+#[test]
+fn test_cancel_bet_on_third_outcome_preserves_binary_mirrors() {
+    let t = setup();
+    let user2 = Address::generate(&t.env);
+    let user3 = Address::generate(&t.env);
+    let token_admin = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token);
+    token_admin.mint(&user2, &10_000i128);
+    token_admin.mint(&user3, &10_000i128);
+
+    let mut outcomes = soroban_sdk::Vec::new(&t.env);
+    outcomes.push_back(String::from_str(&t.env, "Red"));
+    outcomes.push_back(String::from_str(&t.env, "Blue"));
+    outcomes.push_back(String::from_str(&t.env, "Green"));
+
+    let pool_id = t.client.create_multi_outcome_pool(
+        &t.admin,
+        &String::from_str(&t.env, "Three-way pool"),
+        &String::from_str(&t.env, "Choose a color"),
+        &outcomes,
+        &3_600u64,
+        &None::<String>,
+    );
+
+    t.client
+        .place_bet(&user2, &pool_id, &1u32, &200i128, &None::<Address>);
+    t.client
+        .place_bet(&user3, &pool_id, &2u32, &300i128, &None::<Address>);
+
+    let pool_after_bets = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after_bets.total_a, 0i128);
+    assert_eq!(pool_after_bets.total_b, 200i128);
+
+    let refunded = t.client.cancel_bet(&user3, &pool_id, &2u32, &100i128);
+    assert_eq!(refunded, 100i128);
+
+    let pool_after_cancel = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after_cancel.total_a, 0i128);
+    assert_eq!(pool_after_cancel.total_b, 200i128);
+
+    let outcome_state = t.client.get_pool_outcomes(&pool_id);
+    assert_eq!(outcome_state.get(1).unwrap().total, 200i128);
+    assert_eq!(outcome_state.get(2).unwrap().total, 200i128);
 }
 
 #[test]
@@ -7196,6 +7280,32 @@ fn test_empty_winning_pool_handling() {
 
     let w = client.preview_claimable_amount(&pool_id, &user);
     assert_eq!(w, ClaimPreview::NotEligible);
+}
+
+#[test]
+fn claim_winnings_rejects_payout_state_overflow() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+
+    t.client
+        .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
+    expire_pool(&t.env);
+    t.client.settle_pool(&t.admin, &pool_id, &0u32);
+
+    t.env.as_contract(&t.client.address, || {
+        t.env.storage().persistent().set(
+            &DataKey::PoolPayoutState(pool_id),
+            &PoolPayoutState {
+                fee_credited: true,
+                claimed_winning_stake: i128::MAX,
+                paid_out: 0,
+            },
+        );
+    });
+
+    let result = t.client.try_claim_winnings(&t.user, &pool_id);
+    assert_eq!(result, Err(Ok(ContractError::PoolTotalOverflow)));
+    assert!(t.client.get_user_bet(&pool_id, &t.user).is_some());
 }
 
 // ── #1029, #1032, #1034, #1035 Unit Tests ───────────────────────────────────
