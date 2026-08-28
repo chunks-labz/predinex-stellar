@@ -3,6 +3,7 @@
 import { Plus, Trash2 } from 'lucide-react';
 import { MAX_OUTCOME_LENGTH, MAX_OUTCOMES, MIN_OUTCOMES, getHelpText } from '@/lib/validators';
 import type { CreatePoolDraft, FormErrors } from './useCreateWizard';
+import { useI18n } from '@/app/lib/i18n';
 
 interface StepOutcomesProps {
   draft: CreatePoolDraft;
@@ -21,10 +22,14 @@ export function StepOutcomes({
   addOutcome,
   removeOutcome,
 }: StepOutcomesProps) {
+  const { t } = useI18n();
+
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Add between {MIN_OUTCOMES} and {MAX_OUTCOMES} outcome labels. Each must be unique.
+        {t('create.outcomes.hint')
+          .replace('{min}', String(MIN_OUTCOMES))
+          .replace('{max}', String(MAX_OUTCOMES))}
       </p>
 
       {errors.outcomes && (
@@ -38,11 +43,17 @@ export function StepOutcomes({
           const fieldKey = `outcome_${index}`;
           const error = errors[fieldKey];
           const isTouched = touched[fieldKey];
+          const placeholder =
+            index === 0
+              ? t('create.outcomes.placeholderYes')
+              : index === 1
+                ? t('create.outcomes.placeholderNo')
+                : t('create.outcomes.placeholderGeneric');
           return (
             <div key={fieldKey} className="flex items-start gap-2">
               <div className="flex-1">
                 <label htmlFor={fieldKey} className="block text-sm font-medium mb-1">
-                  Outcome {index + 1}
+                  {t('create.outcomes.outcomeLabel').replace('{n}', String(index + 1))}
                 </label>
                 <input
                   id={fieldKey}
@@ -50,7 +61,7 @@ export function StepOutcomes({
                   type="text"
                   value={outcome}
                   onChange={(e) => setOutcome(index, e.target.value)}
-                  placeholder={index === 0 ? 'e.g. Yes' : index === 1 ? 'e.g. No' : 'Outcome label'}
+                  placeholder={placeholder}
                   aria-invalid={!!error}
                   className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
                     isTouched && error ? 'border-red-500' : 'border-input'
@@ -73,7 +84,7 @@ export function StepOutcomes({
                 <button
                   type="button"
                   onClick={() => removeOutcome(index)}
-                  aria-label={`Remove outcome ${index + 1}`}
+                  aria-label={t('create.outcomes.removeAriaLabel').replace('{n}', String(index + 1))}
                   className="mt-7 p-2 rounded-lg border border-border text-muted-foreground hover:text-red-500 hover:border-red-500/40"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -91,7 +102,7 @@ export function StepOutcomes({
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed border-border text-sm hover:bg-muted/30"
         >
           <Plus className="w-4 h-4" />
-          Add outcome
+          {t('create.outcomes.addButton')}
         </button>
       )}
     </div>

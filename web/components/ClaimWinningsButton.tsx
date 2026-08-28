@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useClaimWinnings } from '@/app/lib/hooks/useClaimWinnings';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { Loader2, Coins } from 'lucide-react';
+import { useI18n } from '@/app/lib/i18n';
 
 interface ClaimWinningsButtonProps {
     poolId: number;
@@ -20,6 +21,7 @@ export default function ClaimWinningsButton({
     userAddress,
     onClaimSuccess,
 }: ClaimWinningsButtonProps) {
+    const { t } = useI18n();
     const [isPending, setIsPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const { address, isConnected } = useWallet();
@@ -55,7 +57,7 @@ export default function ClaimWinningsButton({
                 ) : (
                     <Coins className="w-4 h-4 group-hover:rotate-12 transition-transform" />
                 )}
-                {isPending ? 'Processing...' : 'Claim Winnings'}
+                {isPending ? t('claim.processing') : t('claim.button')}
             </button>
             {error && <p className="text-red-400 text-xs text-center font-medium animate-pulse">{error}</p>}
         </div>
