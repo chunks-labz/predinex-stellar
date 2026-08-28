@@ -172,11 +172,18 @@ Any change that touches the contract state or upgrade flow must follow the proce
 
 ## 6. Issue and PR Workflow
 
+### Stellar Wave Program
+
+This repository participates in the **Stellar Wave** program, a community-driven initiative to accelerate protocol development. Issues eligible for the Wave program are labeled with an `area:` tag indicating the impacted subsystem (`area: contract`, `area: web`, `area: docs`, or `area: ops`).
+
+For full details on the Wave program, area taxonomy, acceptance criteria, and triage process, see [`.github/PROGRAM.md`](./.github/PROGRAM.md).
+
 ### Picking up an issue
 
 1. Comment on the issue to let others know you are working on it.
-2. Fork the repository and clone your fork.
-3. Create a branch from `main` using the convention below.
+2. Check application limits if the issue is part of the Wave program.
+3. Fork the repository and clone your fork.
+4. Create a branch from `main` using the convention below.
 
 ### Branch naming
 
