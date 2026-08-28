@@ -9275,6 +9275,78 @@ impl PredinexContract {
         Ok(())
     }
 
+    fn pending_lp_rewards(
+        env: &Env,
+        pool_id: u32,
+        user: &Address,
+        position: &LpPosition,
+        fee_per_share: i128,
+    ) -> Result<(i128, i128), ContractError> {
+        if position.shares <= 0 {
+            return Ok((0, 0));
+        }
+
+        let base_pending = position
+            .shares
+            .checked_mul(fee_per_share)
+            .ok_or(ContractError::PoolTotalOverflow)?
+            / LP_PRECISION
+            - position.reward_debt;
+        if base_pending <= 0 {
+            return Ok((0, 0));
+        }
+
+        let mut pending = base_pending;
+        if let Some(stake) = env
+            .storage()
+            .persistent()
+            .get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone()))
+        {
+            if env.ledger().timestamp() < stake.lock_until {
+                let boost_bps: u32 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpStakeBoostBps)
+                    .unwrap_or(10_000);
+                let staked_fraction = stake
+                    .shares
+                    .checked_mul(10_000)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / position.shares;
+                let boost_portion = base_pending
+                    .checked_mul(staked_fraction)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / 10_000;
+                let boosted = boost_portion
+                    .checked_mul(boost_bps as i128)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / 10_000;
+                pending = base_pending - boost_portion + boosted;
+            }
+        }
+
+        Ok((pending.max(0), base_pending))
+    }
+
+    fn lp_reward_debt_increment(
+        actual_reward: i128,
+        pending: i128,
+        base_pending: i128,
+    ) -> Result<i128, ContractError> {
+        if actual_reward >= pending {
+            return Ok(base_pending);
+        }
+        if pending == base_pending {
+            return Ok(actual_reward);
+        }
+
+        actual_reward
+            .checked_mul(base_pending)
+            .and_then(|scaled| scaled.checked_add(pending - 1))
+            .ok_or(ContractError::PoolTotalOverflow)
+            .map(|scaled| scaled / pending)
+    }
+
     pub fn deposit_liquidity(
         env: Env,
         user: Address,
@@ -9561,40 +9633,8 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::LpFeePerShare(pool_id))
             .unwrap_or(0);
-        let mut pending = position
-            .shares
-            .checked_mul(fee_per_share)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / LP_PRECISION
-            - position.reward_debt;
-
-        if let Some(stake) = env
-            .storage()
-            .persistent()
-            .get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone()))
-        {
-            if env.ledger().timestamp() < stake.lock_until {
-                let boost_bps: u32 = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::LpStakeBoostBps)
-                    .unwrap_or(10_000);
-                let staked_fraction = stake
-                    .shares
-                    .checked_mul(10_000)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / position.shares;
-                let boost_portion = pending
-                    .checked_mul(staked_fraction)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / 10_000;
-                let boosted = boost_portion
-                    .checked_mul(boost_bps as i128)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / 10_000;
-                pending = pending - boost_portion + boosted;
-            }
-        }
+        let (pending, base_pending) =
+            Self::pending_lp_rewards(&env, pool_id, &user, &position, fee_per_share)?;
 
         if pending <= 0 {
             return Err(ContractError::NoLpRewards);
@@ -9627,18 +9667,18 @@ impl PredinexContract {
             &DataKey::LpRewardPool(pool_id),
             &(reward_pool - actual_reward),
         );
-        // Only advance reward_debt by the amount actually disbursed. When the
-        // reward pool is capped below `pending`, the unpaid remainder must stay
-        // claimable on a later call (once the pool is topped up), so we never
-        // record debt beyond the user's full fee-per-share entitlement.
+        // Convert the actual payout back into base fee-per-share debt space.
+        // When boosted rewards are capped by pool balance, advancing debt by
+        // the raw payout would erase too much of the user's residual claim.
         let full_debt = position
             .shares
             .checked_mul(fee_per_share)
             .ok_or(ContractError::PoolTotalOverflow)?
             / LP_PRECISION;
+        let debt_increment = Self::lp_reward_debt_increment(actual_reward, pending, base_pending)?;
         position.reward_debt = position
             .reward_debt
-            .checked_add(actual_reward)
+            .checked_add(debt_increment)
             .ok_or(ContractError::PoolTotalOverflow)?
             .min(full_debt);
         env.storage()
@@ -9781,7 +9821,9 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::LpFeePerShare(pool_id))
             .unwrap_or(0);
-        let pending = position.shares * fee_per_share / LP_PRECISION - position.reward_debt;
+        let pending = Self::pending_lp_rewards(&env, pool_id, &user, &position, fee_per_share)
+            .unwrap_or((0, 0))
+            .0;
         if pending < 0 {
             0
         } else {
