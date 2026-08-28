@@ -12,9 +12,9 @@ import { MIN_POOL_DURATION_SECS } from '@/lib/validators';
  */
 export const TOKEN_CONFIG = {
   /** Display symbol for the native token (e.g., 'STX', 'XLM', 'USD') */
-  SYMBOL: process.env.NEXT_PUBLIC_TOKEN_SYMBOL ?? 'STX',
+  SYMBOL: process.env.NEXT_PUBLIC_TOKEN_SYMBOL ?? 'XLM',
   /** Full token name for display */
-  NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stacks Token',
+  NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stellar Lumens',
   /** Decimal places for display formatting */
   DECIMALS: 2,
   /** Stroops/micro units per token (for conversion) */

@@ -310,7 +310,10 @@ fn test_capped_reward_pool_keeps_residual_claimable() {
     ctx.client
         .distribute_lp_rewards(&ctx.admin, &pool_id, &reward_amount);
 
-    assert_eq!(ctx.client.get_pending_lp_rewards(&pool_id, &lp), reward_amount);
+    assert_eq!(
+        ctx.client.get_pending_lp_rewards(&pool_id, &lp),
+        reward_amount
+    );
 
     // Simulate the reward pool being drained below the LP's accrued rewards
     // (e.g. a boosted staker claimed ahead of them, or the pool was funded

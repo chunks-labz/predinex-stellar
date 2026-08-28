@@ -517,22 +517,10 @@ fn ma_867_1_leaderboard_populated_after_multi_asset_bets() {
     t.base_admin.mint(&user_a, &2_000i128);
     t.base_admin.mint(&user_b, &3_000i128);
 
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &1_000i128,
-        &t.base_token,
-        &None,
-    );
-    t.client.place_multi_asset_bet(
-        &user_b,
-        &pool_id,
-        &1u32,
-        &2_000i128,
-        &t.base_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &1_000i128, &t.base_token, &None);
+    t.client
+        .place_multi_asset_bet(&user_b, &pool_id, &1u32, &2_000i128, &t.base_token, &None);
 
     let leaderboard = t.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
     assert_eq!(
@@ -564,43 +552,21 @@ fn ma_867_2_participant_count_matches_pool_bettors() {
     t.alt_admin.mint(&user_a, &100i128);
     t.alt_admin.mint(&user_b, &200i128);
 
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &50i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &50i128, &t.alt_token, &None);
 
     let count_after_first = t.client.get_participant_count(&pool_id);
     assert_eq!(count_after_first, 1, "one unique bettor after first bet");
 
-    t.client.place_multi_asset_bet(
-        &user_b,
-        &pool_id,
-        &1u32,
-        &100i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_b, &pool_id, &1u32, &100i128, &t.alt_token, &None);
 
     let count_after_second = t.client.get_participant_count(&pool_id);
-    assert_eq!(
-        count_after_second,
-        2,
-        "two unique bettors after second bet"
-    );
+    assert_eq!(count_after_second, 2, "two unique bettors after second bet");
 
     // A second bet from user_a should NOT increase the count.
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &30i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &30i128, &t.alt_token, &None);
 
     let count_after_repeat = t.client.get_participant_count(&pool_id);
     assert_eq!(
@@ -696,10 +662,7 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
         "parity: single and multi normalized payouts must match"
     );
     assert_eq!(multi_res.per_asset.len(), 1);
-    assert_eq!(
-        multi_res.per_asset.get(0).unwrap().amount,
-        single_winnings
-    );
+    assert_eq!(multi_res.per_asset.get(0).unwrap().amount, single_winnings);
 
     // Direct helper parity: compute_winnings vs per-token calc must agree.
     let fee_bps = 200i128; // default protocol fee
@@ -712,7 +675,8 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
     .unwrap();
     assert_eq!(w1, w2);
     // Multi per-token helper should also match.
-    let w_multi = PredinexContract::compute_payout_for_outcome(3_000, 9_000, 3_000, fee_bps).unwrap();
+    let w_multi =
+        PredinexContract::compute_payout_for_outcome(3_000, 9_000, 3_000, fee_bps).unwrap();
     assert_eq!(w1, w_multi);
 }
 
@@ -807,7 +771,10 @@ fn parity_single_vs_multi_mixed_token_normalized_parity() {
     let mut normalized_sum: i128 = 0;
     for i in 0..multi_res.per_asset.len() {
         let entry = multi_res.per_asset.get(i).unwrap();
-        let rate = t.client.get_token_exchange_rate(&entry.token).unwrap_or(10_000);
+        let rate = t
+            .client
+            .get_token_exchange_rate(&entry.token)
+            .unwrap_or(10_000);
         normalized_sum += entry.amount * rate / 10_000;
     }
     assert_eq!(

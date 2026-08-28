@@ -141,19 +141,7 @@ impl PoolContract {
         // --------------------------------------------------------------------
         // 2. Authorization: only the pool creator may extend duration
         // --------------------------------------------------------------------
-        let caller = env.invoker();
-        if caller != pool.creator {
-            #[cfg(feature = "logging")]
-            env.log(
-                &(
-                    "Unauthorized caller",
-                    &caller,
-                    "expected",
-                    &pool.creator,
-                ),
-            );
-            return Err(PoolError::Unauthorized);
-        }
+        pool.creator.require_auth();
 
         // --------------------------------------------------------------------
         // 3. State check – must be Open (Frozen/Disputed cannot be modified)

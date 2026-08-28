@@ -9,6 +9,7 @@ import {
   SETTLEMENT_TYPES,
 } from '@/lib/validators';
 import { useFeePreview } from '@/app/lib/hooks/useFeePreview';
+import { useI18n } from '@/app/lib/i18n';
 
 interface StepParametersProps {
   draft: CreatePoolDraft;
@@ -37,6 +38,7 @@ export function StepParameters({
   setField,
   blurField,
 }: StepParametersProps) {
+  const { t } = useI18n();
   const feePreview = useFeePreview(draft.title, draft.description);
 
   const onChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -50,7 +52,7 @@ export function StepParameters({
     <div className="space-y-5">
       <div>
         <label htmlFor="duration" className="block text-sm font-medium mb-1">
-          Pool expiry (seconds)
+          {t('create.params.durationLabel')}
         </label>
         <input
           id="duration"
@@ -61,7 +63,7 @@ export function StepParameters({
           value={draft.duration}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="e.g. 86400 (1 day)"
+          placeholder={t('create.params.durationPlaceholder')}
           aria-describedby={errors.duration ? 'duration-error' : 'duration-help'}
           aria-invalid={!!errors.duration}
           className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 ${
@@ -87,7 +89,7 @@ export function StepParameters({
 
       <div>
         <label htmlFor="depositDeadline" className="block text-sm font-medium mb-1">
-          Deposit deadline (seconds)
+          {t('create.params.depositDeadlineLabel')}
         </label>
         <input
           id="depositDeadline"
@@ -97,7 +99,7 @@ export function StepParameters({
           value={draft.depositDeadline}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="e.g. 82800 (stop deposits 1 hr before expiry)"
+          placeholder={t('create.params.depositDeadlinePlaceholder')}
           aria-describedby={
             errors.depositDeadline ? 'deposit-deadline-error' : 'deposit-deadline-help'
           }
@@ -127,7 +129,7 @@ export function StepParameters({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="protocolFeeBps" className="block text-sm font-medium mb-1">
-            Protocol fee (basis points)
+            {t('create.params.protocolFeeLabel')}
           </label>
           <input
             id="protocolFeeBps"
@@ -156,7 +158,7 @@ export function StepParameters({
 
         <div>
           <label htmlFor="settlementType" className="block text-sm font-medium mb-1">
-            Settlement type
+            {t('create.params.settlementTypeLabel')}
           </label>
           <select
             id="settlementType"
@@ -170,7 +172,11 @@ export function StepParameters({
           >
             {SETTLEMENT_TYPES.map((type) => (
               <option key={type} value={type}>
-                {type === 'oracle' ? 'Oracle' : type === 'twap' ? 'TWAP' : 'Manual'}
+                {type === 'oracle'
+                  ? t('create.params.settlementOracle')
+                  : type === 'twap'
+                    ? t('create.params.settlementTwap')
+                    : t('create.params.settlementManual')}
               </option>
             ))}
           </select>
@@ -180,7 +186,8 @@ export function StepParameters({
 
       <div>
         <label htmlFor="externalLinks" className="block text-sm font-medium mb-1">
-          External links <span className="text-muted-foreground font-normal">(optional)</span>
+          {t('create.params.externalLinksLabel')}{' '}
+          <span className="text-muted-foreground font-normal">{t('create.basics.resolutionOptional')}</span>
         </label>
         <input
           id="externalLinks"
@@ -188,26 +195,26 @@ export function StepParameters({
           type="url"
           value={draft.externalLinks}
           onChange={onChange}
-          placeholder="https://example.com/data"
+          placeholder={t('create.params.externalLinksPlaceholder')}
           className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          Reference URLs (pipe-separated for multiple). Immutable once the first bet is placed.
+          {t('create.params.externalLinksHint')}
         </p>
       </div>
 
       <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm space-y-2">
-        <p className="font-medium">Estimated fees</p>
+        <p className="font-medium">{t('create.params.estimatedFeesTitle')}</p>
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Protocol fee</span>
+          <span>{t('create.params.protocolFeeRow')}</span>
           <span>{feePreview.protocolFee} XLM</span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Network fee (simulated)</span>
+          <span>{t('create.params.networkFeeRow')}</span>
           <span>{feePreview.networkFee} XLM</span>
         </div>
         <div className="flex justify-between text-sm font-semibold pt-1 border-t border-border">
-          <span>Total estimate</span>
+          <span>{t('create.params.totalEstimate')}</span>
           <span>{feePreview.total} XLM</span>
         </div>
       </div>
