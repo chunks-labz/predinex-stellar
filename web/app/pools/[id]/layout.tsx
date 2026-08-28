@@ -5,7 +5,7 @@ import {
   buildFallbackMetadata,
 } from '../../lib/metadata';
 
-interface PoolLayoutProps {
+interface PoolDetailLayoutProps {
   children: React.ReactNode;
   params: Promise<{ id: string }>;
 }
@@ -42,6 +42,6 @@ export async function generateMetadata({
   }
 }
 
-export default function PoolLayout({ children }: PoolLayoutProps) {
+export default function PoolDetailLayout({ children }: PoolDetailLayoutProps) {
   return <>{children}</>;
 }
