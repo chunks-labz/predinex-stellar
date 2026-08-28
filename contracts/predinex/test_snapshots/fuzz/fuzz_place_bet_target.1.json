@@ -433,6 +433,14 @@
                   },
                   {
                     "key": {
+                      "symbol": "deposit_deadline"
+                    },
+                    "val": {
+                      "u64": "86400"
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "description"
                     },
                     "val": {
@@ -1086,7 +1094,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "18516511806979638084"
+                "i128": "14535942638918044223247"
               }
             }
           },

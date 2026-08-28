@@ -289,7 +289,7 @@
                       "symbol": "deposit_deadline"
                     },
                     "val": {
-                      "u64": "3600"
+                      "u64": "2595600"
                     }
                   },
                   {
