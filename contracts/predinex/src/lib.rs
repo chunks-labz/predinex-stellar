@@ -1459,14 +1459,7 @@ impl PredinexContract {
     /// Pass 0 to remove the fee requirement.
     pub fn set_creation_fee(env: Env, caller: Address, fee: i128) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if fee < 0 {
             return Err(ContractError::FeeMustBeNonNegative);
         }
@@ -1556,14 +1549,7 @@ impl PredinexContract {
     /// * "Fee out of bounds" – if fee_bps is outside [0, 1000]
     pub fn set_protocol_fee(env: Env, caller: Address, fee_bps: u32) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&fee_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
@@ -1821,15 +1807,7 @@ impl PredinexContract {
         max_bet: i128,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         // Ensure pool exists.
         let _pool_exists: Pool = env
@@ -1901,14 +1879,7 @@ impl PredinexContract {
         cooling_period_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if max_pool_size < 0 || large_pool_threshold < 0 {
             return Err(ContractError::InvalidBetAmount);
         }
@@ -1995,14 +1966,7 @@ impl PredinexContract {
         window_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if (max_bets_per_window == 0 && window_secs > 0)
             || (max_bets_per_window > 0 && window_secs == 0)
         {
@@ -6163,16 +6127,9 @@ impl PredinexContract {
     /// Emits a `treasury_withdrawn` event.
     pub fn withdraw_treasury(env: Env, caller: Address, amount: i128) -> Result<(), ContractError> {
         caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
 
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        let treasury_recipient = caller.clone();
 
         if amount <= 0 {
             return Err(ContractError::InvalidWithdrawalAmount);
@@ -6232,16 +6189,7 @@ impl PredinexContract {
         freeze_admin: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let old_freeze_admin: Option<Address> =
             env.storage().persistent().get(&DataKey::FreezeAdmin);
@@ -6477,14 +6425,7 @@ impl PredinexContract {
         pool_id: u32,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let mut pool = env
             .storage()
@@ -7495,14 +7436,7 @@ impl PredinexContract {
     /// topic tuple so indexers can filter by version like every other event.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &paused);
 
         let event_name = if paused {
