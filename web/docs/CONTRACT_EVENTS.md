@@ -476,4 +476,8 @@ Lower-volume operational events (batch daily):
   canonical `contract_paused` / `contract_unpaused` with `event_version()` via
   a single code path in `set_paused`. Off-chain indexers need only subscribe to
   `contract_paused` / `contract_unpaused`.
+- **#1055** — `set_paused` now calls `Self::require_treasury_recipient` instead
+  of a manual inline comparison, matching all other admin-gated functions. Full
+  audit confirmed: 20 admin functions use the shared helper; zero hand-rolled
+  `caller != treasury_recipient` comparisons remain outside the helper itself.
 
