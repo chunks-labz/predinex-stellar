@@ -2426,9 +2426,9 @@ impl PredinexContract {
                 .persistent()
                 .get(&DataKey::LastLargeBetTimestamp(user.clone(), pool_id));
 
-            if last_large_bet_ts.is_some_and(|ts| {
-                now.saturating_sub(ts) < config.large_bet_cooldown_secs
-            }) {
+            if last_large_bet_ts
+                .is_some_and(|ts| now.saturating_sub(ts) < config.large_bet_cooldown_secs)
+            {
                 env.events().publish(
                     (
                         Symbol::new(env, "user_large_bet_cooldown_active"),
@@ -2459,8 +2459,7 @@ impl PredinexContract {
 
         if config.daily_loss_limit > 0 {
             let key = DataKey::UserDailyLossState(user.clone());
-            let mut state =
-                Self::load_loss_state(env, &key, now, config.daily_loss_window_secs);
+            let mut state = Self::load_loss_state(env, &key, now, config.daily_loss_window_secs);
             state.loss = state.loss.saturating_add(amount);
             env.storage().persistent().set(&key, &state);
             env.storage()
@@ -2470,8 +2469,7 @@ impl PredinexContract {
 
         if config.weekly_loss_limit > 0 {
             let key = DataKey::UserWeeklyLossState(user.clone());
-            let mut state =
-                Self::load_loss_state(env, &key, now, config.weekly_loss_window_secs);
+            let mut state = Self::load_loss_state(env, &key, now, config.weekly_loss_window_secs);
             state.loss = state.loss.saturating_add(amount);
             env.storage().persistent().set(&key, &state);
             env.storage()
@@ -3065,9 +3063,10 @@ impl PredinexContract {
             );
         }
         if large_pool_threshold > 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::PoolLargePoolThreshold(pool_id), &large_pool_threshold);
+            env.storage().persistent().set(
+                &DataKey::PoolLargePoolThreshold(pool_id),
+                &large_pool_threshold,
+            );
             env.storage().persistent().extend_ttl(
                 &DataKey::PoolLargePoolThreshold(pool_id),
                 POOL_BUMP_THRESHOLD,
@@ -3075,9 +3074,10 @@ impl PredinexContract {
             );
         }
         if cooling_period_secs > 0 {
-            env.storage()
-                .persistent()
-                .set(&DataKey::PoolLargePoolCoolingPeriod(pool_id), &cooling_period_secs);
+            env.storage().persistent().set(
+                &DataKey::PoolLargePoolCoolingPeriod(pool_id),
+                &cooling_period_secs,
+            );
             env.storage().persistent().extend_ttl(
                 &DataKey::PoolLargePoolCoolingPeriod(pool_id),
                 POOL_BUMP_THRESHOLD,
@@ -3690,11 +3690,9 @@ impl PredinexContract {
             }
             rate_state.used += 1;
             env.storage().persistent().set(&key, &rate_state);
-            env.storage().persistent().extend_ttl(
-                &key,
-                POOL_BUMP_THRESHOLD,
-                POOL_BUMP_TARGET,
-            );
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
         }
 
         // Enforce per-pool bet limits (admin-configurable).
@@ -3730,7 +3728,11 @@ impl PredinexContract {
             .storage()
             .persistent()
             .get::<_, i128>(&DataKey::PoolMaxPoolSize(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, i128>(&DataKey::MaxPoolSize))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::MaxPoolSize)
+            })
             .unwrap_or(DEFAULT_MAX_POOL_SIZE_STROOPS);
         if max_pool_size > 0 && new_total > max_pool_size {
             return Err(ContractError::PoolSizeLimitExceeded);
@@ -3944,13 +3946,21 @@ impl PredinexContract {
             .storage()
             .persistent()
             .get::<_, i128>(&DataKey::PoolLargePoolThreshold(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, i128>(&DataKey::LargePoolThreshold))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::LargePoolThreshold)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_THRESHOLD_STROOPS);
         let cooling_period_secs: u64 = env
             .storage()
             .persistent()
             .get::<_, u64>(&DataKey::PoolLargePoolCoolingPeriod(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS);
         if large_pool_threshold > 0
             && cooling_period_secs > 0
@@ -5308,13 +5318,8 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
-        let user_winning_bet = Self::claim_user_winning_stake(
-            env,
-            pool_id,
-            user.clone(),
-            &user_bet,
-            winning_outcome,
-        )?;
+        let user_winning_bet =
+            Self::claim_user_winning_stake(env, pool_id, user.clone(), &user_bet, winning_outcome)?;
 
         let totals = Self::read_outcome_totals(env, pool_id, &pool);
         let pool_winning_total = totals.get(winning_outcome).unwrap();
@@ -5693,16 +5698,17 @@ impl PredinexContract {
             if let Some(mut entry) = env.storage().persistent().get::<_, ScheduledClaim>(&key) {
                 if entry.status == ScheduledClaimStatus::Pending {
                     if entry.claim_at <= now {
-                        match Self::claim_winnings_internal(&env, entry.user.clone(), entry.pool_id) {
+                        match Self::claim_winnings_internal(&env, entry.user.clone(), entry.pool_id)
+                        {
                             Ok(amount) => {
                                 entry.status = ScheduledClaimStatus::Executed;
                                 env.storage().persistent().set(&key, &entry);
-                                env.storage()
-                                    .persistent()
-                                    .remove(&DataKey::ScheduledClaimByUserPool(
+                                env.storage().persistent().remove(
+                                    &DataKey::ScheduledClaimByUserPool(
                                         entry.pool_id,
                                         entry.user.clone(),
-                                    ));
+                                    ),
+                                );
                                 env.events().publish(
                                     (
                                         Symbol::new(&env, "scheduled_claim_executed"),
@@ -7248,11 +7254,9 @@ impl PredinexContract {
             .checked_add(1)
             .ok_or(ContractError::PoolTotalOverflow)?;
         env.storage().persistent().set(&usage_key, &new_usage);
-        env.storage().persistent().extend_ttl(
-            &usage_key,
-            POOL_BUMP_THRESHOLD,
-            POOL_BUMP_TARGET,
-        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&usage_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
 
         env.events().publish(
             (
@@ -8566,7 +8570,11 @@ impl PredinexContract {
             .storage()
             .persistent()
             .get::<_, i128>(&DataKey::PoolMaxPoolSize(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, i128>(&DataKey::MaxPoolSize))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::MaxPoolSize)
+            })
             .unwrap_or(DEFAULT_MAX_POOL_SIZE_STROOPS);
         if max_pool_size > 0 && new_total > max_pool_size {
             return Err(ContractError::PoolSizeLimitExceeded);
@@ -8577,13 +8585,21 @@ impl PredinexContract {
             .storage()
             .persistent()
             .get::<_, i128>(&DataKey::PoolLargePoolThreshold(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, i128>(&DataKey::LargePoolThreshold))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::LargePoolThreshold)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_THRESHOLD_STROOPS);
         let cooling_period_secs: u64 = env
             .storage()
             .persistent()
             .get::<_, u64>(&DataKey::PoolLargePoolCoolingPeriod(pool_id))
-            .or_else(|| env.storage().persistent().get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS);
         if large_pool_threshold > 0
             && cooling_period_secs > 0
@@ -8723,10 +8739,11 @@ impl PredinexContract {
             if net_t <= 0 {
                 continue;
             }
-            let payout_t = Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning)
-                .unwrap_or(0);
+            let payout_t =
+                Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning).unwrap_or(0);
             if payout_t > 0 {
-                let actual_balance = token::Client::new(&env, &tok).balance(&env.current_contract_address());
+                let actual_balance =
+                    token::Client::new(&env, &tok).balance(&env.current_contract_address());
                 if actual_balance < payout_t {
                     return Err(ContractError::BalanceShortfall);
                 }
@@ -8901,10 +8918,7 @@ impl PredinexContract {
         // When rescuing the contract's main staking token, compute the sum of
         // all pending LP reward pools and ensure the rescue amount leaves enough
         // to cover those obligations.
-        let main_token: Option<Address> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Token);
+        let main_token: Option<Address> = env.storage().persistent().get(&DataKey::Token);
         if let Some(ref mt) = main_token {
             if *mt == token {
                 let pool_count = Self::get_pool_count(env.clone());
@@ -8919,8 +8933,8 @@ impl PredinexContract {
                         .checked_add(obligation)
                         .ok_or(ContractError::PoolTotalOverflow)?;
                 }
-                let contract_balance = token::Client::new(&env, &token)
-                    .balance(&env.current_contract_address());
+                let contract_balance =
+                    token::Client::new(&env, &token).balance(&env.current_contract_address());
                 let available = contract_balance
                     .checked_sub(total_lp_obligations)
                     .ok_or(ContractError::InsufficientTreasuryBalance)?;
