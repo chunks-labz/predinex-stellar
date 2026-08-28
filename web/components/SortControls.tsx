@@ -69,7 +69,7 @@ export default function SortControls({ selectedSort, onSortChange }: SortControl
   return (
     <div className="relative" ref={dropdownRef}>
       <div className="space-y-2">
-        <label className="text-sm font-medium text-foreground">Sort by</label>
+        <label id="sort-label" className="text-sm font-medium text-foreground">Sort by</label>
 
         <button
           onClick={() => setIsOpen(!isOpen)}
@@ -78,23 +78,31 @@ export default function SortControls({ selectedSort, onSortChange }: SortControl
                    focus:border-primary/50 transition-all duration-200"
           aria-expanded={isOpen}
           aria-haspopup="listbox"
+          aria-labelledby="sort-label"
+          aria-label={`Sort by: ${selectedOption.label}`}
         >
           <div className="flex items-center gap-3">
-            {selectedOption.icon}
+            <span aria-hidden="true">{selectedOption.icon}</span>
             <span className="text-sm font-medium">{selectedOption.label}</span>
           </div>
           <ChevronDown
             className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${
               isOpen ? 'rotate-180' : ''
             }`}
+            aria-hidden="true"
           />
         </button>
       </div>
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-background border border-muted/50 rounded-lg
-                      shadow-lg z-50 overflow-hidden">
+        <div
+          role="listbox"
+          aria-label="Sort options"
+          aria-labelledby="sort-label"
+          className="absolute top-full left-0 right-0 mt-2 bg-background border border-muted/50 rounded-lg
+                      shadow-lg z-50 overflow-hidden"
+        >
           <div className="py-1">
             {sortOptions.map((option) => {
               const isSelected = option.value === selectedSort;
@@ -105,6 +113,7 @@ export default function SortControls({ selectedSort, onSortChange }: SortControl
                   onClick={() => handleSortSelect(option.value)}
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 text-left transition-colors duration-150
+                    focus:outline-none focus:bg-primary/10
                     ${isSelected
                       ? 'bg-primary/10 text-primary'
                       : 'hover:bg-muted/50 text-foreground'
@@ -114,7 +123,10 @@ export default function SortControls({ selectedSort, onSortChange }: SortControl
                   aria-selected={isSelected}
                   title={option.description}
                 >
-                  <div className={`${isSelected ? 'text-primary' : 'text-muted-foreground'}`}>
+                  <div
+                    className={`${isSelected ? 'text-primary' : 'text-muted-foreground'}`}
+                    aria-hidden="true"
+                  >
                     {option.icon}
                   </div>
                   <div className="flex-1">
@@ -124,7 +136,7 @@ export default function SortControls({ selectedSort, onSortChange }: SortControl
                     </div>
                   </div>
                   {isSelected && (
-                    <div className="w-2 h-2 bg-primary rounded-full" />
+                    <div className="w-2 h-2 bg-primary rounded-full" aria-hidden="true" />
                   )}
                 </button>
               );
