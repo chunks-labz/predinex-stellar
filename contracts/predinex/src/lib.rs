@@ -4543,7 +4543,6 @@ impl PredinexContract {
         pool_id: u32,
         additional_seconds: u64,
     ) -> Result<u64, ContractError> {
-        creator.require_auth();
         Self::require_not_paused(&env)?;
 
         let mut pool = env
@@ -4552,6 +4551,9 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
+        // Authorize the on-chain pool admin (creator) with an explicit
+        // signature rather than trusting a caller-supplied invoker address.
+        pool.creator.require_auth();
         if creator != pool.creator {
             return Err(ContractError::Unauthorized);
         }
