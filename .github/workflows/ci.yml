@@ -141,7 +141,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
           components: rustfmt, clippy
 
       - name: Add Soroban WASM target
