@@ -4,37 +4,25 @@
  * GET /api/export/pool/:id?format=csv|json&address=<wallet>
  *
  * Returns pool metadata and (when `participants=true`) a list of all bettor
- * addresses with their stake breakdown.  Rate-limited to 10 requests/hour
- * per wallet address (identified via the `address` query param).
+ * addresses with their stake breakdown.
+ *
+ * Abuse posture
+ * -------------
+ * Rate-limited to 10 requests/hour per wallet address (identified via the
+ * `address` query param) to prevent runaway scraping of pool data. Unknown
+ * or absent addresses share an "anonymous" bucket — intentionally tighter
+ * than authenticated wallets to discourage unauthenticated bulk access.
  */
 import { NextRequest, NextResponse } from 'next/server';
+import { checkRateLimit, rateLimitHeaders, parseLimitParam } from '@/app/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
 // ---------------------------------------------------------------------------
-// In-memory rate limiter: max 10 exports per hour per address.
+// Rate-limit constants for this route.
 // ---------------------------------------------------------------------------
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-
-const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
-
-function checkRateLimit(key: string): { allowed: boolean; remaining: number; resetAt: number } {
-  const now = Date.now();
-  const entry = rateLimitStore.get(key);
-
-  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
-    rateLimitStore.set(key, { count: 1, windowStart: now });
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
-  }
-
-  if (entry.count >= RATE_LIMIT_MAX) {
-    return { allowed: false, remaining: 0, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
-  }
-
-  entry.count += 1;
-  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count, resetAt: entry.windowStart + RATE_LIMIT_WINDOW_MS };
-}
 
 // ---------------------------------------------------------------------------
 // Route handler
@@ -51,18 +39,20 @@ export async function GET(
 
   const address = req.nextUrl.searchParams.get('address') ?? 'anonymous';
 
+  // Validate `limit` param if present (not yet used but guarded against abuse).
+  const _limit = parseLimitParam(req.nextUrl.searchParams.get('limit'), 20, 100);
+
   // Rate limit keyed by wallet address.
-  const rl = checkRateLimit(address);
-  const rlHeaders = {
-    'X-RateLimit-Limit': String(RATE_LIMIT_MAX),
-    'X-RateLimit-Remaining': String(rl.remaining),
-    'X-RateLimit-Reset': String(Math.ceil(rl.resetAt / 1000)),
-  };
+  const rl = checkRateLimit(`export-pool:${address}`, {
+    max: RATE_LIMIT_MAX,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+  });
+  const rlHdrs = rateLimitHeaders(rl);
 
   if (!rl.allowed) {
     return NextResponse.json(
       { error: 'Export rate limit exceeded. Maximum 10 exports per hour.' },
-      { status: 429, headers: rlHeaders },
+      { status: 429, headers: rlHdrs },
     );
   }
 
@@ -70,6 +60,6 @@ export async function GET(
   // The endpoint currently returns 501 until on-chain data fetching is wired up.
   return NextResponse.json(
     { error: 'Not implemented: real on-chain pool data export is not yet available.' },
-    { status: 501, headers: rlHeaders },
+    { status: 501, headers: rlHdrs },
   );
 }

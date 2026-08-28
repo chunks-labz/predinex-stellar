@@ -2,6 +2,11 @@
 **/target/
 **/*.wasm
 
+# Generated CI artifacts — committed files cause PR churn (#1063).
+# Regenerated snapshots and benchmarks are published as CI artifacts instead.
+contracts/predinex/benchmark-results.json
+contracts/predinex/test_snapshots/
+
 # Node.js
 **/node_modules/
 .next/

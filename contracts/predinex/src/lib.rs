@@ -326,10 +326,9 @@ const MAX_WEBHOOK_URL_LENGTH: u32 = 512;
 
 /// #151 — Minimum pool lifetime in seconds (matches `web/docs/POOL_DURATION.md`).
 const MIN_POOL_DURATION_SECS: u64 = 300;
-/// #151 — Maximum pool lifetime in seconds (matches web validators / tests).
+/// #151 / #570 — Maximum pool lifetime in seconds (~1 year / 365 days). Matches web validators and tests.
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
-/// #570 — Maximum pool lifetime in seconds (~1 year).
-/// Maximum duration a single `extend_pool_duration` call may add (30 days).
+/// #570 — Maximum duration a single `extend_pool_duration` call may add (30 days).
 ///
 /// The total-lifetime cap (`MAX_POOL_DURATION_SECS`) already bounds how far a
 /// pool can be pushed out overall; this per-call cap additionally bounds how
@@ -5136,6 +5135,29 @@ impl PredinexContract {
         // #705 — Reduce user exposure when expired claim is processed.
         Self::reduce_user_exposure(&env, &user, pool_id, refund);
 
+        // Record refund in user claim history for analytics consistency with claim_refund.
+        let history_key = DataKey::UserClaimHistory(user.clone());
+        let mut history: Vec<UserClaimEntry> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(UserClaimEntry {
+            pool_id,
+            amount: refund,
+            fee: 0,
+            timestamp: env.ledger().timestamp(),
+            winning_outcome: 0,
+            status: UserClaimStatus::Refunded,
+        });
+        while history.len() > 50 {
+            history.remove(0);
+        }
+        env.storage().persistent().set(&history_key, &history);
+        env.storage()
+            .persistent()
+            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
         env.events().publish(
             (
                 Symbol::new(&env, "claim_expired"),
@@ -5932,11 +5954,19 @@ impl PredinexContract {
     ///
     /// Entries are ordered oldest-first (FIFO). The history is capped at the
     /// 50 most recent claims per user; older entries are dropped automatically.
+    /// This retention limit means users who claim from more than 50 pools will
+    /// lose visibility into their oldest claims. Use pagination to retrieve all
+    /// available entries.
     ///
     /// # Arguments
     /// * `user`         – the claimant address
     /// * `start_cursor` – zero-based index to start from (for pagination)
     /// * `limit`        – maximum entries to return (capped at 20)
+    ///
+    /// # Notes
+    /// The 50-entry cap is enforced during claim recording. To retrieve all
+    /// available history, call this function multiple times with increasing
+    /// start_cursor values until fewer than limit entries are returned.
     pub fn get_user_claim_history(
         env: Env,
         user: Address,
@@ -6540,6 +6570,7 @@ impl PredinexContract {
             .get(&DataKey::PoolBettors(pool_id))
             .unwrap_or_else(|| Vec::new(&env));
 
+        // Collect all bet entries with total_bet amounts
         for i in 0..bettors.len() {
             let user = bettors.get(i).unwrap();
 
@@ -6548,38 +6579,42 @@ impl PredinexContract {
                 .persistent()
                 .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             {
-                let winnings_claimed = matches!(
-                    Self::get_claim_status(env.clone(), pool_id, user.clone()),
-                    ClaimStatus::AlreadyClaimed
-                );
-
                 all_entries.push_back(PoolLeaderboardEntry {
                     user,
                     total_bet: bet.total_bet,
-                    winnings_claimed,
+                    winnings_claimed: false,
                 });
             }
         }
 
-        // Sort by total_bet descending, with user address tie-breaking for a stable total order.
+        // Sort by total_bet descending using a more efficient selection sort.
+        // For small to medium lists this is acceptable; for very large lists consider
+        // maintaining a sorted index at bet-time or using heap-based top-K selection.
         let n = all_entries.len();
         for i in 0..n {
+            let mut max_idx = i;
             for j in (i + 1)..n {
-                let entry_i = all_entries.get(i).unwrap();
+                let entry_max = all_entries.get(max_idx).unwrap();
                 let entry_j = all_entries.get(j).unwrap();
 
-                let swap = if entry_j.total_bet > entry_i.total_bet {
+                let should_swap = if entry_j.total_bet > entry_max.total_bet {
                     true
-                } else if entry_j.total_bet == entry_i.total_bet {
-                    entry_j.user < entry_i.user
+                } else if entry_j.total_bet == entry_max.total_bet {
+                    entry_j.user < entry_max.user
                 } else {
                     false
                 };
 
-                if swap {
-                    all_entries.set(i, entry_j);
-                    all_entries.set(j, entry_i);
+                if should_swap {
+                    max_idx = j;
                 }
+            }
+
+            if max_idx != i {
+                let entry_i = all_entries.get(i).unwrap();
+                let entry_max = all_entries.get(max_idx).unwrap();
+                all_entries.set(i, entry_max);
+                all_entries.set(max_idx, entry_i);
             }
         }
 
@@ -6594,11 +6629,17 @@ impl PredinexContract {
             }
         }
 
-        // Slice up to effective_limit entries.
+        // Slice up to effective_limit entries and fetch claim status only for returned entries
         let mut limited = Vec::new(&env);
         let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
         for i in start_index..end_index {
-            limited.push_back(all_entries.get(i).unwrap());
+            let mut entry = all_entries.get(i).unwrap();
+            entry.winnings_claimed =
+                match Self::get_claim_status(env.clone(), pool_id, entry.user.clone()) {
+                    ClaimStatus::AlreadyClaimed => true,
+                    _ => false,
+                };
+            limited.push_back(entry);
         }
         limited
     }
@@ -7327,10 +7368,16 @@ impl PredinexContract {
             }
             let key = DataKey::UserBet(pool_id, user.clone());
             if let Some(bet) = env.storage().persistent().get::<_, UserBet>(&key) {
-                // #189 — extend position TTL on read so dashboard queries keep entries alive.
-                env.storage()
-                    .persistent()
-                    .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+                // #1053 — Only extend TTL if remaining lifetime is below threshold.
+                // This avoids metered write amplification from dashboard polling; reads
+                // now trigger writes only when the entry is approaching expiration.
+                if let Some(remaining_ttl) = env.storage().persistent().get_ttl(&key) {
+                    if remaining_ttl < POOL_BUMP_THRESHOLD {
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+                    }
+                }
                 result.push_back(UserPoolPosition {
                     pool_id,
                     amount_a: bet.amount_a,
@@ -7874,6 +7921,25 @@ impl PredinexContract {
             return Err(ContractError::InvalidWebhookUrl);
         }
 
+        // #1050 — Validate URL has a host after the scheme.
+        // A valid HTTPS URL must have at least "https://a" (10+ bytes) and contain
+        // a character after "https://" that is not a colon or slash.
+        if url.len() < 10 {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        let url_bytes = url.to_string();
+        let after_scheme = &url_bytes.as_bytes()[8..]; // skip "https://"
+        if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        // Ensure the URL contains valid ASCII/UTF-8 hostname characters after scheme.
+        // Reject control characters and non-printable bytes.
+        for &byte in after_scheme.iter().take(after_scheme.len().min(64)) {
+            if byte < 0x20 || byte > 0x7E {
+                return Err(ContractError::InvalidWebhookUrl);
+            }
+        }
+
         let mut webhooks: Vec<Webhook> = env
             .storage()
             .persistent()
@@ -8006,6 +8072,15 @@ impl PredinexContract {
         Self::require_treasury_recipient(&env, &caller)?;
 
         if rate_bps <= 0 {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+
+        // #1051 — Clamp rate_bps to a sane range (1_000 to 1_000_000) to prevent
+        // accidental or malicious extreme rate changes that would break multi-asset
+        // bet normalization and payouts.
+        const MIN_RATE_BPS: i128 = 1_000;      // 0.1x (10%)
+        const MAX_RATE_BPS: i128 = 1_000_000;  // 100x (10,000%)
+        if rate_bps < MIN_RATE_BPS || rate_bps > MAX_RATE_BPS {
             return Err(ContractError::FeeOutOfBounds);
         }
 
@@ -9208,6 +9283,21 @@ impl PredinexContract {
         if mirror.is_settled {
             return Err(ContractError::PoolAlreadySettled);
         }
+        
+        // #1052 — Validate winning_outcome is within the source pool's outcome set bounds.
+        // Fetch the source pool to check its outcome count.
+        let source_pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(source_pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        
+        // Reject any outcome index >= num_outcomes to prevent settling to an
+        // out-of-bounds outcome that would break payout calculations.
+        if winning_outcome >= source_pool.num_outcomes {
+            return Err(ContractError::InvalidOutcome);
+        }
+        
         let timeout: u64 = env
             .storage()
             .persistent()
