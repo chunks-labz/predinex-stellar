@@ -4,6 +4,15 @@ export {
   getStacksCoreApiBaseUrl,
   fetchPredinexContractEvents,
 } from './predinex-read-api';
+export {
+  batchedReadApi,
+  fetchPoolsBatched,
+  fetchUserBetsBatched,
+  fetchUserPortfolioBatched,
+  invalidatePoolCache,
+  invalidateUserCache,
+  clearBatchCache,
+} from './batched-read-api';
 export type { Pool, ActivityItem } from './types';
 export {
   getUserActivityFromSoroban,
