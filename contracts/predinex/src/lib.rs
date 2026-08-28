@@ -507,6 +507,8 @@ pub enum ContractError {
     LargeBetCooldownActive = 86,
     /// On-ledger token balance is less than required obligation/payout.
     BalanceShortfall = 87,
+    /// Template is currently in use and cannot be deleted.
+    TemplateInUse = 88,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -1720,11 +1722,78 @@ impl PredinexContract {
         if total_pool_balance == 0 || pool_winning_total == 0 {
             return None;
         }
-        let fee = total_pool_balance.checked_mul(fee_bps)? / 10_000;
+        let fee = Self::calc_protocol_fee(total_pool_balance, fee_bps)?;
         let net_pool_balance = total_pool_balance.checked_sub(fee)?;
-        user_winning_bet
-            .checked_mul(net_pool_balance)?
-            .checked_div(pool_winning_total)
+        Self::calc_payout_share(user_winning_bet, net_pool_balance, pool_winning_total)
+    }
+
+    // ── Shared claim helpers (single-asset & multi-asset) ─────────────────────
+
+    /// Shared auth helper for all claim paths — requires caller authentication
+    /// and checks that the contract is not paused.
+    fn require_claim_auth(env: &Env, user: &Address) -> Result<(), ContractError> {
+        user.require_auth();
+        Self::require_not_paused(env)
+    }
+
+    /// Shared helper to extract winning outcome or map pool status to claim errors.
+    ///
+    /// Both `claim_winnings_internal` and `claim_multi_asset_winnings` use the
+    /// same status mapping so Frozen/Disputed/Cancelled/Settled handling cannot diverge.
+    fn claim_winning_outcome(pool: &Pool) -> Result<u32, ContractError> {
+        match pool.status {
+            PoolStatus::Settled(o) => Ok(o),
+            PoolStatus::Frozen => Err(ContractError::PoolIsFrozen),
+            PoolStatus::Disputed => Err(ContractError::PoolIsDisputed),
+            PoolStatus::Cancelled => Err(ContractError::PoolIsCancelled),
+            _ => Err(ContractError::PoolNotSettled),
+        }
+    }
+
+    /// Shared helper to load and validate a claimant's winning stake.
+    ///
+    /// Reads `UserOutcomeBets` (falling back to legacy `UserBet` fields) and
+    /// returns `NoWinningsToClaim` when the caller has no stake on the winning
+    /// outcome. Used by both single- and multi-asset claim paths.
+    fn claim_user_winning_stake(
+        env: &Env,
+        pool_id: u32,
+        user: Address,
+        user_bet: &UserBet,
+        winning_outcome: u32,
+    ) -> Result<i128, ContractError> {
+        let bets = Self::read_user_outcome_bets(env, pool_id, user, user_bet);
+        let stake = bets.get(winning_outcome).unwrap_or(0);
+        if stake == 0 {
+            return Err(ContractError::NoWinningsToClaim);
+        }
+        Ok(stake)
+    }
+
+    /// Shared helper for protocol fee calculation: floor(amount * fee_bps / 10_000).
+    fn calc_protocol_fee(amount: i128, fee_bps: i128) -> Option<i128> {
+        amount.checked_mul(fee_bps)?.checked_div(10_000)
+    }
+
+    /// Shared helper for proportional payout: floor(user_stake * net_pool / total_winning).
+    fn calc_payout_share(user_stake: i128, net_pool: i128, total_winning: i128) -> Option<i128> {
+        if total_winning == 0 {
+            return None;
+        }
+        user_stake.checked_mul(net_pool)?.checked_div(total_winning)
+    }
+
+    /// Shared helper that wraps `calc_protocol_fee` + `calc_payout_share` for a
+    /// single outcome-to-token payout. Equivalent to `compute_winnings` but
+    /// exposed as a named helper so multi-asset per-token math can reuse it
+    /// without duplicating the fee-then-divide sequence.
+    fn compute_payout_for_outcome(
+        user_stake: i128,
+        total_for_token: i128,
+        total_winning: i128,
+        fee_bps: i128,
+    ) -> Option<i128> {
+        Self::compute_winnings(user_stake, total_for_token, total_winning, fee_bps)
     }
 
     /// Set per-pool bet limits.
@@ -5171,7 +5240,7 @@ impl PredinexContract {
         if !Self::is_initialized(&env) {
             panic_with_error!(&env, ContractError::NotInitialized);
         }
-        user.require_auth();
+        Self::require_claim_auth(&env, &user)?;
         Self::claim_winnings_internal(&env, user, pool_id)
     }
 
@@ -5198,13 +5267,7 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let winning_outcome = match pool.status {
-            PoolStatus::Settled(outcome) => outcome,
-            PoolStatus::Frozen => return Err(ContractError::PoolIsFrozen),
-            PoolStatus::Disputed => return Err(ContractError::PoolIsDisputed),
-            PoolStatus::Cancelled => return Err(ContractError::PoolIsCancelled),
-            _ => return Err(ContractError::PoolNotSettled),
-        };
+        let winning_outcome = Self::claim_winning_outcome(&pool)?;
 
         let user_bet = env
             .storage()
@@ -5212,12 +5275,13 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
-        let user_outcome_bets = Self::read_user_outcome_bets(env, pool_id, user.clone(), &user_bet);
-        let user_winning_bet = user_outcome_bets.get(winning_outcome).unwrap_or(0);
-
-        if user_winning_bet == 0 {
-            return Err(ContractError::NoWinningsToClaim);
-        }
+        let user_winning_bet = Self::claim_user_winning_stake(
+            env,
+            pool_id,
+            user.clone(),
+            &user_bet,
+            winning_outcome,
+        )?;
 
         let totals = Self::read_outcome_totals(env, pool_id, &pool);
         let pool_winning_total = totals.get(winning_outcome).unwrap();
@@ -5230,13 +5294,13 @@ impl PredinexContract {
         }
 
         let fee_bps = Self::pool_effective_fee_bps(env, pool_id);
-        let fee = total_pool_balance
-            .checked_mul(fee_bps)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / 10000;
-        let net_pool_balance = total_pool_balance - fee;
+        let fee = Self::calc_protocol_fee(total_pool_balance, fee_bps)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        let net_pool_balance = total_pool_balance
+            .checked_sub(fee)
+            .ok_or(ContractError::PoolTotalOverflow)?;
 
-        // #1030 — use shared payout calculation
+        // Use shared payout helper (compute_winnings delegates to calc helpers)
         let winnings = Self::compute_winnings(
             user_winning_bet,
             total_pool_balance,
@@ -8517,8 +8581,7 @@ impl PredinexContract {
         user: Address,
         pool_id: u32,
     ) -> Result<MultiAssetClaimResult, ContractError> {
-        user.require_auth();
-        Self::require_not_paused(&env)?;
+        Self::require_claim_auth(&env, &user)?;
 
         let pool = env
             .storage()
@@ -8526,13 +8589,7 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let winning_outcome = match pool.status {
-            PoolStatus::Settled(o) => o,
-            PoolStatus::Frozen => return Err(ContractError::PoolIsFrozen),
-            PoolStatus::Disputed => return Err(ContractError::PoolIsDisputed),
-            PoolStatus::Cancelled => return Err(ContractError::PoolIsCancelled),
-            _ => return Err(ContractError::PoolNotSettled),
-        };
+        let winning_outcome = Self::claim_winning_outcome(&pool)?;
 
         let user_bet = env
             .storage()
@@ -8540,16 +8597,19 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
-        let user_outcome_bets =
-            Self::read_user_outcome_bets(&env, pool_id, user.clone(), &user_bet);
-        let user_norm_winning = user_outcome_bets.get(winning_outcome).unwrap_or(0);
-
-        if user_norm_winning == 0 {
-            return Err(ContractError::NoWinningsToClaim);
-        }
+        let user_norm_winning = Self::claim_user_winning_stake(
+            &env,
+            pool_id,
+            user.clone(),
+            &user_bet,
+            winning_outcome,
+        )?;
 
         let totals = Self::read_outcome_totals(&env, pool_id, &pool);
         let total_norm_winning = totals.get(winning_outcome).unwrap_or(0);
+        if total_norm_winning == 0 {
+            return Err(ContractError::NoWinningBets);
+        }
 
         let fee_bps = Self::pool_effective_fee_bps(&env, pool_id);
 
@@ -8559,7 +8619,7 @@ impl PredinexContract {
             .get(&DataKey::PoolAllowedTokens(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        // Populate per-token fee on first claim.
+        // Populate per-token fee on first claim using shared fee helper.
         let mut payout_state: PoolPayoutState = env
             .storage()
             .persistent()
@@ -8575,7 +8635,7 @@ impl PredinexContract {
                     .persistent()
                     .get(&DataKey::PoolTokenDeposit(pool_id, tok.clone()))
                     .unwrap_or(0);
-                let fee_t = deposit * fee_bps as i128 / 10_000;
+                let fee_t = Self::calc_protocol_fee(deposit, fee_bps).unwrap_or(0);
                 if fee_t > 0 {
                     env.storage()
                         .persistent()
@@ -8585,9 +8645,8 @@ impl PredinexContract {
             payout_state.fee_credited = true;
         }
 
-        // Payout: user receives (net_T × user_norm / total_norm_winning) of each token.
-        // `per_asset` records the raw amount paid for every token so the caller
-        // gets a full per-asset breakdown of the claim.
+        // Payout: user receives proportional share of each token's net balance.
+        // Uses shared payout helpers so single- and multi-asset math cannot diverge.
         let mut total_norm_paid: i128 = 0;
         let mut per_asset: Vec<AssetClaimEntry> = Vec::new(&env);
         for i in 0..allowed.len() {
@@ -8602,11 +8661,12 @@ impl PredinexContract {
                 .persistent()
                 .get(&DataKey::PoolTokenFeePending(pool_id, tok.clone()))
                 .unwrap_or(0);
-            let net_t = deposit - fee_t;
+            let net_t = deposit.checked_sub(fee_t).unwrap_or(0);
             if net_t <= 0 {
                 continue;
             }
-            let payout_t = net_t * user_norm_winning / total_norm_winning;
+            let payout_t = Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning)
+                .unwrap_or(0);
             if payout_t > 0 {
                 let actual_balance = token::Client::new(&env, &tok).balance(&env.current_contract_address());
                 if actual_balance < payout_t {
