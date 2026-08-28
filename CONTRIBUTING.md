@@ -144,7 +144,15 @@ To build the WASM artifact:
 stellar contract build
 ```
 
-The compiled output lands at `contracts/predinex/target/wasm32-unknown-unknown/release/predinex.wasm`.
+The compiled output lands at `contracts/predinex/target/wasm32v1-none/release/predinex.wasm`.
+
+### Troubleshooting Local Test Failures
+
+If tests fail locally but pass in CI, consult the [Contract Test Determinism Guide](./docs/CONTRACT_TEST_DETERMINISM.md). Common causes include:
+
+- **Rust version mismatch:** The workspace uses a pinned toolchain (1.87.0) via `rust-toolchain.toml`. Verify with `rustc --version`.
+- **Wrong WASM target:** Use `wasm32v1-none`, not `wasm32-unknown-unknown`. Add it with `rustup target add wasm32v1-none`.
+- **Stale build cache:** Clear with `cargo clean` before retrying.
 
 For a full local deploy-to-testnet walkthrough, see the [Local End-to-End Runbook](./docs/local-runbook.md).
 
