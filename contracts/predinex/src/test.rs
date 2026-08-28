@@ -3808,7 +3808,10 @@ fn l5_claim_winnings_emits_claim_event() {
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        topic1,
+        soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION)
+    );
     assert_eq!(topic2, pool_id);
     assert_eq!(topic3, user_a);
 
@@ -5358,7 +5361,10 @@ fn m4_claim_winnings_emits_claim_event() {
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        topic1,
+        soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION)
+    );
     assert_eq!(topic2, pool_id);
     assert_eq!(topic3, user);
 
@@ -7334,11 +7340,8 @@ fn test_claim_multi_asset_winnings_balance_shortfall_rejected() {
     // Drain contract's alt_token balance to create a balance shortfall
     s.env.as_contract(&s.client.address, || {
         let contract_bal = s.alt_token.balance(&s.client.address);
-        s.alt_token.transfer(
-            &s.client.address,
-            &s.treasury,
-            &contract_bal,
-        );
+        s.alt_token
+            .transfer(&s.client.address, &s.treasury, &contract_bal);
     });
 
     let res = s.client.try_claim_multi_asset_winnings(&user, &pool_id);
@@ -7446,9 +7449,7 @@ fn test_extend_pool_duration_rejected_on_settled_voided_frozen_pools() {
 
     // Freeze pool and attempt extension
     t.client.freeze_pool(&t.admin, &pool_id);
-    let res_frozen = t
-        .client
-        .try_extend_pool_duration(&creator, &pool_id, &1000);
+    let res_frozen = t.client.try_extend_pool_duration(&creator, &pool_id, &1000);
     assert_eq!(res_frozen, Err(Ok(ContractError::PoolNotOpen)));
 
     t.client.unfreeze_pool(&t.admin, &pool_id);
@@ -7457,8 +7458,6 @@ fn test_extend_pool_duration_rejected_on_settled_voided_frozen_pools() {
     t.env.ledger().with_mut(|li| li.timestamp = 3601);
     t.client.settle_pool(&t.admin, &pool_id, &0);
 
-    let res_settled = t
-        .client
-        .try_extend_pool_duration(&creator, &pool_id, &1000);
+    let res_settled = t.client.try_extend_pool_duration(&creator, &pool_id, &1000);
     assert_eq!(res_settled, Err(Ok(ContractError::PoolNotOpen)));
 }

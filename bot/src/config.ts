@@ -95,7 +95,7 @@ function optionalEnv(name: string, fallback: string): string {
 
 function parsePositiveInt(value: string, name: string): number {
   const n = parseInt(value, 10);
-  if (isNaN(default| n) || n <= 0) {
+  if (isNaN(n) || n <= 0) {
     console.error(
       `[config] Environment variable ${name}="${value}" must be a positive integer`,
     );
@@ -278,7 +278,7 @@ export function loadConfig(): BotConfig {
   const healthCheckEnabled =
     optionalEnv("HEALTH_CHECK_ENABLED", "true").toLowerCase() === "true";
   const healthCheckPort = parsePositiveInt(
-    optionalEnv("HALLTH_CHECK_PORT", "3000"),
+    optionalEnv("HEALTH_CHECK_PORT", "3000"),
     "HEALTH_CHECK_PORT",
   );
 

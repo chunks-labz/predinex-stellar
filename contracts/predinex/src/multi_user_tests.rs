@@ -906,7 +906,13 @@ fn l4_leaderboard_ordered_by_total_bet_descending() {
     let pool_id = make_pool_mu(&t);
 
     let users: alloc::vec::Vec<Address> = (0..5).map(|_| Address::generate(&t.env)).collect();
-    let amounts = [1_000_000_000i128, 500_000_000i128, 2_000_000_000i128, 750_000_000i128, 1_500_000_000i128];
+    let amounts = [
+        1_000_000_000i128,
+        500_000_000i128,
+        2_000_000_000i128,
+        750_000_000i128,
+        1_500_000_000i128,
+    ];
 
     for (user, &amount) in users.iter().zip(amounts.iter()) {
         mint(&t.env, &t.token, user, amount);
@@ -918,7 +924,13 @@ fn l4_leaderboard_ordered_by_total_bet_descending() {
 
     assert_eq!(leaderboard.len(), 5, "all five users must appear");
 
-    let expected_order = [2_000_000_000i128, 1_500_000_000i128, 1_000_000_000i128, 750_000_000i128, 500_000_000i128];
+    let expected_order = [
+        2_000_000_000i128,
+        1_500_000_000i128,
+        1_000_000_000i128,
+        750_000_000i128,
+        500_000_000i128,
+    ];
     for i in 0..leaderboard.len() {
         assert_eq!(
             leaderboard.get(i).unwrap().total_bet,
@@ -939,7 +951,13 @@ fn l5_leaderboard_cursor_pagination() {
     let pool_id = make_pool_mu(&t);
 
     let users: alloc::vec::Vec<Address> = (0..5).map(|_| Address::generate(&t.env)).collect();
-    let amounts = [1_000_000_000i128, 500_000_000i128, 2_000_000_000i128, 750_000_000i128, 1_500_000_000i128];
+    let amounts = [
+        1_000_000_000i128,
+        500_000_000i128,
+        2_000_000_000i128,
+        750_000_000i128,
+        1_500_000_000i128,
+    ];
 
     for (user, &amount) in users.iter().zip(amounts.iter()) {
         mint(&t.env, &t.token, user, amount);
