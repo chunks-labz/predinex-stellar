@@ -18,6 +18,8 @@ mod create_pool_validation_tests;
 mod creator_deadline_claim_tests;
 mod cross_chain_tests;
 mod e2e_tests;
+mod events;
+mod events_test;
 mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
@@ -33,40 +35,21 @@ mod validation_hardening_tests;
 mod validation_prop_tests;
 mod webhook_test;
 
+// Re-export event types and helpers for backward compatibility
+pub use events::{
+    event_version, BetCancelledEvent, BetEvent, ClaimEvent, ClaimExpiredEvent, ClaimRefundEvent,
+    CreatePoolEvent, FeeConfigUpdatedEvent, PoolBetLimitsSetEvent, PoolCancelledEvent,
+    PoolDurationExtendedEvent, PoolRefundedEvent, PoolSettleRequest, ProtocolFeeSetEvent,
+    ReferralBetEvent, ReferralRewardClaimedEvent, SettleExpiredEvent, SettleResult,
+    SettlePoolEvent, SettlementSource, VoidPoolEvent, EVENT_SCHEMA_VERSION,
+    CONTRACT_STATE_VERSION,
+};
+
 // ── Issue #175: Event schema versioning ──────────────────────────────────────
 //
-// Every event emitted by this contract uses the same topic layout:
-//
-//   (Symbol(event_name), Symbol(EVENT_SCHEMA_VERSION), ...identifiers)
-//
-// Topic position 0 is the event name (e.g. `create_pool`). Topic position 1 is
-// always the schema version marker (currently `"v1"`). Subsequent topics carry
-// pool / user identifiers as before. Indexers and frontend consumers can
-// therefore pin a specific schema version with a positional topic filter, e.g.
-// `[["create_pool", "v1"]]`, and reject events whose version they do not yet
-// understand instead of silently mis-decoding payloads.
-//
-// Upgrade rules for future schema changes:
-//   * A backward-compatible payload extension (additional optional fields)
-//     SHOULD reuse the same version marker.
-//   * A breaking change to topics or data shape MUST bump the version marker
-//     (e.g. `"v2"`) and be documented in `web/docs/CONTRACT_EVENTS.md`.
-//   * The contract MUST never emit two version markers for the same event in
-//     the same release; consumers can rely on exactly one version per event.
-//
-// See `web/docs/CONTRACT_EVENTS.md` for the full per-event schema and the
-// upgrade expectations published to consumers.
-pub const EVENT_SCHEMA_VERSION: &str = "v1";
-
-/// #191 — Contract state schema version for on-chain compatibility checks.
-/// Bumped (e.g. "v2") whenever the persistent state layout changes in a
-/// backward-incompatible way. Stored under `DataKey::ContractVersion`.
-pub const CONTRACT_STATE_VERSION: &str = "v1";
-
-/// Build the schema-version `Symbol` used as topic position 1 on every event.
-fn event_version(env: &Env) -> Symbol {
-    Symbol::new(env, EVENT_SCHEMA_VERSION)
-}
+// Event schema versioning is now handled by the events module (events.rs).
+// All event definitions have been moved there for better organization and
+// maintainability. See events.rs for the unified emission pattern.
 
 // Dispute window: 7 days in seconds (configurable in future)
 const DISPUTE_WINDOW_SECS: u64 = 7 * 24 * 3600;
