@@ -12,10 +12,12 @@ use soroban_sdk::{
 mod benchmark_tests;
 mod benchmarks;
 mod bet_management_tests;
+mod concurrent_tests;
 mod create_pool_validation_tests;
 mod creator_deadline_claim_tests;
 mod cross_chain_tests;
 mod e2e_tests;
+
 mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
@@ -30,6 +32,8 @@ mod test;
 mod validation_hardening_tests;
 mod validation_prop_tests;
 mod webhook_test;
+
+
 
 // ── Issue #175: Event schema versioning ──────────────────────────────────────
 //
@@ -895,6 +899,7 @@ pub const CONTRACT_STATE_VERSION: &str = "v1";
 fn event_version(env: &Env) -> Symbol {
     Symbol::new(env, EVENT_SCHEMA_VERSION)
 }
+
 
 // Dispute window: 7 days in seconds (configurable in future)
 const DISPUTE_WINDOW_SECS: u64 = 7 * 24 * 3600;
@@ -2284,14 +2289,7 @@ impl PredinexContract {
     /// Pass 0 to remove the fee requirement.
     pub fn set_creation_fee(env: Env, caller: Address, fee: i128) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if fee < 0 {
             return Err(ContractError::FeeMustBeNonNegative);
         }
@@ -2372,14 +2370,7 @@ impl PredinexContract {
     /// * "Fee out of bounds" – if fee_bps is outside [0, 1000]
     pub fn set_protocol_fee(env: Env, caller: Address, fee_bps: u32) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&fee_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
@@ -2628,15 +2619,7 @@ impl PredinexContract {
         max_bet: i128,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         // Ensure pool exists.
         let _pool_exists: Pool = env
@@ -2701,14 +2684,7 @@ impl PredinexContract {
         cooling_period_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if max_pool_size < 0 || large_pool_threshold < 0 {
             return Err(ContractError::InvalidBetAmount);
         }
@@ -2790,14 +2766,7 @@ impl PredinexContract {
         window_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if (max_bets_per_window == 0 && window_secs > 0)
             || (max_bets_per_window > 0 && window_secs == 0)
         {
@@ -6826,16 +6795,9 @@ impl PredinexContract {
     /// Emits a `treasury_withdrawn` event.
     pub fn withdraw_treasury(env: Env, caller: Address, amount: i128) -> Result<(), ContractError> {
         caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
 
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        let treasury_recipient = caller.clone();
 
         if amount <= 0 {
             return Err(ContractError::InvalidWithdrawalAmount);
@@ -6892,16 +6854,7 @@ impl PredinexContract {
         freeze_admin: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let old_freeze_admin: Option<Address> =
             env.storage().persistent().get(&DataKey::FreezeAdmin);
@@ -7107,14 +7060,7 @@ impl PredinexContract {
         pool_id: u32,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let mut pool = env
             .storage()
@@ -8065,16 +8011,12 @@ impl PredinexContract {
     /// While paused, sensitive operations (place_bet, settle_pool, claim_winnings,
     /// claim_refund, void_pool) are blocked. Treasury withdrawals and admin functions
     /// remain operational.
+    ///
+    /// Emits `contract_paused` or `contract_unpaused` with `event_version()` in the
+    /// topic tuple so indexers can filter by version like every other event.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &paused);
 
         if paused {
@@ -8085,9 +8027,9 @@ impl PredinexContract {
         Ok(())
     }
 
-    /// #456 — Pause the contract. Convenience wrapper around `set_paused(true)`.
+    /// #456 — Pause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolPaused` event.
+    /// Emits a `contract_paused` event.
     pub fn pause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
@@ -8096,9 +8038,9 @@ impl PredinexContract {
         Ok(())
     }
 
-    /// #456 — Unpause the contract. Convenience wrapper around `set_paused(false)`.
+    /// #456 — Unpause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolUnpaused` event.
+    /// Emits a `contract_unpaused` event.
     pub fn unpause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
@@ -8483,9 +8425,9 @@ impl PredinexContract {
             return Err(ContractError::InvalidWebhookUrl);
         }
         let url_len = url.len() as usize;
-        let mut url_buf = vec![0u8; url_len];
-        url.copy_into_slice(&mut url_buf);
-        let after_scheme = &url_buf[8..url_len]; // skip "https://"
+        let mut url_bytes = vec![0u8; url_len];
+        url.copy_into_slice(&mut url_bytes);
+        let after_scheme = &url_bytes[8..]; // skip "https://"
         if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
             return Err(ContractError::InvalidWebhookUrl);
         }
@@ -9806,7 +9748,8 @@ impl PredinexContract {
 
         // Reject any outcome index >= num_outcomes to prevent settling to an
         // out-of-bounds outcome that would break payout calculations.
-        if winning_outcome >= 2u32 {
+        let outcome_count = Self::read_outcome_totals(&env, source_pool_id, &source_pool).len();
+        if winning_outcome >= outcome_count {
             return Err(ContractError::InvalidOutcome);
         }
 

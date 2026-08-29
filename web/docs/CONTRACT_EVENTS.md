@@ -385,32 +385,20 @@ Emitted when freeze admin address is set.
 ## Contract Control Events
 
 ### contract_paused
-Emitted when the contract is paused.
+Emitted when the contract is paused via `set_paused(true)`, `pause_contract`, or any future
+wrapper that delegates to `set_paused`.
 
-- **Topics:** `(Symbol("contract_paused"))` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("contract_paused"), event_version())`
 - **Data:** `caller: Address`
-- **Indexer Use:** Alert users to maintenance
+- **Indexer Use:** Alert users to maintenance; gate any operation that reads `is_paused`
 
 ### contract_unpaused
-Emitted when the contract is unpaused.
+Emitted when the contract is unpaused via `set_paused(false)`, `unpause_contract`, or any
+future wrapper that delegates to `set_paused`.
 
-- **Topics:** `(Symbol("contract_unpaused"))` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("contract_unpaused"), event_version())`
 - **Data:** `caller: Address`
 - **Indexer Use:** Notify users operations are live
-
-### PoolPaused (Deprecated)
-Alternative pause event (has event_version() unlike contract_paused).
-
-- **Topics:** `(Symbol("PoolPaused"), event_version())`
-- **Data:** `caller: Address`
-- **Note:** Use `contract_paused` instead for consistency
-
-### PoolUnpaused (Deprecated)
-Alternative unpause event.
-
-- **Topics:** `(Symbol("PoolUnpaused"), event_version())`
-- **Data:** `caller: Address`
-- **Note:** Use `contract_unpaused` instead for consistency
 
 ---
 
@@ -470,9 +458,7 @@ Lower-volume operational events (batch daily):
 
 ## Known Issues
 
-1. **Duplicate Pause Events:** `PoolPaused`/`PoolUnpaused` and `contract_paused`/`contract_unpaused` are redundant. Deprecate the former in favor of latter.
-
-2. **Webhook URL Logging:** The `webhook_registered` and `webhook_unregistered` events currently emit URL strings which may be logged publicly. Future versions should emit webhook ID hash instead.
+1. **Webhook URL Logging:** The `webhook_registered` and `webhook_unregistered` events currently emit URL strings which may be logged publicly. Future versions should emit webhook ID hash instead.
 
 ---
 
@@ -483,4 +469,11 @@ Lower-volume operational events (batch daily):
 - Schema versioning with positional topic filters
 - 4 legacy events without version marker for backward compatibility
 - Full typed event payloads for indexer reliability
+
+### Recent fixes
+- **#1054** — `PoolPaused` / `PoolUnpaused` removed. All three pause entry
+  points (`set_paused`, `pause_contract`, `unpause_contract`) now emit the
+  canonical `contract_paused` / `contract_unpaused` with `event_version()` via
+  a single code path in `set_paused`. Off-chain indexers need only subscribe to
+  `contract_paused` / `contract_unpaused`.
 
