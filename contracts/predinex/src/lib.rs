@@ -6636,11 +6636,10 @@ impl PredinexContract {
         let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
         for i in start_index..end_index {
             let mut entry = all_entries.get(i).unwrap();
-            entry.winnings_claimed =
-                match Self::get_claim_status(env.clone(), pool_id, entry.user.clone()) {
-                    ClaimStatus::AlreadyClaimed => true,
-                    _ => false,
-                };
+            entry.winnings_claimed = matches!(
+                Self::get_claim_status(env.clone(), pool_id, entry.user.clone()),
+                ClaimStatus::AlreadyClaimed
+            );
             limited.push_back(entry);
         }
         limited
@@ -7373,13 +7372,12 @@ impl PredinexContract {
                 // #1053 — Only extend TTL if remaining lifetime is below threshold.
                 // This avoids metered write amplification from dashboard polling; reads
                 // now trigger writes only when the entry is approaching expiration.
-                if let Some(remaining_ttl) = env.storage().persistent().get_ttl(&key) {
-                    if remaining_ttl < POOL_BUMP_THRESHOLD {
-                        env.storage()
-                            .persistent()
-                            .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
-                    }
-                }
+                // `extend_ttl` already applies exactly that rule: the host writes only
+                // when the remaining live-until is below `threshold`. There is no
+                // `get_ttl` accessor to gate it with, and none is needed.
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
                 result.push_back(UserPoolPosition {
                     pool_id,
                     amount_a: bet.amount_a,
@@ -7929,15 +7927,18 @@ impl PredinexContract {
         if url.len() < 10 {
             return Err(ContractError::InvalidWebhookUrl);
         }
-        let url_bytes = url.to_string();
-        let after_scheme = &url_bytes.as_bytes()[8..]; // skip "https://"
+        // `String::to_string` is compiled out for the wasm target, so the host
+        // string is copied into a buffer the same way `string_starts_with` does.
+        let mut raw = vec![0u8; url.len() as usize];
+        url.copy_into_slice(&mut raw);
+        let after_scheme = &raw[8..]; // skip "https://"
         if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
             return Err(ContractError::InvalidWebhookUrl);
         }
         // Ensure the URL contains valid ASCII/UTF-8 hostname characters after scheme.
         // Reject control characters and non-printable bytes.
         for &byte in after_scheme.iter().take(after_scheme.len().min(64)) {
-            if byte < 0x20 || byte > 0x7E {
+            if !(0x20..=0x7E).contains(&byte) {
                 return Err(ContractError::InvalidWebhookUrl);
             }
         }
@@ -8080,9 +8081,9 @@ impl PredinexContract {
         // #1051 — Clamp rate_bps to a sane range (1_000 to 1_000_000) to prevent
         // accidental or malicious extreme rate changes that would break multi-asset
         // bet normalization and payouts.
-        const MIN_RATE_BPS: i128 = 1_000;      // 0.1x (10%)
-        const MAX_RATE_BPS: i128 = 1_000_000;  // 100x (10,000%)
-        if rate_bps < MIN_RATE_BPS || rate_bps > MAX_RATE_BPS {
+        const MIN_RATE_BPS: i128 = 1_000; // 0.1x (10%)
+        const MAX_RATE_BPS: i128 = 1_000_000; // 100x (10,000%)
+        if !(MIN_RATE_BPS..=MAX_RATE_BPS).contains(&rate_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
 
@@ -9285,7 +9286,7 @@ impl PredinexContract {
         if mirror.is_settled {
             return Err(ContractError::PoolAlreadySettled);
         }
-        
+
         // #1052 — Validate winning_outcome is within the source pool's outcome set bounds.
         // Fetch the source pool to check its outcome count.
         let source_pool: Pool = env
@@ -9293,13 +9294,17 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::Pool(source_pool_id))
             .ok_or(ContractError::PoolNotFound)?;
-        
-        // Reject any outcome index >= num_outcomes to prevent settling to an
-        // out-of-bounds outcome that would break payout calculations.
-        if winning_outcome >= source_pool.num_outcomes {
+
+        // Reject any outcome index >= the pool's outcome count to prevent
+        // settling to an out-of-bounds outcome that would break payout
+        // calculations. `Pool` carries no count field: multi-outcome pools store
+        // their list separately and binary pools fall back to the A/B names, so
+        // `read_outcomes` is the accessor that covers both.
+        let outcome_count = Self::read_outcomes(&env, source_pool_id, &source_pool).len();
+        if winning_outcome >= outcome_count {
             return Err(ContractError::InvalidOutcome);
         }
-        
+
         let timeout: u64 = env
             .storage()
             .persistent()
@@ -9933,10 +9938,11 @@ impl PredinexContract {
     }
 
     pub fn get_pending_lp_rewards(env: Env, pool_id: u32, user: Address) -> i128 {
+        // `user` is needed again below to compute the pending amount.
         let position: LpPosition = env
             .storage()
             .persistent()
-            .get(&DataKey::LpPosition(pool_id, user))
+            .get(&DataKey::LpPosition(pool_id, user.clone()))
             .unwrap_or(LpPosition {
                 shares: 0,
                 reward_debt: 0,
