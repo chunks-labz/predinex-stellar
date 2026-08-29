@@ -12,6 +12,8 @@ contracts/predinex/test_snapshots/
 .next/
 out/
 build/
+coverage/
+data/
 .env*
 npm-debug.log*
 yarn-debug.log*
