@@ -22,6 +22,7 @@ mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
+mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
 mod multi_user_tests;
@@ -31,6 +32,7 @@ mod protocol_fee_tests;
 mod test;
 mod validation_hardening_tests;
 mod validation_prop_tests;
+mod verification;
 mod webhook_test;
 
 // ── Issue #175: Event schema versioning ──────────────────────────────────────
