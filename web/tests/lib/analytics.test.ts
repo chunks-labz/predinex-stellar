@@ -436,4 +436,87 @@ describe('Analytics Taxonomy', () => {
       expect(sessionId2).not.toBe(sessionId1);
     });
   });
+
+  describe('Network Type & App Version Context', () => {
+    const originalEnv = process.env;
+
+    beforeEach(() => {
+      process.env = { ...originalEnv };
+      analytics.setNetworkTypeOverride(null);
+    });
+
+    afterEach(() => {
+      process.env = originalEnv;
+      analytics.setNetworkTypeOverride(null);
+    });
+
+    it('labels events mainnet when runtime config resolves to mainnet', () => {
+      process.env.NEXT_PUBLIC_NETWORK = 'mainnet';
+      // Reset runtime-config cache so it re-reads the env.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.networkType).toBe('mainnet');
+    });
+
+    it('labels events testnet when runtime config defaults to testnet', () => {
+      delete process.env.NEXT_PUBLIC_NETWORK;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.networkType).toBe('testnet');
+    });
+
+    it('setNetworkTypeOverride overrides runtime config at runtime', () => {
+      process.env.NEXT_PUBLIC_NETWORK = 'testnet';
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.setNetworkTypeOverride('mainnet');
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.networkType).toBe('mainnet');
+
+      analytics.setNetworkTypeOverride(null);
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call2 = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call2.networkType).toBe('testnet');
+    });
+
+    it('falls back to testnet when runtime config throws during resolution', () => {
+      process.env.NEXT_PUBLIC_NETWORK = 'nonsense-value';
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.networkType).toBe('testnet');
+    });
+
+    it('includes appVersion from runtime-config (or unknown fallback)', () => {
+      process.env.NEXT_PUBLIC_APP_VERSION = '1.42.0-test';
+      delete process.env.NEXT_PUBLIC_NETWORK;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.appVersion).toBe('1.42.0-test');
+    });
+
+    it('falls back appVersion to unknown when NEXT_PUBLIC_APP_VERSION is unset', () => {
+      delete process.env.NEXT_PUBLIC_APP_VERSION;
+      delete process.env.NEXT_PUBLIC_NETWORK;
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      require('../../app/lib/runtime-config').__resetRuntimeConfigForTests();
+
+      analytics.emit('wallet.connect.attempt', { walletType: 'freighter' });
+      const call = trackSpy.mock.calls[trackSpy.mock.calls.length - 1][1];
+      expect(call.appVersion).toBe('unknown');
+    });
+  });
 });

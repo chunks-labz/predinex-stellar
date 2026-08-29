@@ -674,6 +674,39 @@ All events follow the topic layout:
 Topic position 0 is the event name; position 1 is always the schema version marker `"v1"`.  
 See `web/docs/CONTRACT_EVENTS.md` for the full per-event payload reference.
 
+### Typed Event Convention (#[contractevent])
+
+All event emission uses Soroban SDK ≥20 `#[contractevent]`-derived types (defined in
+`contract_events` in `lib.rs`). Each event has:
+
+1. A `#[event(name = "...")]` struct inside the `contract_events` module — the name
+   matches the indexer-visible `topic[0]`.
+2. An `emit_<snake_case_name>` helper function that constructs the struct and calls
+   `.publish(env)` with the canonical topic layout.
+
+**Adding a new event:**
+
+```rust
+// 1. Add to contract_events module
+#[event(name = "my_new_event")]
+pub struct MyNewEvent {
+    pub pool_id: u32,
+    // ...payload fields
+}
+
+// 2. Add emit helper
+#[allow(deprecated)]
+fn emit_my_new_event(env: &Env, pool_id: u32) {
+    my_new_event(env, (pool_id,));
+}
+```
+
+**Rules:**
+- Never reuse an event `name` with a breaking topic/payload shape; bump
+  `EVENT_SCHEMA_VERSION` to `"v2"` and add a parallel struct.
+- Every event MUST carry `event_version` ("v1") at topic position 1 — the
+  `emit_*` helpers guarantee this by delegating to the auto-generated function.
+
 ---
 
 ## Further Reading

@@ -70,7 +70,7 @@ interface FetchPoolActivityResult {
   rawCount: number;
 }
 
-async function fetchPoolActivityFromSoroban(
+export async function fetchPoolActivityFromSoroban(
   poolId: number,
   limit: number,
   cursor?: string,

@@ -50,6 +50,7 @@ export type PoolWebhookSettings = {
 
 export type RuntimeConfig = {
   network: SupportedNetwork;
+  appVersion: string;
   contract: ContractConfig;
   api: StacksApiConfig;
   soroban: SorobanConfig;
@@ -60,6 +61,7 @@ export type RuntimeConfig = {
 };
 
 const DEFAULT_NETWORK: SupportedNetwork = 'testnet';
+const DEFAULT_APP_VERSION = 'unknown';
 
 function parseNetwork(raw: string): SupportedNetwork {
   const v = raw.trim().toLowerCase();
@@ -146,8 +148,11 @@ export function getRuntimeConfig(): RuntimeConfig {
     (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
   const contract = resolveContractConfig(network);
 
+  const appVersion = getOptionalEnv('NEXT_PUBLIC_APP_VERSION') ?? DEFAULT_APP_VERSION;
+
   cachedConfig = {
     network,
+    appVersion,
     contract,
     api: {
       coreApiUrl: walletNet.coreApiUrl,
