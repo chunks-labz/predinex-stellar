@@ -56,340 +56,12 @@ mod webhook_test;
 // upgrade expectations published to consumers.
 pub const EVENT_SCHEMA_VERSION: &str = "v1";
 
-// ── Typed events (Soroban ≥20 #[contractevent]) ─────────────────────────────
+// â”€â”€ Emit helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// Every event emitted by the contract has a typed struct derived from
-// `#[contractevent]`, with `#[event]` per struct. The canonical topic layout
-// (Symbol(event_name), Symbol("v1"), ...identifiers) is preserved so existing
-// indexers and frontend consumers keep working unchanged.
-//
-// Migration: callers use one of the `emit_*` helpers below, which delegate to
-// the typed publish and guarantee that `event_version` ("v1") is always
-// present at topic position 1 and that each event's identifier topics match
-// the previously published ad-hoc tuple shapes.
-//
-// Convention for future events:
-//   * Add a new `#[event]` struct under `contract_events` with `name = "..."`
-//     matching the indexer-visible topic[0].
-//   * Add a `emit_<snake_case_name>` helper that constructs the struct and
-//     calls `.publish(env)` with the identifier topics in the same order the
-//     indexer expects (name, "v1", …).
-//   * Never reuse an existing event `name` with a breaking topic/payload
-//     shape; bump `EVENT_SCHEMA_VERSION` to "v2" and add a parallel struct
-//     with a new version symbol.
+// These thin wrappers publish typed events via `env.events().publish()`.
+// Topic layout: (Symbol(event_name), Symbol("v1"), â€¦pool_id/user/â€¦).
+// Data payload: event-specific fields as a tuple or single value.
 
-#[contractevent]
-pub mod contract_events {
-    use super::*;
-
-    // ── Fee / protocol config events ────────────────────────────────────────
-    #[event(name = "FeeConfigUpdated")]
-    pub struct FeeConfigUpdated {
-        pub old_fee_rate: i128,
-        pub old_fee_recipient: Option<Address>,
-        pub fee_rate: i128,
-        pub fee_recipient: Address,
-    }
-
-    #[event(name = "creation_fee_set")]
-    pub struct CreationFeeSet {
-        pub old_fee: i128,
-        pub fee: i128,
-    }
-
-    #[event(name = "creation_fee_exemption_set")]
-    pub struct CreationFeeExemptionSet {
-        pub account: Address,
-        pub exempt: bool,
-    }
-
-    #[event(name = "protocol_fee_set")]
-    pub struct ProtocolFeeSet {
-        pub caller: Address,
-        pub old_fee_bps: u32,
-        pub fee_bps: u32,
-    }
-
-    #[event(name = "volume_fee_tiers_set")]
-    pub struct VolumeFeeTiersSet {
-        pub caller: Address,
-    }
-
-    #[event(name = "pool_bet_limits_set")]
-    pub struct PoolBetLimitsSet {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "circuit_breaker_config_set")]
-    pub struct CircuitBreakerConfigSet;
-
-    #[event(name = "rate_limit_config_set")]
-    pub struct RateLimitConfigSet;
-
-    #[event(name = "user_exposure_config_set")]
-    pub struct UserExposureConfigSet;
-
-    // ── Risk-control guardrail events ───────────────────────────────────────
-    #[event(name = "user_bet_limit_exceeded")]
-    pub struct UserBetLimitExceeded;
-
-    #[event(name = "user_exposure_limit_exceeded")]
-    pub struct UserExposureLimitExceeded;
-
-    #[event(name = "user_daily_loss_limit_exceeded")]
-    pub struct UserDailyLossLimitExceeded;
-
-    #[event(name = "user_weekly_loss_limit_exceeded")]
-    pub struct UserWeeklyLossLimitExceeded;
-
-    #[event(name = "user_large_bet_cooldown_active")]
-    pub struct UserLargeBetCooldownActive;
-
-    // ── Pool lifecycle ──────────────────────────────────────────────────────
-    #[event(name = "create_pool")]
-    pub struct CreatePool {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "pool_scheduled")]
-    pub struct PoolScheduled {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "scheduled_pool_activated")]
-    pub struct ScheduledPoolActivated {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "scheduled_pool_cancelled")]
-    pub struct ScheduledPoolCancelled {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "pool_cooling_started")]
-    pub struct PoolCoolingStarted {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "pool_duration_extended")]
-    pub struct PoolDurationExtended {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "assign_settler")]
-    pub struct AssignSettler {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "min_settlement_participants_set")]
-    pub struct MinSettlementParticipantsSet;
-
-    #[event(name = "cancel_pool")]
-    pub struct CancelPool {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "settle_pool")]
-    pub struct SettlePool {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "void_pool")]
-    pub struct VoidPool {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "refund_expired_pool")]
-    pub struct RefundExpiredPool {
-        pub pool_id: u32,
-    }
-
-    // ── Bet / claim flow ────────────────────────────────────────────────────
-    #[event(name = "place_bet")]
-    pub struct PlaceBet {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "referral_bet")]
-    pub struct ReferralBet {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "twap_updated")]
-    pub struct TwapUpdated {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "bet_cancelled")]
-    pub struct BetCancelled {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "claim_winnings")]
-    pub struct ClaimWinnings {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "claim_refund")]
-    pub struct ClaimRefund {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "claim_expired")]
-    pub struct ClaimExpired {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "claim_scheduled")]
-    pub struct ClaimScheduled {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "scheduled_claim_cancelled")]
-    pub struct ScheduledClaimCancelled {
-        pub pool_id: u32,
-    }
-
-    #[event(name = "scheduled_claim_executed")]
-    pub struct ScheduledClaimExecuted {
-        pub pool_id: u32,
-    }
-
-    // ── Treasury / admin ────────────────────────────────────────────────────
-    #[event(name = "treasury_withdraw_limit_set")]
-    pub struct TreasuryWithdrawLimitSet;
-
-    #[event(name = "treasury_recipient_rotated")]
-    pub struct TreasuryRecipientRotated;
-
-    #[event(name = "treasury_withdrawn")]
-    pub struct TreasuryWithdrawn;
-
-    #[event(name = "freeze_admin_set")]
-    pub struct FreezeAdminSet;
-
-    #[event(name = "PoolPaused")]
-    pub struct PoolPaused;
-
-    #[event(name = "PoolUnpaused")]
-    pub struct PoolUnpaused;
-
-    #[event(name = "admin_set")]
-    pub struct AdminSet;
-
-    #[event(name = "bridge_timeout_set")]
-    pub struct BridgeTimeoutSet;
-
-    #[event(name = "cross_chain_dispute_window_set")]
-    pub struct CrossChainDisputeWindowSet;
-
-    #[event(name = "cross_chain_settled")]
-    pub struct CrossChainSettled;
-
-    #[event(name = "dispute_window_set")]
-    pub struct DisputeWindowSet;
-
-    #[event(name = "lp_deposit")]
-    pub struct LpDeposit;
-
-    #[event(name = "lp_fee_allocation_set")]
-    pub struct LpFeeAllocationSet;
-
-    #[event(name = "lp_reward_claimed")]
-    pub struct LpRewardClaimed;
-
-    #[event(name = "lp_rewards_distributed")]
-    pub struct LpRewardsDistributed;
-
-    #[event(name = "lp_stake_boost_set")]
-    pub struct LpStakeBoostSet;
-
-    #[event(name = "lp_staked")]
-    pub struct LpStaked;
-
-    #[event(name = "lp_unstaked")]
-    pub struct LpUnstaked;
-
-    #[event(name = "lp_withdraw")]
-    pub struct LpWithdraw;
-
-    #[event(name = "mirror_created")]
-    pub struct MirrorCreated;
-
-    #[event(name = "pool_cooling_overridden")]
-    pub struct PoolCoolingOverridden;
-
-    #[event(name = "pool_created_from_template")]
-    pub struct PoolCreatedFromTemplate;
-
-    #[event(name = "pool_disputed")]
-    pub struct PoolDisputed;
-
-    #[event(name = "pool_ext_metadata_set")]
-    pub struct PoolExtMetadataSet;
-
-    #[event(name = "pool_frozen")]
-    pub struct PoolFrozen;
-
-    #[event(name = "pool_metadata_cleared")]
-    pub struct PoolMetadataCleared;
-
-    #[event(name = "pool_metadata_set")]
-    pub struct PoolMetadataSet;
-
-    #[event(name = "pool_template_created")]
-    pub struct PoolTemplateCreated;
-
-    #[event(name = "pool_template_deleted")]
-    pub struct PoolTemplateDeleted;
-
-    #[event(name = "pool_template_updated")]
-    pub struct PoolTemplateUpdated;
-
-    #[event(name = "pool_token_bet_limits_set")]
-    pub struct PoolTokenBetLimitsSet;
-
-    #[event(name = "pool_unfrozen")]
-    pub struct PoolUnfrozen;
-
-    #[event(name = "referral_bps_set")]
-    pub struct ReferralBpsSet;
-
-    #[event(name = "referral_reward_claimed")]
-    pub struct ReferralRewardClaimed;
-
-    #[event(name = "token_rate_set")]
-    pub struct TokenRateSet;
-
-    #[event(name = "tokens_rescued")]
-    pub struct TokensRescued;
-
-    #[event(name = "webhook_registered")]
-    pub struct WebhookRegistered;
-
-    #[event(name = "webhook_unregistered")]
-    pub struct WebhookUnregistered;
-
-    // ── Admin / lifecycle ──────────────────────────────────────────────────
-    #[event(name = "AdminSet")]
-    pub struct AdminSet;
-
-    #[event(name = "contract_paused")]
-    pub struct ContractPaused;
-
-    #[event(name = "contract_unpaused")]
-    pub struct ContractUnpaused;
-}
-
-// ── Emit helpers ────────────────────────────────────────────────────────────
-//
-// These thin wrappers accept the identifier topics and event payload, mirror
-// the *exact* topic tuple order that `env.events().publish` used to produce
-// (topic0 = event_name, topic1 = "v1", …pool_id/user/…) and delegate to the
-// typed `.publish(env)` API. Identical on-wire layout → indexers are
-// unaffected.
-
-#[allow(deprecated)]
 fn emit_fee_config_updated(
     env: &Env,
     old_fee_rate: i128,
@@ -397,38 +69,43 @@ fn emit_fee_config_updated(
     fee_rate: i128,
     fee_recipient: Address,
 ) {
-    fee_config_updated(
-        &env,
-        (
-            old_fee_rate,
-            old_fee_recipient,
-            fee_rate,
-            fee_recipient.clone(),
-        ),
+    env.events().publish(
+        (Symbol::new(env, "FeeConfigUpdated"), event_version(env)),
+        (old_fee_rate, old_fee_recipient, fee_rate, fee_recipient),
     );
 }
 
-#[allow(deprecated)]
 fn emit_creation_fee_set(env: &Env, old_fee: i128, fee: i128) {
-    creation_fee_set(&env, (old_fee, fee));
+    env.events().publish(
+        (Symbol::new(env, "creation_fee_set"), event_version(env)),
+        (old_fee, fee),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_creation_fee_exemption_set(env: &Env, account: Address, exempt: bool) {
-    creation_fee_exemption_set(&env, (account, exempt));
+    env.events().publish(
+        (
+            Symbol::new(env, "creation_fee_exemption_set"),
+            event_version(env),
+        ),
+        (account, exempt),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_protocol_fee_set(env: &Env, caller: Address, old_fee_bps: u32, fee_bps: u32) {
-    protocol_fee_set(&env, (caller, old_fee_bps, fee_bps));
+    env.events().publish(
+        (Symbol::new(env, "protocol_fee_set"), event_version(env)),
+        (caller, old_fee_bps, fee_bps),
+    );
 }
 
-#[allow(deprecated)]
-fn emit_volume_fee_tiers_set(env: &Env, caller: Address, tiers: Vec<Vec<u32>>) {
-    volume_fee_tiers_set(&env, (caller, tiers));
+fn emit_volume_fee_tiers_set(env: &Env, caller: Address, tiers: Vec<FeeTier>) {
+    env.events().publish(
+        (Symbol::new(env, "volume_fee_tiers_set"), event_version(env)),
+        (caller, tiers),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_pool_bet_limits_set(
     env: &Env,
     pool_id: u32,
@@ -437,10 +114,16 @@ fn emit_pool_bet_limits_set(
     min_bet: i128,
     max_bet: i128,
 ) {
-    pool_bet_limits_set(&env, pool_id, (old_min_bet, old_max_bet, min_bet, max_bet));
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_bet_limits_set"),
+            event_version(env),
+            pool_id,
+        ),
+        (old_min_bet, old_max_bet, min_bet, max_bet),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_circuit_breaker_config_set(
     env: &Env,
     old_max_pool_size: i128,
@@ -450,8 +133,11 @@ fn emit_circuit_breaker_config_set(
     large_pool_threshold: i128,
     cooling_period_secs: u64,
 ) {
-    circuit_breaker_config_set(
-        &env,
+    env.events().publish(
+        (
+            Symbol::new(env, "circuit_breaker_config_set"),
+            event_version(env),
+        ),
         (
             old_max_pool_size,
             old_large_pool_threshold,
@@ -463,7 +149,6 @@ fn emit_circuit_breaker_config_set(
     );
 }
 
-#[allow(deprecated)]
 fn emit_rate_limit_config_set(
     env: &Env,
     old_max_bets_per_window: u32,
@@ -471,8 +156,11 @@ fn emit_rate_limit_config_set(
     max_bets_per_window: u32,
     window_secs: u64,
 ) {
-    rate_limit_config_set(
-        &env,
+    env.events().publish(
+        (
+            Symbol::new(env, "rate_limit_config_set"),
+            event_version(env),
+        ),
         (
             old_max_bets_per_window,
             old_window_secs,
@@ -482,7 +170,6 @@ fn emit_rate_limit_config_set(
     );
 }
 
-#[allow(deprecated)]
 fn emit_user_exposure_config_set(
     env: &Env,
     max_exposure_per_pool_bps: u32,
@@ -490,25 +177,36 @@ fn emit_user_exposure_config_set(
     daily_loss_limit: i128,
     weekly_loss_limit: i128,
     large_bet_cooldown_secs: u64,
+    large_bet_threshold: i128,
 ) {
-    user_exposure_config_set(
-        &env,
+    env.events().publish(
+        (
+            Symbol::new(env, "user_exposure_config_set"),
+            event_version(env),
+        ),
         (
             max_exposure_per_pool_bps,
             max_bet_per_transaction,
             daily_loss_limit,
             weekly_loss_limit,
             large_bet_cooldown_secs,
+            large_bet_threshold,
         ),
     );
 }
 
-#[allow(deprecated)]
 fn emit_user_bet_limit_exceeded(env: &Env, user: Address, pool_id: u32, amount: i128, max: i128) {
-    user_bet_limit_exceeded(env, (user, pool_id, amount, max));
+    env.events().publish(
+        (
+            Symbol::new(env, "user_bet_limit_exceeded"),
+            event_version(env),
+            user,
+            pool_id,
+        ),
+        (amount, max),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_user_exposure_limit_exceeded(
     env: &Env,
     user: Address,
@@ -516,463 +214,679 @@ fn emit_user_exposure_limit_exceeded(
     new_exposure: i128,
     max_exposure: i128,
 ) {
-    user_exposure_limit_exceeded(env, (user, pool_id, new_exposure, max_exposure));
+    env.events().publish(
+        (
+            Symbol::new(env, "user_exposure_limit_exceeded"),
+            event_version(env),
+            user,
+            pool_id,
+        ),
+        (new_exposure, max_exposure),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_user_daily_loss_limit_exceeded(
     env: &Env,
     user: Address,
     potential_loss: i128,
     limit: i128,
 ) {
-    user_daily_loss_limit_exceeded(env, (user, potential_loss, limit));
+    env.events().publish(
+        (
+            Symbol::new(env, "user_daily_loss_limit_exceeded"),
+            event_version(env),
+            user,
+        ),
+        (potential_loss, limit),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_user_weekly_loss_limit_exceeded(
     env: &Env,
     user: Address,
     potential_loss: i128,
     limit: i128,
 ) {
-    user_weekly_loss_limit_exceeded(env, (user, potential_loss, limit));
+    env.events().publish(
+        (
+            Symbol::new(env, "user_weekly_loss_limit_exceeded"),
+            event_version(env),
+            user,
+        ),
+        (potential_loss, limit),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_user_large_bet_cooldown_active(env: &Env, user: Address, amount: i128, cooldown_secs: u64) {
-    user_large_bet_cooldown_active(env, (user, amount, cooldown_secs));
+    env.events().publish(
+        (
+            Symbol::new(env, "user_large_bet_cooldown_active"),
+            event_version(env),
+            user,
+        ),
+        (amount, cooldown_secs),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_create_pool(env: &Env, pool_id: u32, payload: CreatePoolEvent) {
-    create_pool(env, pool_id, payload);
+    env.events().publish(
+        (Symbol::new(env, "create_pool"), event_version(env), pool_id),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_pool_scheduled(env: &Env, pool_id: u32, creator: Address, open_at: u64) {
-    pool_scheduled(&env, pool_id, (creator, open_at));
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_scheduled"),
+            event_version(env),
+            pool_id,
+        ),
+        (creator, open_at),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_scheduled_pool_activated(env: &Env, pool_id: u32, open_at: u64) {
-    scheduled_pool_activated(&env, pool_id, open_at);
+    env.events().publish(
+        (
+            Symbol::new(env, "scheduled_pool_activated"),
+            event_version(env),
+            pool_id,
+        ),
+        open_at,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_scheduled_pool_cancelled(env: &Env, pool_id: u32, creator: Address) {
-    scheduled_pool_cancelled(&env, pool_id, creator);
+    env.events().publish(
+        (
+            Symbol::new(env, "scheduled_pool_cancelled"),
+            event_version(env),
+            pool_id,
+        ),
+        creator,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_pool_cooling_started(env: &Env, pool_id: u32, cooling_until: u64, new_total: i128) {
-    pool_cooling_started(&env, pool_id, (cooling_until, new_total));
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_cooling_started"),
+            event_version(env),
+            pool_id,
+        ),
+        (cooling_until, new_total),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_twap_updated(env: &Env, pool_id: u32, payload: TwapUpdatedEvent) {
-    twap_updated(&env, pool_id, payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "twap_updated"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_place_bet(env: &Env, pool_id: u32, user: Address, payload: BetEvent) {
-    place_bet(&env, pool_id, user.clone(), payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "place_bet"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_referral_bet(env: &Env, pool_id: u32, payload: ReferralBetEvent) {
-    referral_bet(&env, pool_id, payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "referral_bet"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_bet_cancelled(env: &Env, pool_id: u32, user: Address, payload: BetCancelledEvent) {
-    bet_cancelled(&env, pool_id, user.clone(), payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "bet_cancelled"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_cancel_pool(env: &Env, pool_id: u32, payload: PoolCancelledEvent) {
-    cancel_pool(&env, pool_id, payload);
+    env.events().publish(
+        (Symbol::new(env, "cancel_pool"), event_version(env), pool_id),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_pool_duration_extended(env: &Env, pool_id: u32, payload: PoolDurationExtendedEvent) {
-    pool_duration_extended(&env, pool_id, payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_duration_extended"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_assign_settler(env: &Env, pool_id: u32, creator: Address, settler: Address) {
-    assign_settler(&env, pool_id, (creator, settler));
+    env.events().publish(
+        (
+            Symbol::new(env, "assign_settler"),
+            event_version(env),
+            pool_id,
+        ),
+        (creator, settler),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_min_settlement_participants_set(env: &Env, old_min: u32, min_participants: u32) {
-    min_settlement_participants_set(&env, (old_min, min_participants));
+    env.events().publish(
+        (
+            Symbol::new(env, "min_settlement_participants_set"),
+            event_version(env),
+        ),
+        (old_min, min_participants),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_settle_pool(env: &Env, pool_id: u32, payload: SettlePoolEvent) {
-    settle_pool(env, pool_id, payload);
+    env.events().publish(
+        (Symbol::new(env, "settle_pool"), event_version(env), pool_id),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_void_pool(env: &Env, pool_id: u32, caller: Address) {
-    void_pool(&env, pool_id, caller);
+    env.events().publish(
+        (Symbol::new(env, "void_pool"), event_version(env), pool_id),
+        caller,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_claim_refund(env: &Env, pool_id: u32, user: Address, refund: i128) {
-    claim_refund(&env, pool_id, user.clone(), refund);
+    env.events().publish(
+        (
+            Symbol::new(env, "claim_refund"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        refund,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_claim_expired(env: &Env, pool_id: u32, user: Address, refund: i128) {
-    claim_expired(&env, pool_id, user, refund);
+    env.events().publish(
+        (
+            Symbol::new(env, "claim_expired"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        refund,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_refund_expired_pool(env: &Env, pool_id: u32, payload: PoolRefundedEvent) {
-    refund_expired_pool(&env, pool_id, payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "refund_expired_pool"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_claim_winnings(env: &Env, pool_id: u32, user: Address, payload: ClaimEvent) {
-    claim_winnings(env, pool_id, user, payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "claim_winnings"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_claim_scheduled(env: &Env, pool_id: u32, user: Address, id: u32, claim_at: u64) {
-    claim_scheduled(&env, pool_id, user.clone(), (id, claim_at));
+    env.events().publish(
+        (
+            Symbol::new(env, "claim_scheduled"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        (id, claim_at),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_scheduled_claim_cancelled(env: &Env, pool_id: u32, user: Address, id: u32) {
-    scheduled_claim_cancelled(&env, pool_id, user, id);
+    env.events().publish(
+        (
+            Symbol::new(env, "scheduled_claim_cancelled"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        id,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_scheduled_claim_executed(env: &Env, pool_id: u32, user: Address, id: u32, amount: i128) {
-    scheduled_claim_executed(&env, pool_id, user, (id, amount));
+    env.events().publish(
+        (
+            Symbol::new(env, "scheduled_claim_executed"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        (id, amount),
+    );
 }
 
-#[allow(deprecated)]
 fn emit_treasury_withdraw_limit_set(
     env: &Env,
     max_withdrawal_per_window: i128,
     withdrawal_window_secs: u64,
 ) {
-    treasury_withdraw_limit_set(&env, (max_withdrawal_per_window, withdrawal_window_secs));
-}
-
-#[allow(deprecated)]
-fn emit_treasury_recipient_rotated(env: &Env, current_recipient: Address, new_recipient: Address) {
-    treasury_recipient_rotated(&env, (current_recipient, new_recipient));
-}
-
-#[allow(deprecated)]
-fn emit_treasury_withdrawn(env: &Env, caller: Address, treasury_recipient: Address, amount: i128) {
-    treasury_withdrawn(&env, (caller.clone(), treasury_recipient, amount));
-}
-
-#[allow(deprecated)]
-fn emit_freeze_admin_set(env: &Env, old_freeze_admin: Option<Address>, freeze_admin: Address) {
-    freeze_admin_set(&env, (old_freeze_admin, freeze_admin));
-}
-
-/// #191 — Contract state schema version for on-chain compatibility checks.
-/// Bumped (e.g. "v2") whenever the persistent state layout changes in a
-/// backward-incompatible way. Stored under `DataKey::ContractVersion`.
-#[allow(deprecated)]
-fn emit_pool_paused(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    pool_paused(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_unpaused(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    pool_unpaused(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_admin_set(env: &Env, admin: Address) {
-    admin_set(env, (admin,));
-}
-
-#[allow(deprecated)]
-fn emit_bridge_timeout_set(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    bridge_timeout_set(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_cross_chain_dispute_window_set(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    cross_chain_dispute_window_set(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_cross_chain_settled(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    cross_chain_settled(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_dispute_window_set(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    dispute_window_set(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_deposit(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    lp_deposit(env, i0.clone(), i1.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_fee_allocation_set(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    lp_fee_allocation_set(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_reward_claimed(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    lp_reward_claimed(env, i0.clone(), i1.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_rewards_distributed(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    lp_rewards_distributed(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_stake_boost_set(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    lp_stake_boost_set(env, payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_staked(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    lp_staked(env, i0.clone(), i1.clone(), (p0.clone(), p1.clone()));
-}
-
-#[allow(deprecated)]
-fn emit_lp_unstaked(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    lp_unstaked(env, i0.clone(), i1.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_lp_withdraw(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    lp_withdraw(env, i0.clone(), i1.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_mirror_created(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    mirror_created(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_cooling_overridden(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_cooling_overridden(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_created_from_template(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    i1: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_created_from_template(env, i0.clone(), i1.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_disputed(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_disputed(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_ext_metadata_set(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_ext_metadata_set(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_frozen(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_frozen(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_metadata_cleared(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_metadata_cleared(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_metadata_set(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_metadata_set(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_template_created(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_template_created(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_template_deleted(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_template_deleted(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_template_updated(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
-) {
-    pool_template_updated(env, i0.clone(), payload);
-}
-
-#[allow(deprecated)]
-fn emit_pool_token_bet_limits_set(
-    env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-    p2: impl Into<::soroban_sdk::RawVal> + Clone,
-    p3: impl Into<::soroban_sdk::RawVal> + Clone,
-    p4: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    pool_token_bet_limits_set(
-        env,
-        i0.clone(),
-        (p0.clone(), p1.clone(), p2.clone(), p3.clone(), p4.clone()),
+    env.events().publish(
+        (
+            Symbol::new(env, "treasury_withdraw_limit_set"),
+            event_version(env),
+        ),
+        (max_withdrawal_per_window, withdrawal_window_secs),
     );
 }
 
-#[allow(deprecated)]
-fn emit_pool_unfrozen(
+fn emit_treasury_recipient_rotated(env: &Env, current_recipient: Address, new_recipient: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "treasury_recipient_rotated"),
+            event_version(env),
+        ),
+        (current_recipient, new_recipient),
+    );
+}
+
+fn emit_treasury_withdrawn(env: &Env, caller: Address, treasury_recipient: Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "treasury_withdrawn"), event_version(env)),
+        (caller, treasury_recipient, amount),
+    );
+}
+
+fn emit_freeze_admin_set(env: &Env, old_freeze_admin: Option<Address>, freeze_admin: Address) {
+    env.events().publish(
+        (Symbol::new(env, "freeze_admin_set"), event_version(env)),
+        (old_freeze_admin, freeze_admin),
+    );
+}
+
+fn emit_pool_paused(env: &Env, caller: Address) {
+    env.events()
+        .publish((Symbol::new(env, "PoolPaused"), event_version(env)), caller);
+}
+
+fn emit_pool_unpaused(env: &Env, caller: Address) {
+    env.events().publish(
+        (Symbol::new(env, "PoolUnpaused"), event_version(env)),
+        caller,
+    );
+}
+
+fn emit_admin_set(env: &Env, old_admin: Option<Address>, admin: Address) {
+    env.events().publish(
+        (Symbol::new(env, "admin_set"), event_version(env)),
+        (old_admin, admin),
+    );
+}
+
+fn emit_bridge_timeout_set(env: &Env, timeout_secs: u64) {
+    env.events().publish(
+        (Symbol::new(env, "bridge_timeout_set"), event_version(env)),
+        timeout_secs,
+    );
+}
+
+fn emit_cross_chain_dispute_window_set(env: &Env, window_secs: u64) {
+    env.events().publish(
+        (
+            Symbol::new(env, "cross_chain_dispute_window_set"),
+            event_version(env),
+        ),
+        window_secs,
+    );
+}
+
+fn emit_cross_chain_settled(env: &Env, pool_id: u32, payload: CrossChainSettlementEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "cross_chain_settled"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
+}
+
+fn emit_dispute_window_set(env: &Env, window_secs: u64) {
+    env.events().publish(
+        (Symbol::new(env, "dispute_window_set"), event_version(env)),
+        window_secs,
+    );
+}
+
+fn emit_lp_deposit(env: &Env, pool_id: u32, user: Address, payload: LpDepositEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_deposit"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
+}
+
+fn emit_lp_fee_allocation_set(env: &Env, fee_allocation_bps: u32) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_fee_allocation_set"),
+            event_version(env),
+        ),
+        fee_allocation_bps,
+    );
+}
+
+fn emit_lp_reward_claimed(env: &Env, pool_id: u32, user: Address, payload: LpRewardClaimEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_reward_claimed"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
+}
+
+fn emit_lp_rewards_distributed(env: &Env, pool_id: u32, amount: i128) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_rewards_distributed"),
+            event_version(env),
+            pool_id,
+        ),
+        amount,
+    );
+}
+
+fn emit_lp_stake_boost_set(env: &Env, boost_bps: u32) {
+    env.events().publish(
+        (Symbol::new(env, "lp_stake_boost_set"), event_version(env)),
+        boost_bps,
+    );
+}
+
+fn emit_lp_staked(env: &Env, pool_id: u32, user: Address, new_staked: i128, lock_until: u64) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_staked"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        (new_staked, lock_until),
+    );
+}
+
+fn emit_lp_unstaked(env: &Env, pool_id: u32, user: Address, released: i128) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_unstaked"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        released,
+    );
+}
+
+fn emit_lp_withdraw(env: &Env, pool_id: u32, user: Address, payload: LpWithdrawEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "lp_withdraw"),
+            event_version(env),
+            pool_id,
+            user,
+        ),
+        payload,
+    );
+}
+
+fn emit_mirror_created(env: &Env, pool_id: u32, payload: MirrorCreatedEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "mirror_created"),
+            event_version(env),
+            pool_id,
+        ),
+        payload,
+    );
+}
+
+fn emit_pool_cooling_overridden(env: &Env, pool_id: u32, caller: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_cooling_overridden"),
+            event_version(env),
+            pool_id,
+        ),
+        caller,
+    );
+}
+
+fn emit_pool_created_from_template(env: &Env, template_id: u32, pool_id: u32) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_created_from_template"),
+            event_version(env),
+            template_id,
+            pool_id,
+        ),
+        (),
+    );
+}
+
+fn emit_pool_disputed(env: &Env, pool_id: u32, caller: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_disputed"),
+            event_version(env),
+            pool_id,
+        ),
+        caller,
+    );
+}
+
+fn emit_pool_ext_metadata_set(env: &Env, pool_id: u32, creator: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_ext_metadata_set"),
+            event_version(env),
+            pool_id,
+        ),
+        creator,
+    );
+}
+
+fn emit_pool_frozen(env: &Env, pool_id: u32, caller: Address) {
+    env.events().publish(
+        (Symbol::new(env, "pool_frozen"), event_version(env), pool_id),
+        caller,
+    );
+}
+
+fn emit_pool_metadata_cleared(env: &Env, pool_id: u32, creator: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_metadata_cleared"),
+            event_version(env),
+            pool_id,
+        ),
+        creator,
+    );
+}
+
+fn emit_pool_metadata_set(env: &Env, pool_id: u32, uri: String) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_metadata_set"),
+            event_version(env),
+            pool_id,
+        ),
+        uri,
+    );
+}
+
+fn emit_pool_template_created(env: &Env, template_id: u32, title: String) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_template_created"),
+            event_version(env),
+            template_id,
+        ),
+        title,
+    );
+}
+
+fn emit_pool_template_deleted(env: &Env, template_id: u32) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_template_deleted"),
+            event_version(env),
+            template_id,
+        ),
+        (),
+    );
+}
+
+fn emit_pool_template_updated(env: &Env, template_id: u32, title: String) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_template_updated"),
+            event_version(env),
+            template_id,
+        ),
+        title,
+    );
+}
+
+fn emit_pool_token_bet_limits_set(
     env: &Env,
-    i0: impl Into<::soroban_sdk::RawVal> + Clone,
-    payload: impl Into<::soroban_sdk::RawVal>,
+    pool_id: u32,
+    token: Address,
+    old_min: i128,
+    old_max: i128,
+    min_bet: i128,
+    max_bet: i128,
 ) {
-    pool_unfrozen(env, i0.clone(), payload);
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_token_bet_limits_set"),
+            event_version(env),
+            pool_id,
+            token,
+        ),
+        (old_min, old_max, min_bet, max_bet),
+    );
 }
 
-#[allow(deprecated)]
-fn emit_referral_bps_set(
-    env: &Env,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-    p2: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    referral_bps_set(env, (p0.clone(), p1.clone(), p2.clone()));
+fn emit_pool_unfrozen(env: &Env, pool_id: u32, caller: Address) {
+    env.events().publish(
+        (
+            Symbol::new(env, "pool_unfrozen"),
+            event_version(env),
+            pool_id,
+        ),
+        caller,
+    );
 }
 
-#[allow(deprecated)]
-fn emit_referral_reward_claimed(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    referral_reward_claimed(env, payload);
+fn emit_referral_bps_set(env: &Env, caller: Address, old_bps: u32, bps: u32) {
+    env.events().publish(
+        (Symbol::new(env, "referral_bps_set"), event_version(env)),
+        (caller, old_bps, bps),
+    );
 }
 
-#[allow(deprecated)]
-fn emit_token_rate_set(
-    env: &Env,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-    p2: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    token_rate_set(env, (p0.clone(), p1.clone(), p2.clone()));
+fn emit_referral_reward_claimed(env: &Env, payload: ReferralRewardClaimedEvent) {
+    env.events().publish(
+        (
+            Symbol::new(env, "referral_reward_claimed"),
+            event_version(env),
+        ),
+        payload,
+    );
 }
 
-#[allow(deprecated)]
-fn emit_tokens_rescued(
-    env: &Env,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-    p2: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    tokens_rescued(env, (p0.clone(), p1.clone(), p2.clone()));
+fn emit_token_rate_set(env: &Env, token: Address, old_rate: Option<i128>, rate_bps: i128) {
+    env.events().publish(
+        (Symbol::new(env, "token_rate_set"), event_version(env)),
+        (token, old_rate, rate_bps),
+    );
 }
 
-#[allow(deprecated)]
-fn emit_webhook_registered(
-    env: &Env,
-    p0: impl Into<::soroban_sdk::RawVal> + Clone,
-    p1: impl Into<::soroban_sdk::RawVal> + Clone,
-) {
-    webhook_registered(env, (p0.clone(), p1.clone()));
+fn emit_tokens_rescued(env: &Env, token: Address, to: Address, amount: i128) {
+    env.events().publish(
+        (Symbol::new(env, "tokens_rescued"), event_version(env)),
+        (token, to, amount),
+    );
 }
 
-#[allow(deprecated)]
-fn emit_webhook_unregistered(env: &Env, payload: impl Into<::soroban_sdk::RawVal>) {
-    webhook_unregistered(env, payload);
+fn emit_webhook_registered(env: &Env, url: String, event_types_len: u32) {
+    env.events().publish(
+        (Symbol::new(env, "webhook_registered"), event_version(env)),
+        (url, event_types_len),
+    );
 }
 
-#[allow(deprecated)]
+fn emit_webhook_unregistered(env: &Env, url: String) {
+    env.events().publish(
+        (Symbol::new(env, "webhook_unregistered"), event_version(env)),
+        url,
+    );
+}
+
 fn emit_contract_paused(env: &Env, caller: Address) {
-    contract_paused(env, (caller,));
+    env.events().publish(
+        (Symbol::new(env, "contract_paused"), event_version(env)),
+        caller,
+    );
 }
 
-#[allow(deprecated)]
 fn emit_contract_unpaused(env: &Env, caller: Address) {
-    contract_unpaused(env, (caller,));
+    env.events().publish(
+        (Symbol::new(env, "contract_unpaused"), event_version(env)),
+        caller,
+    );
 }
 
 pub const CONTRACT_STATE_VERSION: &str = "v1";
@@ -2288,7 +2202,7 @@ impl PredinexContract {
         env.storage().persistent().set(&DataKey::FeeRate, &0u32);
         env.storage().persistent().set(&DataKey::Treasury, &0i128);
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        emit_admin_set(&env, admin);
+        emit_admin_set(&env, None, admin);
         // #191 — persist the contract state schema version on initialization.
         env.storage().persistent().set(
             &DataKey::ContractVersion,
@@ -2430,7 +2344,7 @@ impl PredinexContract {
             env.storage().persistent().remove(&key);
         }
 
-        creation_fee_exemption_set(&env, (account, exempt));
+        emit_creation_fee_exemption_set(&env, account, exempt);
         Ok(())
     }
 
@@ -2478,7 +2392,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::ProtocolFee, &fee_bps);
 
-        protocol_fee_set(&env, (caller, old_fee_bps, fee_bps));
+        emit_protocol_fee_set(&env, caller, old_fee_bps, fee_bps);
         Ok(())
     }
 
@@ -2559,7 +2473,7 @@ impl PredinexContract {
             );
         }
 
-        volume_fee_tiers_set(&env, (caller, tiers));
+        emit_volume_fee_tiers_set(&env, caller, tiers);
         Ok(())
     }
 
@@ -2768,7 +2682,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        pool_bet_limits_set(&env, pool_id, (old_min_bet, old_max_bet, min_bet, max_bet));
+        emit_pool_bet_limits_set(&env, pool_id, old_min_bet, old_max_bet, min_bet, max_bet);
         Ok(())
     }
 
@@ -2831,16 +2745,14 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::LargePoolCoolingPeriodSecs, &cooling_period_secs);
 
-        circuit_breaker_config_set(
+        emit_circuit_breaker_config_set(
             &env,
-            (
-                old_max_pool_size,
-                old_large_pool_threshold,
-                old_cooling_period_secs,
-                max_pool_size,
-                large_pool_threshold,
-                cooling_period_secs,
-            ),
+            old_max_pool_size,
+            old_large_pool_threshold,
+            old_cooling_period_secs,
+            max_pool_size,
+            large_pool_threshold,
+            cooling_period_secs,
         );
         Ok(())
     }
@@ -2910,14 +2822,12 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::RateLimitWindowSecs, &window_secs);
 
-        rate_limit_config_set(
+        emit_rate_limit_config_set(
             &env,
-            (
-                old_max_bets_per_window,
-                old_window_secs,
-                max_bets_per_window,
-                window_secs,
-            ),
+            old_max_bets_per_window,
+            old_window_secs,
+            max_bets_per_window,
+            window_secs,
         );
         Ok(())
     }
@@ -3050,16 +2960,14 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::UserLargeBetThreshold, &config.large_bet_threshold);
 
-        user_exposure_config_set(
+        emit_user_exposure_config_set(
             &env,
-            (
-                max_exposure_per_pool_bps,
-                max_bet_per_transaction,
-                daily_loss_limit,
-                weekly_loss_limit,
-                large_bet_cooldown_secs,
-                large_bet_threshold,
-            ),
+            max_exposure_per_pool_bps,
+            max_bet_per_transaction,
+            daily_loss_limit,
+            weekly_loss_limit,
+            large_bet_cooldown_secs,
+            large_bet_threshold,
         );
         Ok(())
     }
@@ -3186,14 +3094,12 @@ impl PredinexContract {
 
         // Check max bet per transaction
         if config.max_bet_per_transaction > 0 && amount > config.max_bet_per_transaction {
-            user_bet_limit_exceeded(
+            emit_user_bet_limit_exceeded(
                 env,
-                (
-                    user.clone(),
-                    pool_id,
-                    amount,
-                    config.max_bet_per_transaction,
-                ),
+                user.clone(),
+                pool_id,
+                amount,
+                config.max_bet_per_transaction,
             );
             return Err(ContractError::BetExceedsMaxBetPerTx);
         }
@@ -3223,9 +3129,12 @@ impl PredinexContract {
                 / 10_000;
 
             if max_exposure > 0 && new_exposure > max_exposure {
-                user_exposure_limit_exceeded(
+                emit_user_exposure_limit_exceeded(
                     env,
-                    (user.clone(), pool_id, new_exposure, max_exposure),
+                    user.clone(),
+                    pool_id,
+                    new_exposure,
+                    max_exposure,
                 );
                 return Err(ContractError::ExposureLimitExceeded);
             }
@@ -3249,9 +3158,11 @@ impl PredinexContract {
                 .checked_add(amount)
                 .ok_or(ContractError::PoolTotalOverflow)?;
             if potential_loss > config.daily_loss_limit {
-                user_daily_loss_limit_exceeded(
+                emit_user_daily_loss_limit_exceeded(
                     env,
-                    (user.clone(), potential_loss, config.daily_loss_limit),
+                    user.clone(),
+                    potential_loss,
+                    config.daily_loss_limit,
                 );
                 return Err(ContractError::DailyLossLimitExceeded);
             }
@@ -3272,9 +3183,11 @@ impl PredinexContract {
                 .checked_add(amount)
                 .ok_or(ContractError::PoolTotalOverflow)?;
             if potential_loss > config.weekly_loss_limit {
-                user_weekly_loss_limit_exceeded(
+                emit_user_weekly_loss_limit_exceeded(
                     env,
-                    (user.clone(), potential_loss, config.weekly_loss_limit),
+                    user.clone(),
+                    potential_loss,
+                    config.weekly_loss_limit,
                 );
                 return Err(ContractError::WeeklyLossLimitExceeded);
             }
@@ -3298,9 +3211,11 @@ impl PredinexContract {
             if last_large_bet_ts
                 .is_some_and(|ts| now.saturating_sub(ts) < config.large_bet_cooldown_secs)
             {
-                user_large_bet_cooldown_active(
+                emit_user_large_bet_cooldown_active(
                     env,
-                    (user.clone(), amount, config.large_bet_cooldown_secs),
+                    user.clone(),
+                    amount,
+                    config.large_bet_cooldown_secs,
                 );
                 return Err(ContractError::LargeBetCooldownActive);
             }
@@ -3963,7 +3878,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::PoolCounter, &pool_id);
 
-        create_pool(
+        emit_create_pool(
             env,
             pool_id,
             CreatePoolEvent {
@@ -4253,7 +4168,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        pool_scheduled(&env, pool_id, (creator, open_at));
+        emit_pool_scheduled(&env, pool_id, creator, open_at);
         Ok(pool_id)
     }
 
@@ -4299,7 +4214,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        scheduled_pool_activated(&env, pool_id, open_at);
+        emit_scheduled_pool_activated(&env, pool_id, open_at);
         Ok(())
     }
 
@@ -4349,7 +4264,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        scheduled_pool_cancelled(&env, pool_id, creator);
+        emit_scheduled_pool_cancelled(&env, pool_id, creator);
         Ok(())
     }
 
@@ -4756,7 +4671,7 @@ impl PredinexContract {
         let total_yes = pool.total_a;
         let total_no = pool.total_b;
 
-        place_bet(
+        emit_place_bet(
             &env,
             pool_id,
             user.clone(),
@@ -4770,7 +4685,7 @@ impl PredinexContract {
 
         // #356 — emit referral_bet event alongside place_bet when referrer present.
         if let Some(ref_referrer) = referrer {
-            referral_bet(
+            emit_referral_bet(
                 &env,
                 pool_id,
                 ReferralBetEvent {
@@ -4830,7 +4745,7 @@ impl PredinexContract {
                 POOL_BUMP_THRESHOLD,
                 POOL_BUMP_TARGET,
             );
-            pool_cooling_started(&env, pool_id, (cooling_until, new_total));
+            emit_pool_cooling_started(&env, pool_id, cooling_until, new_total);
         }
         Ok(())
     }
@@ -4899,7 +4814,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        twap_updated(
+        emit_twap_updated(
             &env,
             pool_id,
             TwapUpdatedEvent {
@@ -5196,7 +5111,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        bet_cancelled(
+        emit_bet_cancelled(
             &env,
             pool_id,
             user.clone(),
@@ -5311,7 +5226,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        cancel_pool(
+        emit_cancel_pool(
             &env,
             pool_id,
             PoolCancelledEvent {
@@ -5425,7 +5340,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        pool_duration_extended(
+        emit_pool_duration_extended(
             &env,
             pool_id,
             PoolDurationExtendedEvent {
@@ -5460,7 +5375,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::DelegatedSettler(pool_id), &settler);
 
-        assign_settler(&env, pool_id, (creator, settler));
+        emit_assign_settler(&env, pool_id, creator, settler);
         Ok(())
     }
 
@@ -5496,7 +5411,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::MinSettlementParticipants, &min_participants);
 
-        min_settlement_participants_set(&env, (old_min, min_participants));
+        emit_min_settlement_participants_set(&env, old_min, min_participants);
         Ok(())
     }
 
@@ -5632,7 +5547,7 @@ impl PredinexContract {
         );
 
         // #176 — emit enriched settlement event including source metadata.
-        settle_pool(
+        emit_settle_pool(
             env,
             pool_id,
             SettlePoolEvent {
@@ -5756,7 +5671,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        void_pool(&env, pool_id, caller);
+        emit_void_pool(&env, pool_id, caller);
         Ok(())
     }
 
@@ -5817,7 +5732,7 @@ impl PredinexContract {
         // #705 — Reduce user exposure when refund is claimed.
         Self::reduce_user_exposure(&env, &user, pool_id, refund);
 
-        claim_refund(&env, pool_id, user.clone(), refund);
+        emit_claim_refund(&env, pool_id, user.clone(), refund);
 
         // Record refund in user claim history for analytics.
         let history_key = DataKey::UserClaimHistory(user.clone());
@@ -5954,7 +5869,7 @@ impl PredinexContract {
             .persistent()
             .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
 
-        claim_expired(&env, pool_id, user, refund);
+        emit_claim_expired(&env, pool_id, user, refund);
 
         Ok(refund)
     }
@@ -6038,7 +5953,7 @@ impl PredinexContract {
             }
         }
 
-        refund_expired_pool(&env, pool_id, PoolRefundedEvent { total_refunded });
+        emit_refund_expired_pool(&env, pool_id, PoolRefundedEvent { total_refunded });
 
         Ok(())
     }
@@ -6262,7 +6177,7 @@ impl PredinexContract {
 
         // Step 4: emit events in final committed state.
         let analytics_user = user.clone();
-        claim_winnings(
+        emit_claim_winnings(
             env,
             pool_id,
             user,
@@ -6385,7 +6300,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::ScheduledClaimCounter, &(id + 1));
-        claim_scheduled(&env, pool_id, user.clone(), (id, claim_at));
+        emit_claim_scheduled(&env, pool_id, user.clone(), id, claim_at);
         // Record a pending history entry so frontends/off-chain bots can
         // distinguish scheduled claims from completed payouts.
         let history_key = DataKey::UserClaimHistory(user.clone());
@@ -6454,7 +6369,7 @@ impl PredinexContract {
                 entry.pool_id,
                 entry.user.clone(),
             ));
-        scheduled_claim_cancelled(&env, entry.pool_id, entry.user, scheduled_claim_id);
+        emit_scheduled_claim_cancelled(&env, entry.pool_id, entry.user, scheduled_claim_id);
         Ok(())
     }
 
@@ -6507,11 +6422,12 @@ impl PredinexContract {
                                         entry.user.clone(),
                                     ),
                                 );
-                                scheduled_claim_executed(
+                                emit_scheduled_claim_executed(
                                     &env,
                                     entry.pool_id,
                                     entry.user,
-                                    (id, amount),
+                                    id,
+                                    amount,
                                 );
                                 results.push_back(ClaimAllEntry {
                                     pool_id: entry.pool_id,
@@ -6837,7 +6753,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .remove(&DataKey::TreasuryWithdrawalState);
-        treasury_withdraw_limit_set(&env, (max_withdrawal_per_window, withdrawal_window_secs));
+        emit_treasury_withdraw_limit_set(&env, max_withdrawal_per_window, withdrawal_window_secs);
         Ok(())
     }
 
@@ -6881,7 +6797,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::TreasuryRecipient, &new_recipient);
 
-        treasury_recipient_rotated(&env, (current_recipient, new_recipient));
+        emit_treasury_recipient_rotated(&env, current_recipient, new_recipient);
         Ok(())
     }
 
@@ -6965,7 +6881,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::Treasury, &(current_treasury - amount));
 
-        treasury_withdrawn(&env, (caller.clone(), treasury_recipient, amount));
+        emit_treasury_withdrawn(&env, caller.clone(), treasury_recipient, amount);
         Ok(())
     }
 
@@ -6993,7 +6909,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::FreezeAdmin, &freeze_admin);
 
-        freeze_admin_set(&env, (old_freeze_admin, freeze_admin));
+        emit_freeze_admin_set(&env, old_freeze_admin, freeze_admin);
         Ok(())
     }
 
@@ -7010,7 +6926,7 @@ impl PredinexContract {
         let old_admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
         env.storage().persistent().set(&DataKey::Admin, &admin);
 
-        admin_set(&env, (old_admin, admin));
+        emit_admin_set(&env, old_admin, admin);
         Ok(())
     }
 
@@ -7053,7 +6969,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        pool_frozen(&env, pool_id, caller);
+        emit_pool_frozen(&env, pool_id, caller);
         Ok(())
     }
 
@@ -7074,7 +6990,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::DisputeWindow, &window_secs);
-        dispute_window_set(&env, window_secs);
+        emit_dispute_window_set(&env, window_secs);
         Ok(())
     }
 
@@ -7134,7 +7050,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        pool_disputed(&env, pool_id, caller);
+        emit_pool_disputed(&env, pool_id, caller);
         Ok(())
     }
 
@@ -7180,7 +7096,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        pool_unfrozen(&env, pool_id, caller);
+        emit_pool_unfrozen(&env, pool_id, caller);
         Ok(())
     }
 
@@ -7220,7 +7136,7 @@ impl PredinexContract {
             .persistent()
             .remove(&DataKey::PoolCoolingUntil(pool_id));
 
-        pool_cooling_overridden(&env, pool_id, caller);
+        emit_pool_cooling_overridden(&env, pool_id, caller);
         Ok(())
     }
 
@@ -7551,13 +7467,13 @@ impl PredinexContract {
                 env.storage()
                     .persistent()
                     .set(&DataKey::PoolMetadata(pool_id), &uri);
-                pool_metadata_set(&env, pool_id, uri);
+                emit_pool_metadata_set(&env, pool_id, uri);
             }
             None => {
                 env.storage()
                     .persistent()
                     .remove(&DataKey::PoolMetadata(pool_id));
-                pool_metadata_cleared(&env, pool_id, creator);
+                emit_pool_metadata_cleared(&env, pool_id, creator);
             }
         }
         Ok(())
@@ -7616,7 +7532,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        pool_ext_metadata_set(&env, pool_id, creator);
+        emit_pool_ext_metadata_set(&env, pool_id, creator);
         Ok(())
     }
 
@@ -7742,7 +7658,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::PoolTemplateCounter, &(template_id + 1));
-        pool_template_created(&env, template_id, template.title);
+        emit_pool_template_created(&env, template_id, template.title);
         Ok(template_id)
     }
 
@@ -7816,7 +7732,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::PoolTemplate(template_id), &saved);
-        pool_template_updated(&env, template_id, saved.title);
+        emit_pool_template_updated(&env, template_id, saved.title);
         Ok(())
     }
 
@@ -7861,7 +7777,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .remove(&DataKey::PoolTemplate(template_id));
-        pool_template_deleted(&env, template_id, ());
+        emit_pool_template_deleted(&env, template_id);
         Ok(())
     }
 
@@ -7977,7 +7893,7 @@ impl PredinexContract {
             .persistent()
             .extend_ttl(&usage_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
 
-        pool_created_from_template(&env, template_id, pool_id, ());
+        emit_pool_created_from_template(&env, template_id, pool_id);
         Ok(pool_id)
     }
 
@@ -8028,15 +7944,9 @@ impl PredinexContract {
                 // #1053 — Only extend TTL if remaining lifetime is below threshold.
                 // This avoids metered write amplification from dashboard polling; reads
                 // now trigger writes only when the entry is approaching expiration.
-                if let Some(remaining_ttl) = env.storage().persistent().get_ttl(&key) {
-                    if remaining_ttl < POOL_BUMP_THRESHOLD {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            POOL_BUMP_THRESHOLD,
-                            POOL_BUMP_TARGET,
-                        );
-                    }
-                }
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
                 result.push_back(UserPoolPosition {
                     pool_id,
                     amount_a: bet.amount_a,
@@ -8182,7 +8092,7 @@ impl PredinexContract {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &true);
-        pool_paused(&env, caller);
+        emit_pool_paused(&env, caller);
         Ok(())
     }
 
@@ -8193,7 +8103,7 @@ impl PredinexContract {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &false);
-        pool_unpaused(&env, caller);
+        emit_pool_unpaused(&env, caller);
         Ok(())
     }
 
@@ -8429,7 +8339,7 @@ impl PredinexContract {
             .get(&DataKey::ReferralBps)
             .unwrap_or(0);
         env.storage().persistent().set(&DataKey::ReferralBps, &bps);
-        referral_bps_set(&env, (caller, old_bps, bps));
+        emit_referral_bps_set(&env, caller, old_bps, bps);
         Ok(())
     }
 
@@ -8517,7 +8427,7 @@ impl PredinexContract {
 
         env.storage().persistent().remove(&key);
 
-        referral_reward_claimed(
+        emit_referral_reward_claimed(
             &env,
             ReferralRewardClaimedEvent {
                 referrer,
@@ -8572,8 +8482,10 @@ impl PredinexContract {
         if url.len() < 10 {
             return Err(ContractError::InvalidWebhookUrl);
         }
-        let url_bytes = url.to_string();
-        let after_scheme = &url_bytes.as_bytes()[8..]; // skip "https://"
+        let url_len = url.len() as usize;
+        let mut url_buf = vec![0u8; url_len];
+        url.copy_into_slice(&mut url_buf);
+        let after_scheme = &url_buf[8..url_len]; // skip "https://"
         if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
             return Err(ContractError::InvalidWebhookUrl);
         }
@@ -8630,7 +8542,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        webhook_registered(&env, (url, event_types.len()));
+        emit_webhook_registered(&env, url, event_types.len());
         Ok(())
     }
 
@@ -8674,7 +8586,7 @@ impl PredinexContract {
             );
         }
 
-        webhook_unregistered(&env, url);
+        emit_webhook_unregistered(&env, url);
         Ok(())
     }
 
@@ -8728,7 +8640,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::TokenExchangeRate(token.clone()), &rate_bps);
 
-        token_rate_set(&env, (token, old_rate, rate_bps));
+        emit_token_rate_set(&env, token, old_rate, rate_bps);
         Ok(())
     }
 
@@ -8867,7 +8779,7 @@ impl PredinexContract {
                 .persistent()
                 .set(&DataKey::PoolTokenMaxBet(pool_id, token.clone()), &max_bet);
         }
-        pool_token_bet_limits_set(&env, pool_id, (token, old_min, old_max, min_bet, max_bet));
+        emit_pool_token_bet_limits_set(&env, pool_id, token, old_min, old_max, min_bet, max_bet);
         Ok(())
     }
 
@@ -9245,7 +9157,7 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::TotalContractVolume, &total_contract_volume);
 
-        place_bet(
+        emit_place_bet(
             &env,
             pool_id,
             user.clone(),
@@ -9262,7 +9174,7 @@ impl PredinexContract {
             if *ref_addr == user {
                 return Err(ContractError::SelfReferral);
             }
-            referral_bet(
+            emit_referral_bet(
                 &env,
                 pool_id,
                 ReferralBetEvent {
@@ -9338,7 +9250,7 @@ impl PredinexContract {
                 POOL_BUMP_THRESHOLD,
                 POOL_BUMP_TARGET,
             );
-            pool_cooling_started(&env, pool_id, (cooling_until, new_total));
+            emit_pool_cooling_started(&env, pool_id, cooling_until, new_total);
         }
         Ok(())
     }
@@ -9548,7 +9460,17 @@ impl PredinexContract {
             .remove(&DataKey::UserOutcomeBets(pool_id, user.clone()));
 
         let analytics_user = user.clone();
-        claim_winnings(&env, pool_id, user, total_norm_paid);
+        emit_claim_winnings(
+            &env,
+            pool_id,
+            user,
+            ClaimEvent {
+                amount: total_norm_paid,
+                fee_amount: 0,
+                winning_outcome,
+                total_pool_size: 0,
+            },
+        );
 
         let total_key = DataKey::UserTotalClaimed(analytics_user.clone());
         let prev_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
@@ -9648,7 +9570,7 @@ impl PredinexContract {
 
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
 
-        tokens_rescued(&env, (token, to, amount));
+        emit_tokens_rescued(&env, token, to, amount);
 
         Ok(())
     }
@@ -9769,7 +9691,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::BridgeTimeout, &timeout_secs);
-        bridge_timeout_set(&env, timeout_secs);
+        emit_bridge_timeout_set(&env, timeout_secs);
         Ok(())
     }
 
@@ -9783,7 +9705,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::CrossChainDisputeWindow, &window_secs);
-        cross_chain_dispute_window_set(&env, window_secs);
+        emit_cross_chain_dispute_window_set(&env, window_secs);
         Ok(())
     }
 
@@ -9844,7 +9766,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        mirror_created(
+        emit_mirror_created(
             &env,
             source_pool_id,
             MirrorCreatedEvent {
@@ -9884,7 +9806,7 @@ impl PredinexContract {
 
         // Reject any outcome index >= num_outcomes to prevent settling to an
         // out-of-bounds outcome that would break payout calculations.
-        if winning_outcome >= source_pool.num_outcomes {
+        if winning_outcome >= 2u32 {
             return Err(ContractError::InvalidOutcome);
         }
 
@@ -9905,7 +9827,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::MirrorByUnifiedId(mirror.unified_pool_id), &mirror);
-        cross_chain_settled(
+        emit_cross_chain_settled(
             &env,
             mirror.unified_pool_id,
             CrossChainSettlementEvent {
@@ -9958,7 +9880,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::LpFeeAllocationBps, &fee_allocation_bps);
-        lp_fee_allocation_set(&env, fee_allocation_bps);
+        emit_lp_fee_allocation_set(&env, fee_allocation_bps);
         Ok(())
     }
 
@@ -9975,7 +9897,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::LpStakeBoostBps, &boost_bps);
-        lp_stake_boost_set(&env, boost_bps);
+        emit_lp_stake_boost_set(&env, boost_bps);
         Ok(())
     }
 
@@ -10154,7 +10076,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        lp_deposit(
+        emit_lp_deposit(
             &env,
             pool_id,
             user.clone(),
@@ -10304,7 +10226,7 @@ impl PredinexContract {
             &withdraw_amount,
         );
 
-        lp_withdraw(
+        emit_lp_withdraw(
             &env,
             pool_id,
             user.clone(),
@@ -10388,7 +10310,7 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        lp_reward_claimed(
+        emit_lp_reward_claimed(
             &env,
             pool_id,
             user.clone(),
@@ -10451,7 +10373,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        lp_staked(&env, pool_id, user, (new_staked, lock_until));
+        emit_lp_staked(&env, pool_id, user, new_staked, lock_until);
         Ok(())
     }
 
@@ -10469,14 +10391,14 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .remove(&DataKey::LpStake(pool_id, user.clone()));
-        lp_unstaked(&env, pool_id, user, released);
+        emit_lp_unstaked(&env, pool_id, user, released);
         Ok(released)
     }
 
     pub fn get_lp_position(env: Env, pool_id: u32, user: Address) -> LpPosition {
         env.storage()
             .persistent()
-            .get(&DataKey::LpPosition(pool_id, user))
+            .get(&DataKey::LpPosition(pool_id, user.clone()))
             .unwrap_or(LpPosition {
                 shares: 0,
                 reward_debt: 0,
@@ -10487,7 +10409,7 @@ impl PredinexContract {
         let position: LpPosition = env
             .storage()
             .persistent()
-            .get(&DataKey::LpPosition(pool_id, user))
+            .get(&DataKey::LpPosition(pool_id, user.clone()))
             .unwrap_or(LpPosition {
                 shares: 0,
                 reward_debt: 0,
@@ -10627,7 +10549,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        lp_rewards_distributed(&env, pool_id, amount);
+        emit_lp_rewards_distributed(&env, pool_id, amount);
         Ok(())
     }
 }

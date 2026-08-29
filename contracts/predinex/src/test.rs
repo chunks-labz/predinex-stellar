@@ -1170,7 +1170,7 @@ fn c3_invalid_amount_does_not_mutate_pool_state() {
     let token = soroban_sdk::token::Client::new(&t.env, &t.token);
     assert_eq!(
         token.balance(&t.user),
-        10_000i128,
+        100_000_000i128,
         "user balance must be unchanged after rejected bet"
     );
 }
@@ -3206,13 +3206,13 @@ fn i2_cancel_pool_after_first_bet_succeeds() {
 
     let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
     let bal_before = token_client.balance(&t.user);
-    assert_eq!(bal_before, 10_000i128);
+    assert_eq!(bal_before, 100_000_000i128);
 
     t.client
         .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
 
     let bal_after_bet = token_client.balance(&t.user);
-    assert_eq!(bal_after_bet, 9_900i128);
+    assert_eq!(bal_after_bet, 99_999_900i128);
 
     t.client.cancel_pool(
         &t.admin,
@@ -3236,7 +3236,7 @@ fn i2_cancel_pool_after_first_bet_succeeds() {
     // Verify participant is refunded immediately
     let bal_after_cancel = token_client.balance(&t.user);
     assert_eq!(
-        bal_after_cancel, 10_000i128,
+        bal_after_cancel, 100_000_000i128,
         "user balance must be fully refunded"
     );
 }
@@ -4922,6 +4922,8 @@ fn g1_dispute_within_window_succeeds() {
         &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
+
+    client.set_freeze_admin(&admin, &admin);
 
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
     let bettor = Address::generate(&env);

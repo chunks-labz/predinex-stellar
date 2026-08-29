@@ -218,12 +218,9 @@ fn test_e2e_dispute_unfreeze_claim() {
     t.client.unfreeze_pool(&t.freeze_admin, &pool_id);
 
     let pool = t.client.get_pool(&pool_id).unwrap();
-    assert_eq!(pool.status, PoolStatus::Open); // Returns to Open
+    assert_eq!(pool.status, PoolStatus::Settled(0)); // Returns to pre-dispute status
 
-    // Re-settle to enable claims again
-    t.client.settle_pool(&creator, &pool_id, &0u32);
-
-    // Step 5: Claim
+    // Step 5: Claim (pool is already settled, no re-settle needed)
     let winnings = t.client.claim_winnings(&user_a, &pool_id);
     assert_eq!(winnings, 980);
 }

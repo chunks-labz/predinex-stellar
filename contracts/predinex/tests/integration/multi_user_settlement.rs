@@ -311,38 +311,23 @@ fn mu3_dispute_blocks_claims_unfreeze_re_settles() {
         "claim must fail while pool is disputed"
     );
 
-    // Phase 3: freeze admin unfreezes, which restores Open status so the pool
-    // can receive more bets and be re-settled.
+    // Phase 3: freeze admin unfreezes, which restores the pre-dispute status
+    // (Settled(0) in this case — the pool was settled before the dispute).
     ctx.client.unfreeze_pool(&freeze_admin, &pool_id);
 
     {
         let pool: Pool = ctx.client.get_pool(&pool_id).unwrap();
         assert_eq!(
             pool.status,
-            PoolStatus::Open,
-            "pool must be Open after unfreeze"
+            PoolStatus::Settled(0),
+            "pool must return to pre-dispute Settled(0) after unfreeze"
         );
     }
 
-    // Phase 4: additional user places a bet while pool is back open.
-    // We must advance time back before expiry for new bets to land.
-    // Reset timestamp to within the original betting window.
-    ctx.env.ledger().with_mut(|l| l.timestamp = 100);
-    let user_d = Address::generate(&ctx.env);
-    mint(&ctx, &user_d, 200);
-    ctx.client
-        .place_bet(&user_d, &pool_id, &0, &200, &None::<Address>);
-
-    // Phase 5: expire again and re-settle (outcome 0 wins again).
-    ctx.env.ledger().with_mut(|l| l.timestamp = 3_700);
-    ctx.client.settle_pool(&creator, &pool_id, &0);
-
-    // Phase 6: all outcome-0 winners claim successfully.
+    // Phase 4: all outcome-0 winners can now claim successfully.
     let w_a = ctx.client.claim_winnings(&user_a, &pool_id);
-    let w_d = ctx.client.claim_winnings(&user_d, &pool_id);
 
     assert!(w_a > 0, "user_a must receive a positive payout");
-    assert!(w_d > 0, "user_d must receive a positive payout");
 
     // Outcome-1 users get nothing.
     assert!(
