@@ -21,7 +21,13 @@ fn setup_contract() -> (Env, PredinexContractClient<'static>, Address, Address) 
 }
 
 /// Like `setup_contract` but returns the contract_id for event assertion.
-fn setup_contract_for_events() -> (Env, PredinexContractClient<'static>, Address, Address, Address) {
+fn setup_contract_for_events() -> (
+    Env,
+    PredinexContractClient<'static>,
+    Address,
+    Address,
+    Address,
+) {
     let env = Env::default();
     env.mock_all_auths();
 

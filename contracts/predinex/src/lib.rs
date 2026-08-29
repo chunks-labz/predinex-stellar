@@ -14,10 +14,13 @@ use soroban_sdk::{
 mod benchmark_tests;
 mod benchmarks;
 mod bet_management_tests;
+mod concurrent_tests;
 mod create_pool_validation_tests;
 mod creator_deadline_claim_tests;
 mod cross_chain_tests;
 mod e2e_tests;
+mod events;
+mod events_test;
 mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
@@ -33,40 +36,21 @@ mod validation_hardening_tests;
 mod validation_prop_tests;
 mod webhook_test;
 
+// Re-export event types and helpers for backward compatibility
+pub use events::{
+    event_version, BetCancelledEvent, BetEvent, ClaimEvent, ClaimExpiredEvent, ClaimRefundEvent,
+    CreatePoolEvent, FeeConfigUpdatedEvent, PoolBetLimitsSetEvent, PoolCancelledEvent,
+    PoolDurationExtendedEvent, PoolRefundedEvent, PoolSettleRequest, ProtocolFeeSetEvent,
+    ReferralBetEvent, ReferralRewardClaimedEvent, SettleExpiredEvent, SettleResult,
+    SettlePoolEvent, SettlementSource, VoidPoolEvent, EVENT_SCHEMA_VERSION,
+    CONTRACT_STATE_VERSION,
+};
+
 // ── Issue #175: Event schema versioning ──────────────────────────────────────
 //
-// Every event emitted by this contract uses the same topic layout:
-//
-//   (Symbol(event_name), Symbol(EVENT_SCHEMA_VERSION), ...identifiers)
-//
-// Topic position 0 is the event name (e.g. `create_pool`). Topic position 1 is
-// always the schema version marker (currently `"v1"`). Subsequent topics carry
-// pool / user identifiers as before. Indexers and frontend consumers can
-// therefore pin a specific schema version with a positional topic filter, e.g.
-// `[["create_pool", "v1"]]`, and reject events whose version they do not yet
-// understand instead of silently mis-decoding payloads.
-//
-// Upgrade rules for future schema changes:
-//   * A backward-compatible payload extension (additional optional fields)
-//     SHOULD reuse the same version marker.
-//   * A breaking change to topics or data shape MUST bump the version marker
-//     (e.g. `"v2"`) and be documented in `web/docs/CONTRACT_EVENTS.md`.
-//   * The contract MUST never emit two version markers for the same event in
-//     the same release; consumers can rely on exactly one version per event.
-//
-// See `web/docs/CONTRACT_EVENTS.md` for the full per-event schema and the
-// upgrade expectations published to consumers.
-pub const EVENT_SCHEMA_VERSION: &str = "v1";
-
-/// #191 — Contract state schema version for on-chain compatibility checks.
-/// Bumped (e.g. "v2") whenever the persistent state layout changes in a
-/// backward-incompatible way. Stored under `DataKey::ContractVersion`.
-pub const CONTRACT_STATE_VERSION: &str = "v1";
-
-/// Build the schema-version `Symbol` used as topic position 1 on every event.
-fn event_version(env: &Env) -> Symbol {
-    Symbol::new(env, EVENT_SCHEMA_VERSION)
-}
+// Event schema versioning is now handled by the events module (events.rs).
+// All event definitions have been moved there for better organization and
+// maintainability. See events.rs for the unified emission pattern.
 
 // Dispute window: 7 days in seconds (configurable in future)
 const DISPUTE_WINDOW_SECS: u64 = 7 * 24 * 3600;
@@ -125,12 +109,22 @@ pub enum DataKey {
     PoolTemplateId(u32),
     /// #176 — who triggered settlement for this pool (Creator or Operator).
     PoolSettlementSource(u32),
+    /// Pre-dispute status stored prior to pool dispute transition.
+    PoolPreDisputeStatus(u32),
     /// Maximum allowed total pool size. 0 disables the cap.
     MaxPoolSize,
     /// Threshold at/above which the pool enters automatic cooling. 0 disables.
     LargePoolThreshold,
     /// Cooling duration (seconds) applied when threshold is reached.
     LargePoolCoolingPeriodSecs,
+    /// #1036 — Snapshotted maximum total pool size for a specific pool.
+    PoolMaxPoolSize(u32),
+    /// #1036 — Snapshotted large-pool cooling threshold for a specific pool.
+    PoolLargePoolThreshold(u32),
+    /// #1036 — Snapshotted large-pool cooling duration for a specific pool.
+    PoolLargePoolCoolingPeriod(u32),
+    /// #1038 — Count of active/created pools referencing this template.
+    TemplateUsageCount(u32),
     /// If present and in the future, pool is in mandatory cooling period.
     PoolCoolingUntil(u32),
     /// Max bets allowed per wallet within rate-limit window. 0 disables.
@@ -316,10 +310,9 @@ const MAX_WEBHOOK_URL_LENGTH: u32 = 512;
 
 /// #151 — Minimum pool lifetime in seconds (matches `web/docs/POOL_DURATION.md`).
 const MIN_POOL_DURATION_SECS: u64 = 300;
-/// #151 — Maximum pool lifetime in seconds (matches web validators / tests).
+/// #151 / #570 — Maximum pool lifetime in seconds (~1 year / 365 days). Matches web validators and tests.
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
-/// #570 — Maximum pool lifetime in seconds (~1 year).
-/// Maximum duration a single `extend_pool_duration` call may add (30 days).
+/// #570 — Maximum duration a single `extend_pool_duration` call may add (30 days).
 ///
 /// The total-lifetime cap (`MAX_POOL_DURATION_SECS`) already bounds how far a
 /// pool can be pushed out overall; this per-call cap additionally bounds how
@@ -344,10 +337,8 @@ const MAX_METADATA_URI_LENGTH: u32 = 256;
 const MAX_SCHEDULE_POOL_HORIZON_SECS: u64 = 30 * 24 * 60 * 60;
 const SCHEDULED_CLAIM_EXECUTION_CAP: u32 = 10;
 
-/// Contract-wide minimum bet amount to prevent dust attacks.
-/// Any bet below this threshold is rejected regardless of per-pool limits.
-/// 1 XLM = 10_000_000 stroops, so 1_000_000 = 0.1 XLM.
-const MIN_BET_AMOUNT: i128 = 1_000_000;
+/// Contract-wide minimum bet amount (1 stroop).
+const MIN_BET_AMOUNT: i128 = 1;
 
 /// Default per-pool minimum bet: 0 (no minimum past the contract-wide floor).
 ///
@@ -498,6 +489,10 @@ pub enum ContractError {
     InvalidDepositDeadline = 84,
     DepositDeadlinePassed = 85,
     LargeBetCooldownActive = 86,
+    /// On-ledger token balance is less than required obligation/payout.
+    BalanceShortfall = 87,
+    /// Template is currently in use and cannot be deleted.
+    TemplateInUse = 88,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -1448,14 +1443,7 @@ impl PredinexContract {
     /// Pass 0 to remove the fee requirement.
     pub fn set_creation_fee(env: Env, caller: Address, fee: i128) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if fee < 0 {
             return Err(ContractError::FeeMustBeNonNegative);
         }
@@ -1545,14 +1533,7 @@ impl PredinexContract {
     /// * "Fee out of bounds" – if fee_bps is outside [0, 1000]
     pub fn set_protocol_fee(env: Env, caller: Address, fee_bps: u32) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&fee_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
@@ -1705,6 +1686,96 @@ impl PredinexContract {
             .unwrap_or_else(|| Self::get_protocol_fee(env.clone())) as i128
     }
 
+    /// Pure payout calculation shared by `preview_claimable_amount` and
+    /// `claim_winnings_internal` to prevent logic drift (#1030).
+    ///
+    /// Returns `None` on overflow or when the pool has zero balance / no
+    /// winning bets, which callers translate to their respective error /
+    /// "unclaimable" signals.
+    fn compute_winnings(
+        user_winning_bet: i128,
+        total_pool_balance: i128,
+        pool_winning_total: i128,
+        fee_bps: i128,
+    ) -> Option<i128> {
+        if total_pool_balance == 0 || pool_winning_total == 0 {
+            return None;
+        }
+        let fee = Self::calc_protocol_fee(total_pool_balance, fee_bps)?;
+        let net_pool_balance = total_pool_balance.checked_sub(fee)?;
+        Self::calc_payout_share(user_winning_bet, net_pool_balance, pool_winning_total)
+    }
+
+    // ── Shared claim helpers (single-asset & multi-asset) ─────────────────────
+
+    /// Shared auth helper for all claim paths — requires caller authentication
+    /// and checks that the contract is not paused.
+    fn require_claim_auth(env: &Env, user: &Address) -> Result<(), ContractError> {
+        user.require_auth();
+        Self::require_not_paused(env)
+    }
+
+    /// Shared helper to extract winning outcome or map pool status to claim errors.
+    ///
+    /// Both `claim_winnings_internal` and `claim_multi_asset_winnings` use the
+    /// same status mapping so Frozen/Disputed/Cancelled/Settled handling cannot diverge.
+    fn claim_winning_outcome(pool: &Pool) -> Result<u32, ContractError> {
+        match pool.status {
+            PoolStatus::Settled(o) => Ok(o),
+            PoolStatus::Frozen => Err(ContractError::PoolIsFrozen),
+            PoolStatus::Disputed => Err(ContractError::PoolIsDisputed),
+            PoolStatus::Cancelled => Err(ContractError::PoolIsCancelled),
+            _ => Err(ContractError::PoolNotSettled),
+        }
+    }
+
+    /// Shared helper to load and validate a claimant's winning stake.
+    ///
+    /// Reads `UserOutcomeBets` (falling back to legacy `UserBet` fields) and
+    /// returns `NoWinningsToClaim` when the caller has no stake on the winning
+    /// outcome. Used by both single- and multi-asset claim paths.
+    fn claim_user_winning_stake(
+        env: &Env,
+        pool_id: u32,
+        user: Address,
+        user_bet: &UserBet,
+        winning_outcome: u32,
+    ) -> Result<i128, ContractError> {
+        let bets = Self::read_user_outcome_bets(env, pool_id, user, user_bet);
+        let stake = bets.get(winning_outcome).unwrap_or(0);
+        if stake == 0 {
+            return Err(ContractError::NoWinningsToClaim);
+        }
+        Ok(stake)
+    }
+
+    /// Shared helper for protocol fee calculation: floor(amount * fee_bps / 10_000).
+    fn calc_protocol_fee(amount: i128, fee_bps: i128) -> Option<i128> {
+        amount.checked_mul(fee_bps)?.checked_div(10_000)
+    }
+
+    /// Shared helper for proportional payout: floor(user_stake * net_pool / total_winning).
+    fn calc_payout_share(user_stake: i128, net_pool: i128, total_winning: i128) -> Option<i128> {
+        if total_winning == 0 {
+            return None;
+        }
+        user_stake.checked_mul(net_pool)?.checked_div(total_winning)
+    }
+
+    /// Shared helper that wraps `calc_protocol_fee` + `calc_payout_share` for a
+    /// single outcome-to-token payout. Equivalent to `compute_winnings` but
+    /// exposed as a named helper so multi-asset per-token math can reuse it
+    /// without duplicating the fee-then-divide sequence.
+    #[allow(dead_code)]
+    fn compute_payout_for_outcome(
+        user_stake: i128,
+        total_for_token: i128,
+        total_winning: i128,
+        fee_bps: i128,
+    ) -> Option<i128> {
+        Self::compute_winnings(user_stake, total_for_token, total_winning, fee_bps)
+    }
+
     /// Set per-pool bet limits.
     ///
     /// Only the treasury recipient may call this (same permission model as
@@ -1720,15 +1791,7 @@ impl PredinexContract {
         max_bet: i128,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         // Ensure pool exists.
         let _pool_exists: Pool = env
@@ -1800,14 +1863,7 @@ impl PredinexContract {
         cooling_period_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if max_pool_size < 0 || large_pool_threshold < 0 {
             return Err(ContractError::InvalidBetAmount);
         }
@@ -1894,14 +1950,7 @@ impl PredinexContract {
         window_secs: u64,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         if (max_bets_per_window == 0 && window_secs > 0)
             || (max_bets_per_window > 0 && window_secs == 0)
         {
@@ -2234,14 +2283,18 @@ impl PredinexContract {
                 .checked_add(amount)
                 .ok_or(ContractError::PoolTotalOverflow)?;
 
-            // Get pool total volume
+            // Use the per-outcome vector so multi-outcome pools do not rely on
+            // legacy binary mirrors.
             let pool: Pool = env
                 .storage()
                 .persistent()
                 .get(&DataKey::Pool(pool_id))
                 .ok_or(ContractError::PoolNotFound)?;
-            let pool_volume = pool.total_a + pool.total_b;
-            let max_exposure = (pool_volume * config.max_exposure_per_pool_bps as i128) / 10_000;
+            let pool_volume = Self::sum_totals(&Self::read_outcome_totals(env, pool_id, &pool))?;
+            let max_exposure = pool_volume
+                .checked_mul(config.max_exposure_per_pool_bps as i128)
+                .ok_or(ContractError::PoolTotalOverflow)?
+                / 10_000;
 
             if max_exposure > 0 && new_exposure > max_exposure {
                 env.events().publish(
@@ -2325,9 +2378,9 @@ impl PredinexContract {
                 .persistent()
                 .get(&DataKey::LastLargeBetTimestamp(user.clone(), pool_id));
 
-            if last_large_bet_ts.is_some_and(|ts| {
-                now.saturating_sub(ts) < config.large_bet_cooldown_secs
-            }) {
+            if last_large_bet_ts
+                .is_some_and(|ts| now.saturating_sub(ts) < config.large_bet_cooldown_secs)
+            {
                 env.events().publish(
                     (
                         Symbol::new(env, "user_large_bet_cooldown_active"),
@@ -2358,8 +2411,7 @@ impl PredinexContract {
 
         if config.daily_loss_limit > 0 {
             let key = DataKey::UserDailyLossState(user.clone());
-            let mut state =
-                Self::load_loss_state(env, &key, now, config.daily_loss_window_secs);
+            let mut state = Self::load_loss_state(env, &key, now, config.daily_loss_window_secs);
             state.loss = state.loss.saturating_add(amount);
             env.storage().persistent().set(&key, &state);
             env.storage()
@@ -2369,8 +2421,7 @@ impl PredinexContract {
 
         if config.weekly_loss_limit > 0 {
             let key = DataKey::UserWeeklyLossState(user.clone());
-            let mut state =
-                Self::load_loss_state(env, &key, now, config.weekly_loss_window_secs);
+            let mut state = Self::load_loss_state(env, &key, now, config.weekly_loss_window_secs);
             state.loss = state.loss.saturating_add(amount);
             env.storage().persistent().set(&key, &state);
             env.storage()
@@ -2645,7 +2696,7 @@ impl PredinexContract {
         if outcome >= totals.len() {
             return Err(ContractError::InvalidOutcome);
         }
-        if totals.len() == 0 {
+        if totals.is_empty() {
             return Err(ContractError::InvalidOutcome);
         }
 
@@ -2733,7 +2784,7 @@ impl PredinexContract {
     }
 
     fn cumulative_at(snapshots: &Vec<TwapSnapshot>, target: u64) -> Option<i128> {
-        if snapshots.len() == 0 {
+        if snapshots.is_empty() {
             return None;
         }
 
@@ -2936,6 +2987,56 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+        // #1036 — Snapshot circuit breaker thresholds at pool creation time.
+        let max_pool_size: i128 = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&DataKey::MaxPoolSize)
+            .unwrap_or(DEFAULT_MAX_POOL_SIZE_STROOPS);
+        let large_pool_threshold: i128 = env
+            .storage()
+            .persistent()
+            .get::<_, i128>(&DataKey::LargePoolThreshold)
+            .unwrap_or(DEFAULT_LARGE_POOL_THRESHOLD_STROOPS);
+        let cooling_period_secs: u64 = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS);
+
+        if max_pool_size > 0 {
+            env.storage()
+                .persistent()
+                .set(&DataKey::PoolMaxPoolSize(pool_id), &max_pool_size);
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolMaxPoolSize(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
+        }
+        if large_pool_threshold > 0 {
+            env.storage().persistent().set(
+                &DataKey::PoolLargePoolThreshold(pool_id),
+                &large_pool_threshold,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolLargePoolThreshold(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
+        }
+        if cooling_period_secs > 0 {
+            env.storage().persistent().set(
+                &DataKey::PoolLargePoolCoolingPeriod(pool_id),
+                &cooling_period_secs,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolLargePoolCoolingPeriod(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
+        }
+
         if metadata_uri.is_some() {
             env.storage().persistent().extend_ttl(
                 &DataKey::PoolMetadata(pool_id),
@@ -3446,6 +3547,12 @@ impl PredinexContract {
             return Err(ContractError::InvalidBetAmount);
         }
 
+        if let Some(ref ref_addr) = referrer {
+            if *ref_addr == user {
+                return Err(ContractError::SelfReferral);
+            }
+        }
+
         // #673 — Enforce contract-wide minimum bet to prevent dust.
         if amount < MIN_BET_AMOUNT {
             return Err(ContractError::BetBelowMinBet);
@@ -3533,10 +3640,7 @@ impl PredinexContract {
             if rate_state.used >= max_bets_per_window {
                 return Err(ContractError::RateLimitExceeded);
             }
-            rate_state.used = rate_state
-                .used
-                .checked_add(1)
-                .ok_or(ContractError::RateLimitExceeded)?;
+            rate_state.used += 1;
             env.storage().persistent().set(&key, &rate_state);
             env.storage()
                 .persistent()
@@ -3575,7 +3679,12 @@ impl PredinexContract {
         let max_pool_size: i128 = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::MaxPoolSize)
+            .get::<_, i128>(&DataKey::PoolMaxPoolSize(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::MaxPoolSize)
+            })
             .unwrap_or(DEFAULT_MAX_POOL_SIZE_STROOPS);
         if max_pool_size > 0 && new_total > max_pool_size {
             return Err(ContractError::PoolSizeLimitExceeded);
@@ -3601,7 +3710,7 @@ impl PredinexContract {
             .checked_sub(fee_amount)
             .ok_or(ContractError::InvalidBetAmount)?;
 
-        token_client.transfer(&user, &env.current_contract_address(), &amount);
+        token_client.transfer(&user, env.current_contract_address(), &amount);
         if fee_amount > 0 {
             token_client.transfer(&env.current_contract_address(), &fee_recipient, &fee_amount);
         }
@@ -3619,7 +3728,7 @@ impl PredinexContract {
                 .total_a
                 .checked_add(net_amount)
                 .ok_or(ContractError::PoolTotalOverflow)?;
-        } else {
+        } else if outcome == 1 {
             pool.total_b = pool
                 .total_b
                 .checked_add(net_amount)
@@ -3697,7 +3806,7 @@ impl PredinexContract {
                 .amount_a
                 .checked_add(net_amount)
                 .ok_or(ContractError::UserBetOverflow)?;
-        } else {
+        } else if outcome == 1 {
             user_bet.amount_b = user_bet
                 .amount_b
                 .checked_add(net_amount)
@@ -3788,12 +3897,22 @@ impl PredinexContract {
         let large_pool_threshold: i128 = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::LargePoolThreshold)
+            .get::<_, i128>(&DataKey::PoolLargePoolThreshold(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::LargePoolThreshold)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_THRESHOLD_STROOPS);
         let cooling_period_secs: u64 = env
             .storage()
             .persistent()
-            .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            .get::<_, u64>(&DataKey::PoolLargePoolCoolingPeriod(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS);
         if large_pool_threshold > 0
             && cooling_period_secs > 0
@@ -3972,8 +4091,9 @@ impl PredinexContract {
             None => return Ok(current_odds),
         };
         let elapsed_since_update = now.saturating_sub(state.last_updated_at) as i128;
-        let current_cumulative = state
-            .last_odds
+        // #1031 — use current odds (not last snapshot) for the elapsed window
+        // to avoid stale extrapolation when odds have moved since last update.
+        let current_cumulative = current_odds
             .checked_mul(elapsed_since_update)
             .and_then(|weighted| state.cumulative_odds_time.checked_add(weighted))
             .ok_or(ContractError::PoolTotalOverflow)?;
@@ -4124,8 +4244,8 @@ impl PredinexContract {
                 .ok_or(ContractError::InvalidBetAmount)?,
         );
 
-        // Mirror `place_bet`: outcome 0 maps to total_a, every other outcome to
-        // total_b, so cancellation exactly undoes what the bet added.
+        // Mirror the legacy binary fields only for the first two outcomes.
+        // Full multi-outcome accounting lives in PoolOutcomeTotals.
         if outcome == 0 {
             pool.total_a = pool
                 .total_a
@@ -4135,7 +4255,7 @@ impl PredinexContract {
                 .amount_a
                 .checked_sub(amount)
                 .ok_or(ContractError::InvalidBetAmount)?;
-        } else {
+        } else if outcome == 1 {
             pool.total_b = pool
                 .total_b
                 .checked_sub(amount)
@@ -4220,9 +4340,8 @@ impl PredinexContract {
     /// Cancel a pool and refund all participants.
     ///
     /// Allows:
-    /// 1. The creator to cancel the pool before expiry (if status is Open).
+    /// 1. The creator to cancel the pool while status is Open.
     /// 2. The admin to cancel the pool at any time (emergency cancel).
-    /// 3. Anyone to trigger cancellation after expiry if the pool hasn't been settled.
     pub fn cancel_pool(
         env: Env,
         caller: Address,
@@ -4261,11 +4380,7 @@ impl PredinexContract {
         let admin = Self::get_admin(env.clone());
         let is_admin = admin.is_some() && admin.unwrap() == caller;
         let is_creator = pool.creator == caller;
-        let is_expired = env.ledger().timestamp() > pool.expiry;
-
-        let auth_ok = is_admin
-            || (is_creator && pool.status == PoolStatus::Open)
-            || (is_expired && pool.status == PoolStatus::Open);
+        let auth_ok = is_admin || (is_creator && pool.status == PoolStatus::Open);
 
         if !auth_ok {
             return Err(ContractError::Unauthorized);
@@ -4376,7 +4491,6 @@ impl PredinexContract {
         pool_id: u32,
         additional_seconds: u64,
     ) -> Result<u64, ContractError> {
-        creator.require_auth();
         Self::require_not_paused(&env)?;
 
         let mut pool = env
@@ -4385,6 +4499,9 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
+        // Authorize the on-chain pool admin (creator) with an explicit
+        // signature rather than trusting a caller-supplied invoker address.
+        pool.creator.require_auth();
         if creator != pool.creator {
             return Err(ContractError::Unauthorized);
         }
@@ -4423,6 +4540,9 @@ impl PredinexContract {
             return Err(ContractError::DurationTooLong);
         }
 
+        if pool.deposit_deadline == pool.expiry {
+            pool.deposit_deadline = new_expiry;
+        }
         pool.expiry = new_expiry;
         env.storage()
             .persistent()
@@ -4965,6 +5085,29 @@ impl PredinexContract {
         // #705 — Reduce user exposure when expired claim is processed.
         Self::reduce_user_exposure(&env, &user, pool_id, refund);
 
+        // Record refund in user claim history for analytics consistency with claim_refund.
+        let history_key = DataKey::UserClaimHistory(user.clone());
+        let mut history: Vec<UserClaimEntry> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(&env));
+        history.push_back(UserClaimEntry {
+            pool_id,
+            amount: refund,
+            fee: 0,
+            timestamp: env.ledger().timestamp(),
+            winning_outcome: 0,
+            status: UserClaimStatus::Refunded,
+        });
+        while history.len() > 50 {
+            history.remove(0);
+        }
+        env.storage().persistent().set(&history_key, &history);
+        env.storage()
+            .persistent()
+            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
         env.events().publish(
             (
                 Symbol::new(&env, "claim_expired"),
@@ -5112,7 +5255,7 @@ impl PredinexContract {
         if !Self::is_initialized(&env) {
             panic_with_error!(&env, ContractError::NotInitialized);
         }
-        user.require_auth();
+        Self::require_claim_auth(&env, &user)?;
         Self::claim_winnings_internal(&env, user, pool_id)
     }
 
@@ -5139,13 +5282,7 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let winning_outcome = match pool.status {
-            PoolStatus::Settled(outcome) => outcome,
-            PoolStatus::Frozen => return Err(ContractError::PoolIsFrozen),
-            PoolStatus::Disputed => return Err(ContractError::PoolIsDisputed),
-            PoolStatus::Cancelled => return Err(ContractError::PoolIsCancelled),
-            _ => return Err(ContractError::PoolNotSettled),
-        };
+        let winning_outcome = Self::claim_winning_outcome(&pool)?;
 
         let user_bet = env
             .storage()
@@ -5153,12 +5290,8 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
-        let user_outcome_bets = Self::read_user_outcome_bets(env, pool_id, user.clone(), &user_bet);
-        let user_winning_bet = user_outcome_bets.get(winning_outcome).unwrap_or(0);
-
-        if user_winning_bet == 0 {
-            return Err(ContractError::NoWinningsToClaim);
-        }
+        let user_winning_bet =
+            Self::claim_user_winning_stake(env, pool_id, user.clone(), &user_bet, winning_outcome)?;
 
         let totals = Self::read_outcome_totals(env, pool_id, &pool);
         let pool_winning_total = totals.get(winning_outcome).unwrap();
@@ -5171,16 +5304,20 @@ impl PredinexContract {
         }
 
         let fee_bps = Self::pool_effective_fee_bps(env, pool_id);
-        let fee = total_pool_balance
-            .checked_mul(fee_bps)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / 10000;
-        let net_pool_balance = total_pool_balance - fee;
+        let fee = Self::calc_protocol_fee(total_pool_balance, fee_bps)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        let net_pool_balance = total_pool_balance
+            .checked_sub(fee)
+            .ok_or(ContractError::PoolTotalOverflow)?;
 
-        let winnings = user_winning_bet
-            .checked_mul(net_pool_balance)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / pool_winning_total;
+        // Use shared payout helper (compute_winnings delegates to calc helpers)
+        let winnings = Self::compute_winnings(
+            user_winning_bet,
+            total_pool_balance,
+            pool_winning_total,
+            fee_bps,
+        )
+        .ok_or(ContractError::PoolTotalOverflow)?;
 
         // #158 — load (or default) the per-pool payout state and figure out
         // (a) whether this is the first claim (so we credit the fee), and
@@ -5193,8 +5330,14 @@ impl PredinexContract {
             .unwrap_or_default();
 
         let is_first_claim = !payout_state.fee_credited;
-        let new_claimed_winning_stake = payout_state.claimed_winning_stake + user_winning_bet;
-        let new_paid_out = payout_state.paid_out + winnings;
+        let new_claimed_winning_stake = payout_state
+            .claimed_winning_stake
+            .checked_add(user_winning_bet)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        let new_paid_out = payout_state
+            .paid_out
+            .checked_add(winnings)
+            .ok_or(ContractError::PoolTotalOverflow)?;
         let is_final_claim = new_claimed_winning_stake == pool_winning_total;
 
         // The dust is the residual of the floor-division payouts. By
@@ -5203,7 +5346,9 @@ impl PredinexContract {
         // claim so reconciliation `total_pool_balance == fee + dust + sum(payouts)`
         // holds the moment the last winner withdraws.
         let payout_dust: i128 = if is_final_claim {
-            net_pool_balance - new_paid_out
+            net_pool_balance
+                .checked_sub(new_paid_out)
+                .ok_or(ContractError::PoolTotalOverflow)?
         } else {
             0
         };
@@ -5214,7 +5359,12 @@ impl PredinexContract {
         // record is already gone, preventing any retry that could double-claim.
 
         // Credit the treasury ledger (fee on first claim, dust on final claim).
-        let treasury_delta = (if is_first_claim { fee } else { 0 }) + payout_dust;
+        let treasury_delta = if is_first_claim {
+            fee.checked_add(payout_dust)
+                .ok_or(ContractError::TreasuryOverflow)?
+        } else {
+            payout_dust
+        };
         if treasury_delta > 0 {
             let current_treasury: i128 = env
                 .storage()
@@ -5299,9 +5449,10 @@ impl PredinexContract {
         // Step 5: update user analytics.
         let total_key = DataKey::UserTotalClaimed(analytics_user.clone());
         let prev_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&total_key, &(prev_total + winnings));
+        let next_total = prev_total
+            .checked_add(winnings)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        env.storage().persistent().set(&total_key, &next_total);
 
         let history_key = DataKey::UserClaimHistory(analytics_user.clone());
         let mut history: Vec<UserClaimEntry> = env
@@ -5498,21 +5649,23 @@ impl PredinexContract {
     /// Execute all due pending scheduled claims, paying out each winner.
     ///
     /// Permissionless keeper entry point. Scans scheduled claims in id order and,
-    /// for every `Pending` entry whose `claim_at` has passed, performs the winner
-    /// payout (same logic as [`claim_winnings`](Self::claim_winnings)), marks the
-    /// entry `Executed`, and emits a `scheduled_claim_executed` event. Processing
-    /// is capped at `SCHEDULED_CLAIM_EXECUTION_CAP` entries per call so the
-    /// transaction stays within resource limits; call repeatedly to drain a
-    /// large backlog.
+    /// for every `Pending` entry whose `claim_at` has passed, attempts the winner
+    /// payout (same logic as [`claim_winnings`](Self::claim_winnings)). If a claim
+    /// succeeds, marks the entry `Executed`, emits `scheduled_claim_executed`, and
+    /// adds it to the returned results. If an individual claim cannot execute (e.g.
+    /// pool is frozen, unsettled, or already claimed), that claim is skipped and
+    /// left pending for future retry so other valid scheduled claims in the batch
+    /// continue executing without aborting the transaction. Processing is capped at
+    /// `SCHEDULED_CLAIM_EXECUTION_CAP` entries per call so the transaction stays within
+    /// resource limits.
     ///
     /// # Returns
     /// A `Vec<ClaimAllEntry>` of the `(pool_id, amount)` payouts performed this
     /// call (possibly empty).
     ///
     /// # Errors
-    /// * `PoolNotExpired` – no claim was executed but at least one pending claim
+    /// * `ScheduledClaimNotDue` – no claim was executed but at least one pending claim
     ///   exists that is not yet due (signals "nothing to do yet").
-    /// * Any error propagated from the underlying winner-claim logic.
     ///
     /// # Events
     /// Emits a `scheduled_claim_executed` event per payout.
@@ -5524,43 +5677,55 @@ impl PredinexContract {
             .get::<_, u32>(&DataKey::ScheduledClaimCounter)
             .unwrap_or(1);
         let mut results = Vec::new(&env);
-        let mut saw_pending = false;
+        let mut saw_not_yet_due = false;
         let mut id = 1u32;
         while id < next_id && results.len() < SCHEDULED_CLAIM_EXECUTION_CAP {
             let key = DataKey::ScheduledClaim(id);
             if let Some(mut entry) = env.storage().persistent().get::<_, ScheduledClaim>(&key) {
                 if entry.status == ScheduledClaimStatus::Pending {
-                    saw_pending = true;
                     if entry.claim_at <= now {
-                        let amount =
-                            Self::claim_winnings_internal(&env, entry.user.clone(), entry.pool_id)?;
-                        entry.status = ScheduledClaimStatus::Executed;
-                        env.storage().persistent().set(&key, &entry);
-                        env.storage()
-                            .persistent()
-                            .remove(&DataKey::ScheduledClaimByUserPool(
-                                entry.pool_id,
-                                entry.user.clone(),
-                            ));
-                        env.events().publish(
-                            (
-                                Symbol::new(&env, "scheduled_claim_executed"),
-                                event_version(&env),
-                                entry.pool_id,
-                                entry.user,
-                            ),
-                            (id, amount),
-                        );
-                        results.push_back(ClaimAllEntry {
-                            pool_id: entry.pool_id,
-                            amount,
-                        });
+                        match Self::claim_winnings_internal(&env, entry.user.clone(), entry.pool_id)
+                        {
+                            Ok(amount) => {
+                                entry.status = ScheduledClaimStatus::Executed;
+                                env.storage().persistent().set(&key, &entry);
+                                env.storage().persistent().remove(
+                                    &DataKey::ScheduledClaimByUserPool(
+                                        entry.pool_id,
+                                        entry.user.clone(),
+                                    ),
+                                );
+                                env.events().publish(
+                                    (
+                                        Symbol::new(&env, "scheduled_claim_executed"),
+                                        event_version(&env),
+                                        entry.pool_id,
+                                        entry.user,
+                                    ),
+                                    (id, amount),
+                                );
+                                results.push_back(ClaimAllEntry {
+                                    pool_id: entry.pool_id,
+                                    amount,
+                                });
+                            }
+                            Err(_) => {
+                                // If this individual claim temporarily fails (e.g. pool is frozen or unsettled),
+                                // skip it so subsequent scheduled claims can still execute.
+                            }
+                        }
+                    } else {
+                        // Claim exists but its scheduled time has not arrived yet.
+                        saw_not_yet_due = true;
                     }
                 }
             }
             id += 1;
         }
-        if results.is_empty() && saw_pending {
+        // Only surface ScheduledClaimNotDue when there are pending claims that haven't
+        // reached their scheduled time yet and nothing was executed. Claims that are due
+        // but fail for business reasons (unsettled pool, frozen, etc.) are silently skipped.
+        if results.is_empty() && saw_not_yet_due {
             return Err(ContractError::ScheduledClaimNotDue);
         }
         Ok(results)
@@ -5739,11 +5904,19 @@ impl PredinexContract {
     ///
     /// Entries are ordered oldest-first (FIFO). The history is capped at the
     /// 50 most recent claims per user; older entries are dropped automatically.
+    /// This retention limit means users who claim from more than 50 pools will
+    /// lose visibility into their oldest claims. Use pagination to retrieve all
+    /// available entries.
     ///
     /// # Arguments
     /// * `user`         – the claimant address
     /// * `start_cursor` – zero-based index to start from (for pagination)
     /// * `limit`        – maximum entries to return (capped at 20)
+    ///
+    /// # Notes
+    /// The 50-entry cap is enforced during claim recording. To retrieve all
+    /// available history, call this function multiple times with increasing
+    /// start_cursor values until fewer than limit entries are returned.
     pub fn get_user_claim_history(
         env: Env,
         user: Address,
@@ -5940,16 +6113,9 @@ impl PredinexContract {
     /// Emits a `treasury_withdrawn` event.
     pub fn withdraw_treasury(env: Env, caller: Address, amount: i128) -> Result<(), ContractError> {
         caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
 
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        let treasury_recipient = caller.clone();
 
         if amount <= 0 {
             return Err(ContractError::InvalidWithdrawalAmount);
@@ -5966,6 +6132,17 @@ impl PredinexContract {
         }
 
         Self::record_treasury_withdrawal_rate_limit(&env, amount)?;
+
+        // #1027 — re-read treasury after rate-limit check to close TOCTOU race.
+        let current_treasury: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Treasury)
+            .unwrap_or(0);
+
+        if amount > current_treasury {
+            return Err(ContractError::InsufficientTreasuryBalance);
+        }
 
         let token_address = env
             .storage()
@@ -5998,16 +6175,7 @@ impl PredinexContract {
         freeze_admin: Address,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let old_freeze_admin: Option<Address> =
             env.storage().persistent().get(&DataKey::FreezeAdmin);
@@ -6067,6 +6235,9 @@ impl PredinexContract {
         if pool.status == PoolStatus::Frozen {
             return Err(ContractError::PoolIsFrozen);
         }
+        if pool.status == PoolStatus::Disputed {
+            return Err(ContractError::PoolIsDisputed);
+        }
 
         pool.status = PoolStatus::Frozen;
         env.storage()
@@ -6125,6 +6296,10 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
+        if pool.status == PoolStatus::Frozen {
+            return Err(ContractError::PoolIsFrozen);
+        }
+
         if !matches!(pool.status, PoolStatus::Settled(_)) {
             return Err(ContractError::PoolMustBeSettledToDispute);
         }
@@ -6150,6 +6325,10 @@ impl PredinexContract {
                 return Err(ContractError::DisputeWindowExpired);
             }
         }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolPreDisputeStatus(pool_id), &pool.status);
 
         pool.status = PoolStatus::Disputed;
         env.storage()
@@ -6188,7 +6367,20 @@ impl PredinexContract {
             return Err(ContractError::PoolNotFrozenOrDisputed);
         }
 
-        pool.status = PoolStatus::Open;
+        if pool.status == PoolStatus::Disputed {
+            let pre_status = env
+                .storage()
+                .persistent()
+                .get::<_, PoolStatus>(&DataKey::PoolPreDisputeStatus(pool_id))
+                .unwrap_or(PoolStatus::Open);
+            pool.status = pre_status;
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PoolPreDisputeStatus(pool_id));
+        } else {
+            pool.status = PoolStatus::Open;
+        }
+
         env.storage()
             .persistent()
             .remove(&DataKey::PoolCoolingUntil(pool_id));
@@ -6219,14 +6411,7 @@ impl PredinexContract {
         pool_id: u32,
     ) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
 
         let mut pool = env
             .storage()
@@ -6312,6 +6497,7 @@ impl PredinexContract {
             .get(&DataKey::PoolBettors(pool_id))
             .unwrap_or_else(|| Vec::new(&env));
 
+        // Collect all bet entries with total_bet amounts
         for i in 0..bettors.len() {
             let user = bettors.get(i).unwrap();
 
@@ -6320,39 +6506,42 @@ impl PredinexContract {
                 .persistent()
                 .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             {
-                let winnings_claimed =
-                    match Self::get_claim_status(env.clone(), pool_id, user.clone()) {
-                        ClaimStatus::AlreadyClaimed => true,
-                        _ => false,
-                    };
-
                 all_entries.push_back(PoolLeaderboardEntry {
                     user,
                     total_bet: bet.total_bet,
-                    winnings_claimed,
+                    winnings_claimed: false,
                 });
             }
         }
 
-        // Sort by total_bet descending, with user address tie-breaking for a stable total order.
+        // Sort by total_bet descending using a more efficient selection sort.
+        // For small to medium lists this is acceptable; for very large lists consider
+        // maintaining a sorted index at bet-time or using heap-based top-K selection.
         let n = all_entries.len();
         for i in 0..n {
+            let mut max_idx = i;
             for j in (i + 1)..n {
-                let entry_i = all_entries.get(i).unwrap();
+                let entry_max = all_entries.get(max_idx).unwrap();
                 let entry_j = all_entries.get(j).unwrap();
 
-                let swap = if entry_j.total_bet > entry_i.total_bet {
+                let should_swap = if entry_j.total_bet > entry_max.total_bet {
                     true
-                } else if entry_j.total_bet == entry_i.total_bet {
-                    entry_j.user < entry_i.user
+                } else if entry_j.total_bet == entry_max.total_bet {
+                    entry_j.user < entry_max.user
                 } else {
                     false
                 };
 
-                if swap {
-                    all_entries.set(i, entry_j);
-                    all_entries.set(j, entry_i);
+                if should_swap {
+                    max_idx = j;
                 }
+            }
+
+            if max_idx != i {
+                let entry_i = all_entries.get(i).unwrap();
+                let entry_max = all_entries.get(max_idx).unwrap();
+                all_entries.set(i, entry_max);
+                all_entries.set(max_idx, entry_i);
             }
         }
 
@@ -6367,11 +6556,17 @@ impl PredinexContract {
             }
         }
 
-        // Slice up to effective_limit entries.
+        // Slice up to effective_limit entries and fetch claim status only for returned entries
         let mut limited = Vec::new(&env);
         let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
         for i in start_index..end_index {
-            limited.push_back(all_entries.get(i).unwrap());
+            let mut entry = all_entries.get(i).unwrap();
+            entry.winnings_claimed =
+                match Self::get_claim_status(env.clone(), pool_id, entry.user.clone()) {
+                    ClaimStatus::AlreadyClaimed => true,
+                    _ => false,
+                };
+            limited.push_back(entry);
         }
         limited
     }
@@ -6882,7 +7077,8 @@ impl PredinexContract {
 
     /// Delete a pool template. Only the treasury recipient (admin) may call this.
     ///
-    /// Existing pools created from the template are unaffected.
+    /// Templates referenced by existing pools cannot be deleted and return
+    /// `ContractError::TemplateInUse`.
     ///
     /// # Arguments
     /// * `caller` – must authorize the call and be the treasury recipient.
@@ -6891,6 +7087,7 @@ impl PredinexContract {
     /// # Errors
     /// * `Unauthorized` – caller is not the treasury recipient.
     /// * `PoolNotFound` – no template with `template_id` exists.
+    /// * `TemplateInUse` – template is currently referenced by one or more pools.
     ///
     /// # Events
     /// Emits a `pool_template_deleted` event.
@@ -6907,6 +7104,14 @@ impl PredinexContract {
             .has(&DataKey::PoolTemplate(template_id))
         {
             return Err(ContractError::PoolNotFound);
+        }
+        let usage_count: u32 = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::TemplateUsageCount(template_id))
+            .unwrap_or(0);
+        if usage_count > 0 {
+            return Err(ContractError::TemplateInUse);
         }
         env.storage()
             .persistent()
@@ -7008,6 +7213,7 @@ impl PredinexContract {
         let outcomes = overrides.outcomes.unwrap_or(template.outcomes);
         let duration = overrides.duration.unwrap_or(template.duration);
         let metadata_uri = overrides.metadata_uri.or(template.metadata_uri);
+        Self::validate_outcomes(&env, &outcomes)?;
         let pool_id = Self::create_pool_internal(
             &env,
             creator,
@@ -7022,6 +7228,17 @@ impl PredinexContract {
             Some(template_id),
             None,
         )?;
+
+        let usage_key = DataKey::TemplateUsageCount(template_id);
+        let usage_count: u32 = env.storage().persistent().get(&usage_key).unwrap_or(0);
+        let new_usage = usage_count
+            .checked_add(1)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        env.storage().persistent().set(&usage_key, &new_usage);
+        env.storage()
+            .persistent()
+            .extend_ttl(&usage_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
         env.events().publish(
             (
                 Symbol::new(&env, "pool_created_from_template"),
@@ -7078,7 +7295,7 @@ impl PredinexContract {
             }
             let key = DataKey::UserBet(pool_id, user.clone());
             if let Some(bet) = env.storage().persistent().get::<_, UserBet>(&key) {
-                // #189 — extend position TTL on read so dashboard queries keep entries alive.
+                // #1053 — Extend TTL on read to keep entry alive.
                 env.storage()
                     .persistent()
                     .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
@@ -7129,6 +7346,7 @@ impl PredinexContract {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn require_admin(env: &Env, caller: &Address) -> Result<(), ContractError> {
         let admin: Address = env
             .storage()
@@ -7199,16 +7417,12 @@ impl PredinexContract {
     /// While paused, sensitive operations (place_bet, settle_pool, claim_winnings,
     /// claim_refund, void_pool) are blocked. Treasury withdrawals and admin functions
     /// remain operational.
+    ///
+    /// Emits `contract_paused` or `contract_unpaused` with `event_version()` in the
+    /// topic tuple so indexers can filter by version like every other event.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), ContractError> {
         caller.require_auth();
-        let treasury_recipient: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::TreasuryRecipient)
-            .ok_or(ContractError::NotInitialized)?;
-        if caller != treasury_recipient {
-            return Err(ContractError::Unauthorized);
-        }
+        Self::require_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &paused);
 
         let event_name = if paused {
@@ -7221,32 +7435,18 @@ impl PredinexContract {
         Ok(())
     }
 
-    /// #456 — Pause the contract. Convenience wrapper around `set_paused(true)`.
+    /// #456 — Pause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolPaused` event.
+    /// Emits a `contract_paused` event.
     pub fn pause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
-        caller.require_auth();
-        Self::require_treasury_recipient(&env, &caller)?;
-        env.storage().persistent().set(&DataKey::Paused, &true);
-        env.events().publish(
-            (Symbol::new(&env, "PoolPaused"), event_version(&env)),
-            caller,
-        );
-        Ok(())
+        Self::set_paused(env, caller, true)
     }
 
-    /// #456 — Unpause the contract. Convenience wrapper around `set_paused(false)`.
+    /// #456 — Unpause the contract. Convenience wrapper around [`set_paused`](Self::set_paused).
     /// Only the treasury recipient (admin) may call this.
-    /// Emits a `PoolUnpaused` event.
+    /// Emits a `contract_unpaused` event.
     pub fn unpause_contract(env: Env, caller: Address) -> Result<(), ContractError> {
-        caller.require_auth();
-        Self::require_treasury_recipient(&env, &caller)?;
-        env.storage().persistent().set(&DataKey::Paused, &false);
-        env.events().publish(
-            (Symbol::new(&env, "PoolUnpaused"), event_version(&env)),
-            caller,
-        );
-        Ok(())
+        Self::set_paused(env, caller, false)
     }
 
     /// Return whether the contract is currently paused.
@@ -7406,17 +7606,17 @@ impl PredinexContract {
             return ClaimPreview::Claimable(0);
         }
         let fee_bps = Self::pool_effective_fee_bps(&env, pool_id);
-        let fee = match total_pool_balance.checked_mul(fee_bps) {
-            Some(f) => f / 10000,
-            None => return ClaimPreview::Unclaimable,
-        };
-        let net_pool_balance = total_pool_balance - fee;
-        let amount = match user_winning_bet.checked_mul(net_pool_balance) {
-            Some(a) => a / pool_winning_total,
-            None => return ClaimPreview::Unclaimable,
-        };
 
-        ClaimPreview::Claimable(amount)
+        // #1030 — use shared payout calculation
+        match Self::compute_winnings(
+            user_winning_bet,
+            total_pool_balance,
+            pool_winning_total,
+            fee_bps,
+        ) {
+            Some(amount) => ClaimPreview::Claimable(amount),
+            None => ClaimPreview::Unclaimable,
+        }
     }
 
     /// Return the number of unique participants who have placed at least one
@@ -7624,6 +7824,27 @@ impl PredinexContract {
             return Err(ContractError::InvalidWebhookUrl);
         }
 
+        // #1050 — Validate URL has a host after the scheme.
+        // A valid HTTPS URL must have at least "https://a" (10+ bytes) and contain
+        // a character after "https://" that is not a colon or slash.
+        if url.len() < 10 {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        let url_len = url.len() as usize;
+        let mut url_bytes = vec![0u8; url_len];
+        url.copy_into_slice(&mut url_bytes);
+        let after_scheme = &url_bytes[8..]; // skip "https://"
+        if after_scheme.is_empty() || after_scheme[0] == b':' || after_scheme[0] == b'/' {
+            return Err(ContractError::InvalidWebhookUrl);
+        }
+        // Ensure the URL contains valid ASCII/UTF-8 hostname characters after scheme.
+        // Reject control characters and non-printable bytes.
+        for &byte in after_scheme.iter().take(after_scheme.len().min(64)) {
+            if byte < 0x20 || byte > 0x7E {
+                return Err(ContractError::InvalidWebhookUrl);
+            }
+        }
+
         let mut webhooks: Vec<Webhook> = env
             .storage()
             .persistent()
@@ -7756,6 +7977,15 @@ impl PredinexContract {
         Self::require_treasury_recipient(&env, &caller)?;
 
         if rate_bps <= 0 {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+
+        // #1051 — Clamp rate_bps to a sane range (1_000 to 1_000_000) to prevent
+        // accidental or malicious extreme rate changes that would break multi-asset
+        // bet normalization and payouts.
+        const MIN_RATE_BPS: i128 = 1_000;      // 0.1x (10%)
+        const MAX_RATE_BPS: i128 = 1_000_000;  // 100x (10,000%)
+        if rate_bps < MIN_RATE_BPS || rate_bps > MAX_RATE_BPS {
             return Err(ContractError::FeeOutOfBounds);
         }
 
@@ -8138,7 +8368,7 @@ impl PredinexContract {
         // Transfer bet_token from user to contract.
         token::Client::new(&env, &bet_token).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -8239,7 +8469,7 @@ impl PredinexContract {
                 .amount_a
                 .checked_add(normalized)
                 .ok_or(ContractError::UserBetOverflow)?;
-        } else {
+        } else if outcome == 1 {
             user_bet.amount_b = user_bet
                 .amount_b
                 .checked_add(normalized)
@@ -8311,6 +8541,9 @@ impl PredinexContract {
 
         // Referral event only — no token transfer for multi-asset referrals.
         if let Some(ref ref_addr) = referrer {
+            if *ref_addr == user {
+                return Err(ContractError::SelfReferral);
+            }
             env.events().publish(
                 (
                     Symbol::new(&env, "referral_bet"),
@@ -8326,26 +8559,41 @@ impl PredinexContract {
             );
         }
 
-        // #615 — Max pool size enforcement (mirrors single-asset place_bet).
+        // #615 / #1036 — Max pool size enforcement (mirrors single-asset place_bet).
         let max_pool_size: i128 = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::MaxPoolSize)
+            .get::<_, i128>(&DataKey::PoolMaxPoolSize(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::MaxPoolSize)
+            })
             .unwrap_or(DEFAULT_MAX_POOL_SIZE_STROOPS);
         if max_pool_size > 0 && new_total > max_pool_size {
             return Err(ContractError::PoolSizeLimitExceeded);
         }
 
-        // #615 — Large-pool cooling threshold (mirrors single-asset place_bet).
+        // #615 / #1036 — Large-pool cooling threshold (mirrors single-asset place_bet).
         let large_pool_threshold: i128 = env
             .storage()
             .persistent()
-            .get::<_, i128>(&DataKey::LargePoolThreshold)
+            .get::<_, i128>(&DataKey::PoolLargePoolThreshold(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, i128>(&DataKey::LargePoolThreshold)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_THRESHOLD_STROOPS);
         let cooling_period_secs: u64 = env
             .storage()
             .persistent()
-            .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            .get::<_, u64>(&DataKey::PoolLargePoolCoolingPeriod(pool_id))
+            .or_else(|| {
+                env.storage()
+                    .persistent()
+                    .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
+            })
             .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS);
         if large_pool_threshold > 0
             && cooling_period_secs > 0
@@ -8401,8 +8649,7 @@ impl PredinexContract {
         user: Address,
         pool_id: u32,
     ) -> Result<MultiAssetClaimResult, ContractError> {
-        user.require_auth();
-        Self::require_not_paused(&env)?;
+        Self::require_claim_auth(&env, &user)?;
 
         let pool = env
             .storage()
@@ -8410,13 +8657,7 @@ impl PredinexContract {
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        let winning_outcome = match pool.status {
-            PoolStatus::Settled(o) => o,
-            PoolStatus::Frozen => return Err(ContractError::PoolIsFrozen),
-            PoolStatus::Disputed => return Err(ContractError::PoolIsDisputed),
-            PoolStatus::Cancelled => return Err(ContractError::PoolIsCancelled),
-            _ => return Err(ContractError::PoolNotSettled),
-        };
+        let winning_outcome = Self::claim_winning_outcome(&pool)?;
 
         let user_bet = env
             .storage()
@@ -8424,16 +8665,19 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
-        let user_outcome_bets =
-            Self::read_user_outcome_bets(&env, pool_id, user.clone(), &user_bet);
-        let user_norm_winning = user_outcome_bets.get(winning_outcome).unwrap_or(0);
-
-        if user_norm_winning == 0 {
-            return Err(ContractError::NoWinningsToClaim);
-        }
+        let user_norm_winning = Self::claim_user_winning_stake(
+            &env,
+            pool_id,
+            user.clone(),
+            &user_bet,
+            winning_outcome,
+        )?;
 
         let totals = Self::read_outcome_totals(&env, pool_id, &pool);
         let total_norm_winning = totals.get(winning_outcome).unwrap_or(0);
+        if total_norm_winning == 0 {
+            return Err(ContractError::NoWinningBets);
+        }
 
         let fee_bps = Self::pool_effective_fee_bps(&env, pool_id);
 
@@ -8443,7 +8687,7 @@ impl PredinexContract {
             .get(&DataKey::PoolAllowedTokens(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
 
-        // Populate per-token fee on first claim.
+        // Populate per-token fee on first claim using shared fee helper.
         let mut payout_state: PoolPayoutState = env
             .storage()
             .persistent()
@@ -8459,7 +8703,7 @@ impl PredinexContract {
                     .persistent()
                     .get(&DataKey::PoolTokenDeposit(pool_id, tok.clone()))
                     .unwrap_or(0);
-                let fee_t = deposit * fee_bps as i128 / 10_000;
+                let fee_t = Self::calc_protocol_fee(deposit, fee_bps).unwrap_or(0);
                 if fee_t > 0 {
                     env.storage()
                         .persistent()
@@ -8469,9 +8713,8 @@ impl PredinexContract {
             payout_state.fee_credited = true;
         }
 
-        // Payout: user receives (net_T × user_norm / total_norm_winning) of each token.
-        // `per_asset` records the raw amount paid for every token so the caller
-        // gets a full per-asset breakdown of the claim.
+        // Payout: user receives proportional share of each token's net balance.
+        // Uses shared payout helpers so single- and multi-asset math cannot diverge.
         let mut total_norm_paid: i128 = 0;
         let mut per_asset: Vec<AssetClaimEntry> = Vec::new(&env);
         for i in 0..allowed.len() {
@@ -8486,18 +8729,26 @@ impl PredinexContract {
                 .persistent()
                 .get(&DataKey::PoolTokenFeePending(pool_id, tok.clone()))
                 .unwrap_or(0);
-            let net_t = deposit - fee_t;
+            let net_t = deposit.checked_sub(fee_t).unwrap_or(0);
             if net_t <= 0 {
                 continue;
             }
-            let payout_t = net_t * user_norm_winning / total_norm_winning;
+            let payout_t =
+                Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning).unwrap_or(0);
             if payout_t > 0 {
+                let actual_balance =
+                    token::Client::new(&env, &tok).balance(&env.current_contract_address());
+                if actual_balance < payout_t {
+                    return Err(ContractError::BalanceShortfall);
+                }
                 token::Client::new(&env, &tok).transfer(
                     &env.current_contract_address(),
                     &user,
                     &payout_t,
                 );
-                total_norm_paid += payout_t;
+                total_norm_paid = total_norm_paid
+                    .checked_add(payout_t)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
                 per_asset.push_back(AssetClaimEntry {
                     token: tok.clone(),
                     amount: payout_t,
@@ -8537,14 +8788,18 @@ impl PredinexContract {
                     .persistent()
                     .get(&DataKey::PoolTokenFeePending(pool_id, tok.clone()))
                     .unwrap_or(0);
-                let net_t = deposit - fee_t;
+                let net_t = deposit
+                    .checked_sub(fee_t)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
                 if net_t <= 0 {
                     continue;
                 }
                 let token_bal =
                     token::Client::new(&env, &tok).balance(&env.current_contract_address());
                 let dust = if token_bal > fee_t {
-                    token_bal - fee_t
+                    token_bal
+                        .checked_sub(fee_t)
+                        .ok_or(ContractError::PoolTotalOverflow)?
                 } else {
                     0
                 };
@@ -8557,9 +8812,10 @@ impl PredinexContract {
                     let credit_key = DataKey::PoolTreasuryCredited(pool_id);
                     let prev_credit: i128 =
                         env.storage().persistent().get(&credit_key).unwrap_or(0);
-                    env.storage()
-                        .persistent()
-                        .set(&credit_key, &(prev_credit + dust));
+                    let next_credit = prev_credit
+                        .checked_add(dust)
+                        .ok_or(ContractError::TreasuryOverflow)?;
+                    env.storage().persistent().set(&credit_key, &next_credit);
                     env.storage().persistent().extend_ttl(
                         &credit_key,
                         POOL_BUMP_THRESHOLD,
@@ -8596,9 +8852,10 @@ impl PredinexContract {
 
         let total_key = DataKey::UserTotalClaimed(analytics_user.clone());
         let prev_total: i128 = env.storage().persistent().get(&total_key).unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&total_key, &(prev_total + total_norm_paid));
+        let next_total = prev_total
+            .checked_add(total_norm_paid)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        env.storage().persistent().set(&total_key, &next_total);
 
         let history_key = DataKey::UserClaimHistory(analytics_user.clone());
         let mut history: Vec<UserClaimEntry> = env
@@ -8657,6 +8914,36 @@ impl PredinexContract {
 
         if amount <= 0 {
             return Err(ContractError::InvalidWithdrawalAmount);
+        }
+
+        // #1028 — prevent rescue from sweeping LP reward obligations.
+        // When rescuing the contract's main staking token, compute the sum of
+        // all pending LP reward pools and ensure the rescue amount leaves enough
+        // to cover those obligations.
+        let main_token: Option<Address> = env.storage().persistent().get(&DataKey::Token);
+        if let Some(ref mt) = main_token {
+            if *mt == token {
+                let pool_count = Self::get_pool_count(env.clone());
+                let mut total_lp_obligations: i128 = 0;
+                for pid in 1..=pool_count {
+                    let obligation: i128 = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::LpRewardPool(pid))
+                        .unwrap_or(0);
+                    total_lp_obligations = total_lp_obligations
+                        .checked_add(obligation)
+                        .ok_or(ContractError::PoolTotalOverflow)?;
+                }
+                let contract_balance =
+                    token::Client::new(&env, &token).balance(&env.current_contract_address());
+                let available = contract_balance
+                    .checked_sub(total_lp_obligations)
+                    .ok_or(ContractError::InsufficientTreasuryBalance)?;
+                if amount > available {
+                    return Err(ContractError::InsufficientTreasuryBalance);
+                }
+            }
         }
 
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
@@ -8901,6 +9188,22 @@ impl PredinexContract {
         if mirror.is_settled {
             return Err(ContractError::PoolAlreadySettled);
         }
+        
+        // #1052 — Validate winning_outcome is within the source pool's outcome set bounds.
+        // Fetch the source pool to check its outcome count.
+        let source_pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(source_pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+        
+        // Reject any outcome index >= num_outcomes to prevent settling to an
+        // out-of-bounds outcome that would break payout calculations.
+        let outcome_count = Self::read_outcome_totals(&env, source_pool_id, &source_pool).len();
+        if winning_outcome >= outcome_count {
+            return Err(ContractError::InvalidOutcome);
+        }
+        
         let timeout: u64 = env
             .storage()
             .persistent()
@@ -8991,7 +9294,7 @@ impl PredinexContract {
     ) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
-        if boost_bps < 10_000 || boost_bps > 50_000 {
+        if !(10_000..=50_000).contains(&boost_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
         env.storage()
@@ -9002,6 +9305,78 @@ impl PredinexContract {
             boost_bps,
         );
         Ok(())
+    }
+
+    fn pending_lp_rewards(
+        env: &Env,
+        pool_id: u32,
+        user: &Address,
+        position: &LpPosition,
+        fee_per_share: i128,
+    ) -> Result<(i128, i128), ContractError> {
+        if position.shares <= 0 {
+            return Ok((0, 0));
+        }
+
+        let base_pending = position
+            .shares
+            .checked_mul(fee_per_share)
+            .ok_or(ContractError::PoolTotalOverflow)?
+            / LP_PRECISION
+            - position.reward_debt;
+        if base_pending <= 0 {
+            return Ok((0, 0));
+        }
+
+        let mut pending = base_pending;
+        if let Some(stake) = env
+            .storage()
+            .persistent()
+            .get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone()))
+        {
+            if env.ledger().timestamp() < stake.lock_until {
+                let boost_bps: u32 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpStakeBoostBps)
+                    .unwrap_or(10_000);
+                let staked_fraction = stake
+                    .shares
+                    .checked_mul(10_000)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / position.shares;
+                let boost_portion = base_pending
+                    .checked_mul(staked_fraction)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / 10_000;
+                let boosted = boost_portion
+                    .checked_mul(boost_bps as i128)
+                    .ok_or(ContractError::PoolTotalOverflow)?
+                    / 10_000;
+                pending = base_pending - boost_portion + boosted;
+            }
+        }
+
+        Ok((pending.max(0), base_pending))
+    }
+
+    fn lp_reward_debt_increment(
+        actual_reward: i128,
+        pending: i128,
+        base_pending: i128,
+    ) -> Result<i128, ContractError> {
+        if actual_reward >= pending {
+            return Ok(base_pending);
+        }
+        if pending == base_pending {
+            return Ok(actual_reward);
+        }
+
+        actual_reward
+            .checked_mul(base_pending)
+            .and_then(|scaled| scaled.checked_add(pending - 1))
+            .ok_or(ContractError::PoolTotalOverflow)
+            .map(|scaled| scaled / pending)
     }
 
     pub fn deposit_liquidity(
@@ -9027,7 +9402,7 @@ impl PredinexContract {
             .ok_or(ContractError::NotInitialized)?;
         token::Client::new(&env, &token_address).transfer(
             &user,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
 
@@ -9290,40 +9665,8 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::LpFeePerShare(pool_id))
             .unwrap_or(0);
-        let mut pending = position
-            .shares
-            .checked_mul(fee_per_share)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / LP_PRECISION
-            - position.reward_debt;
-
-        if let Some(stake) = env
-            .storage()
-            .persistent()
-            .get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone()))
-        {
-            if env.ledger().timestamp() < stake.lock_until {
-                let boost_bps: u32 = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::LpStakeBoostBps)
-                    .unwrap_or(10_000);
-                let staked_fraction = stake
-                    .shares
-                    .checked_mul(10_000)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / position.shares;
-                let boost_portion = pending
-                    .checked_mul(staked_fraction)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / 10_000;
-                let boosted = boost_portion
-                    .checked_mul(boost_bps as i128)
-                    .ok_or(ContractError::PoolTotalOverflow)?
-                    / 10_000;
-                pending = pending - boost_portion + boosted;
-            }
-        }
+        let (pending, base_pending) =
+            Self::pending_lp_rewards(&env, pool_id, &user, &position, fee_per_share)?;
 
         if pending <= 0 {
             return Err(ContractError::NoLpRewards);
@@ -9356,11 +9699,20 @@ impl PredinexContract {
             &DataKey::LpRewardPool(pool_id),
             &(reward_pool - actual_reward),
         );
-        position.reward_debt = position
+        // Convert the actual payout back into base fee-per-share debt space.
+        // When boosted rewards are capped by pool balance, advancing debt by
+        // the raw payout would erase too much of the user's residual claim.
+        let full_debt = position
             .shares
             .checked_mul(fee_per_share)
             .ok_or(ContractError::PoolTotalOverflow)?
             / LP_PRECISION;
+        let debt_increment = Self::lp_reward_debt_increment(actual_reward, pending, base_pending)?;
+        position.reward_debt = position
+            .reward_debt
+            .checked_add(debt_increment)
+            .ok_or(ContractError::PoolTotalOverflow)?
+            .min(full_debt);
         env.storage()
             .persistent()
             .set(&DataKey::LpPosition(pool_id, user.clone()), &position);
@@ -9488,7 +9840,7 @@ impl PredinexContract {
         let position: LpPosition = env
             .storage()
             .persistent()
-            .get(&DataKey::LpPosition(pool_id, user))
+            .get(&DataKey::LpPosition(pool_id, user.clone()))
             .unwrap_or(LpPosition {
                 shares: 0,
                 reward_debt: 0,
@@ -9501,7 +9853,9 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::LpFeePerShare(pool_id))
             .unwrap_or(0);
-        let pending = position.shares * fee_per_share / LP_PRECISION - position.reward_debt;
+        let pending = Self::pending_lp_rewards(&env, pool_id, &user, &position, fee_per_share)
+            .unwrap_or((0, 0))
+            .0;
         if pending < 0 {
             0
         } else {
@@ -9570,7 +9924,7 @@ impl PredinexContract {
             .ok_or(ContractError::NotInitialized)?;
         token::Client::new(&env, &token_address).transfer(
             &caller,
-            &env.current_contract_address(),
+            env.current_contract_address(),
             &amount,
         );
         let scaled_amount = amount

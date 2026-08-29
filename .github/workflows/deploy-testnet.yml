@@ -35,7 +35,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Add Soroban WASM target
         run: rustup target add wasm32v1-none
@@ -104,7 +104,7 @@ jobs:
       - name: Setup Rust (for stellar-cli reuse)
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install stellar-cli if cache miss
         run: |
@@ -219,7 +219,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install stellar-cli if cache miss
         run: |

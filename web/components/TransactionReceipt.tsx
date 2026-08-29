@@ -77,8 +77,12 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold">Transaction Receipt</h3>
             {onClose && (
-              <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-                <XCircle className="w-5 h-5" />
+              <button
+                onClick={onClose}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close transaction receipt"
+              >
+                <XCircle className="w-5 h-5" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -124,9 +128,10 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
               <button
                 onClick={copyTxId}
                 className="p-1 hover:bg-muted/50 rounded transition-colors"
-                title="Copy transaction ID"
+                title={copied ? 'Copied!' : 'Copy transaction ID'}
+                aria-label={copied ? 'Transaction ID copied to clipboard' : 'Copy transaction ID'}
               >
-                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-4 h-4 text-green-500" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
               </button>
               <a
                 href={txUrl}
@@ -134,8 +139,9 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
                 rel="noopener noreferrer"
                 className="p-1 hover:bg-muted/50 rounded transition-colors"
                 title="View on explorer"
+                aria-label="View transaction on Stellar explorer (opens in new tab)"
               >
-                <ExternalLink className="w-4 h-4" />
+                <ExternalLink className="w-4 h-4" aria-hidden="true" />
               </a>
             </div>
           </div>

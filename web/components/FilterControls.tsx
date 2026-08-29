@@ -81,9 +81,13 @@ export default function FilterControls({
 
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-medium text-foreground">Filter by Status</h3>
+      <h3 className="text-sm font-medium text-foreground" id="filter-group-label">Filter by Status</h3>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+      <div
+        className="grid grid-cols-2 md:grid-cols-4 gap-2"
+        role="group"
+        aria-labelledby="filter-group-label"
+      >
         {filterOptions.map((option) => {
           const isSelected = selectedStatus === option.value;
           const count = getCount(option.value);
@@ -96,16 +100,19 @@ export default function FilterControls({
                 flex flex-col items-center gap-2 p-3 rounded-lg border transition-all duration-200
                 ${getFilterColor(option.value, isSelected)}
                 hover:scale-105 active:scale-95
+                focus:outline-none focus:ring-2 focus:ring-primary/50
               `}
+              aria-pressed={isSelected}
+              aria-label={`${option.label}${counts ? `, ${count} market${count !== 1 ? 's' : ''}` : ''}`}
               title={option.description}
             >
               <div className="flex items-center gap-2">
-                {option.icon}
+                <span aria-hidden="true">{option.icon}</span>
                 <span className="text-sm font-medium">{option.label}</span>
               </div>
 
               {counts && (
-                <span className="text-xs opacity-75">
+                <span className="text-xs opacity-75" aria-hidden="true">
                   {count} market{count !== 1 ? 's' : ''}
                 </span>
               )}
@@ -115,7 +122,7 @@ export default function FilterControls({
       </div>
 
       {/* Mobile-friendly horizontal scroll version */}
-      <div className="md:hidden">
+      <div className="md:hidden" role="group" aria-labelledby="filter-group-label">
         <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
           {filterOptions.map((option) => {
             const isSelected = selectedStatus === option.value;
@@ -128,13 +135,16 @@ export default function FilterControls({
                 className={`
                   flex items-center gap-2 px-4 py-2 rounded-full border transition-all duration-200 whitespace-nowrap
                   ${getFilterColor(option.value, isSelected)}
+                  focus:outline-none focus:ring-2 focus:ring-primary/50
                 `}
+                aria-pressed={isSelected}
+                aria-label={`${option.label}${counts ? `, ${count} market${count !== 1 ? 's' : ''}` : ''}`}
                 title={option.description}
               >
-                {option.icon}
+                <span aria-hidden="true">{option.icon}</span>
                 <span className="text-sm font-medium">{option.label}</span>
                 {counts && (
-                  <span className="text-xs opacity-75 ml-1">
+                  <span className="text-xs opacity-75 ml-1" aria-hidden="true">
                     ({count})
                   </span>
                 )}

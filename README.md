@@ -61,12 +61,26 @@ stateDiagram-v2
 
 ## ✨ Features
 
-- **Decentralized Prediction Pools**: Create and manage binary outcome markets with ease.
-- **Fast Settlements**: Leverages Stellar's 5-second finality for rapid results.
+- **Decentralized Prediction Pools**: Create and manage binary and multi-outcome prediction markets with ease.
+- **Fast Settlements**: Leverages Stellar's near-instant finality for rapid results.
 - **Cross-Asset Betting**: Compatible with any Stellar asset via the Stellar Asset Contract (SAC).
+- **LP Yield Farming**: Deposit liquidity, earn fees, and boost rewards by staking LP shares.
 - **Automated Bookkeeping**: Real-time tracking of pool totals and user positions.
+- **Rich Web Experience**: A Next.js app with market discovery, portfolio, analytics, comparisons, disputes, and more.
+- **Embeddable Widget**: Integrate live pools into any website with a drop-in widget (`packages/widget`).
+- **Automation Bot**: Repo-managed off-chain tooling for pool/oracle workflows (`bot`).
 - **Robust Security**: Built with Rust and Soroban's secure-by-design architecture.
 - **Transparency**: Fully verifiable on-chain data and transaction history.
+
+## 🗂 Repository Layout
+
+- `contracts/predinex` — the core Soroban prediction-market contract (pool lifecycle, betting, settlement, LP incentives).
+- `contracts/pool` — related pool utility/auxiliary contract.
+- `web` — the Next.js frontend (App Router): markets, dashboard, analytics, admin, disputes, oracle management, portfolio.
+- `packages/widget` — the embeddable pool widget for third-party sites.
+- `bot` — automated off-chain workflows (oracle reporting, market upkeep).
+- `docs` — protocol, contract API, deployment, and development documentation.
+- `scripts` — bootstrap and CI/verification helpers.
 
 ## 🚀 Getting Started
 
@@ -75,6 +89,7 @@ stateDiagram-v2
 - [Rust](https://www.rust-lang.org/)
 - [Stellar CLI](https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup#install-the-stellar-cli)
 - [Node.js](https://nodejs.org/) (v18+)
+- A Stellar wallet (e.g. [Freighter](https://www.freighter.app/))
 
 ### Installation
 
@@ -97,24 +112,35 @@ stateDiagram-v2
    stellar contract build
    ```
 
-4. **Run Tests**
+4. **Run Contract Tests**
    ```bash
    cargo test
    ```
 
-## 🛣️ Roadmap to Launch
+5. **Run the Web App**
+   ```bash
+   cd web
+   npm install
+   npm run dev
+   ```
 
-Predinex Stellar follows a phased approach to bring a premium betting experience to the ecosystem.
+## 🛣️ Roadmap
+
+Predinex Stellar ships in phases, growing from core on-chain mechanics to a full product experience.
 
 ### Phase 1: Core Soroban Implementation (COMPLETED)
-- ✅ Core contract logic (Pools, Bets, Settlement).
+- ✅ Core contract logic (Pools, Bets, Settlement, Cancellation).
+- ✅ Multi-outcome pools and template support.
+- ✅ LP yield farming with stake boost.
 - ✅ Unit test suite for full lifecycle verification.
 - ✅ Token integration (SAC).
 
-### Phase 2: Frontend Migration (IN PROGRESS)
+### Phase 2: Frontend & Product (IN PROGRESS)
 - 🔄 Stellar SDK integration.
 - 🔄 Wallet and network support are tracked in the canonical [wallet and network support page](./web/docs/WALLET_NETWORK_SUPPORT.md).
-- ⏳ Real-time market tracking on Stellar.
+- ✅ Market discovery, market detail, and portfolio.
+- ✅ Admin, analytics, disputes, oracle management, and comparison tooling.
+- ✅ Embeddable pool widget.
 
 ## 🤝 Contributing & Releases
 
@@ -123,8 +149,10 @@ We welcome contributions! Please read the [Contributing Guide](./CONTRIBUTING.md
 Additional development guides:
 - [Local End-to-End Runbook](./docs/local-runbook.md) — build the contract, deploy to testnet, and wire the web app from a clean checkout
 - [Contract API Reference](./docs/contract-api.md) — every public function, data types, auth requirements, fee model, and events
+- [Contract Specification](./docs/CONTRACT_SPEC.md) and [API Reference](./docs/API_REFERENCE.md)
 - [Deployment Guide](./docs/deployment-guide.md) — build WASM, deploy to testnet/pubnet, initialize, and verify
 - [Frontend Development](./web/DEVELOPMENT.md)
+- [Frontend Architecture](./web/FRONTEND.md)
 - [Release Process](./RELEASE.md)
 
 ## 🛠️ CI/CD Pipeline
@@ -140,7 +168,7 @@ Pull requests automatically generate preview deployments for the web app, making
 - 🔒 **Safe**: Previews use testnet configuration only
 - ⚡ **Fast**: Deployments complete in ~2 minutes
 
-**Setup Guide**: See [Preview Deployment Quick Start](./docs/PREVIEW_SETUP_QUICKSTART.md) for 5-minute setup instructions.
+**Setup Guide**: See [Preview Deployments Guide](./docs/preview-deployments.md) for configuration instructions.
 
 **Full Documentation**: [Preview Deployments Guide](./docs/preview-deployments.md)
 

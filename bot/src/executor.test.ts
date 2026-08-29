@@ -21,4 +21,18 @@ describe("validateSettlementOutcomes", () => {
       ]),
     ).toThrow(/InvalidOutcome: pool 5 has winning outcome 2/);
   });
+
+  it("rejects non-integer and negative winning outcomes", () => {
+    expect(() =>
+      validateSettlementOutcomesForTest([
+        { poolId: 6, winningOutcome: -1 },
+      ]),
+    ).toThrow(/InvalidOutcome: pool 6 has winning outcome -1/);
+
+    expect(() =>
+      validateSettlementOutcomesForTest([
+        { poolId: 7, winningOutcome: 1.5 },
+      ]),
+    ).toThrow(/InvalidOutcome: pool 7 has winning outcome 1.5/);
+  });
 });
