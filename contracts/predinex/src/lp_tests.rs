@@ -349,3 +349,56 @@ fn test_capped_reward_pool_keeps_residual_claimable() {
     assert_eq!(claimed_again, residual);
     assert_eq!(ctx.client.get_pending_lp_rewards(&pool_id, &lp), 0);
 }
+
+/// Issue #1021 — `get_pending_lp_rewards` must report the same stake-boosted
+/// amount that `claim_lp_rewards` actually pays out for a staked LP, while an
+/// unstaked LP must be unaffected by another LP's boost.
+#[test]
+fn test_pending_lp_rewards_matches_claimable_with_stake_boost() {
+    let ctx = LpCtx::new();
+    let staker = Address::generate(&ctx.env);
+    let plain = Address::generate(&ctx.env);
+    let deposit = 10_000_000i128;
+    let reward_amount = 4_000_000i128;
+    ctx.mint(&staker, deposit);
+    ctx.mint(&plain, deposit);
+    ctx.mint(&ctx.admin, reward_amount);
+
+    ctx.client.set_lp_stake_boost(&ctx.admin, &20_000); // 2x
+
+    let pool_id = ctx.create_pool(&ctx.admin);
+    ctx.client.deposit_liquidity(&staker, &pool_id, &deposit);
+    ctx.client.deposit_liquidity(&plain, &pool_id, &deposit);
+
+    // Stake all of the staker's shares so they earn the boost; the other LP
+    // remains unstaked.
+    ctx.client
+        .stake_lp(&staker, &pool_id, &deposit, &MIN_POOL_DURATION_SECS);
+
+    ctx.client
+        .distribute_lp_rewards(&ctx.admin, &pool_id, &reward_amount);
+
+    // Equal shares => base pending is 2M each. The fully-staked LP receives a
+    // 2x boost => 4M, which `get_pending_lp_rewards` must report.
+    let staker_pending = ctx.client.get_pending_lp_rewards(&pool_id, &staker);
+    assert_eq!(staker_pending, reward_amount);
+
+    // The unstaked LP is unaffected by the boost and keeps the base amount.
+    let plain_pending = ctx.client.get_pending_lp_rewards(&pool_id, &plain);
+    assert_eq!(plain_pending, reward_amount / 2);
+
+    // A staked LP's pending equals exactly the amount it can actually claim.
+    let staker_claimed = ctx.client.claim_lp_rewards(&staker, &pool_id);
+    assert_eq!(staker_claimed, staker_pending);
+
+    // Top the reward pool back up so the unstaked LP can collect in full; its
+    // claimable amount must still equal its (unboosted) pending.
+    ctx.env.as_contract(&ctx.client.address, || {
+        ctx.env
+            .storage()
+            .persistent()
+            .set(&DataKey::LpRewardPool(pool_id), &plain_pending);
+    });
+    let plain_claimed = ctx.client.claim_lp_rewards(&plain, &pool_id);
+    assert_eq!(plain_claimed, plain_pending);
+}

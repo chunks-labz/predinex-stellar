@@ -237,6 +237,25 @@ export default function CreateMarket() {
               </div>
             )}
 
+            {wizard.hasSavedDraft && wizard.step > 1 && (
+              <div
+                role="status"
+                className="mb-6 p-4 rounded-xl border border-primary/30 bg-primary/5 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+              >
+                <p className="font-medium">
+                  We saved your draft — pick up where you left off (step{" "}
+                  {wizard.step}).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => wizard.goTo(wizard.step)}
+                  className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 shrink-0"
+                >
+                  Continue editing
+                </button>
+              </div>
+            )}
+
             <StepIndicator
               current={wizard.step}
               onJump={(target) => wizard.goTo(target)}
