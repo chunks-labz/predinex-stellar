@@ -663,6 +663,77 @@ pub fn rotate_treasury_recipient(
 
 ---
 
+## Lending Pool Security Modules
+
+The standalone lending pool security surface lives under `stellar-lend/contracts/hello-world/src`
+with matching off-chain services in `api/src/services` and `oracle/src/services`.
+
+### `TwapOracle::compute_twap`
+
+```rust
+pub fn compute_twap(
+    samples: Vec<OracleSample>,
+    config: TwapConfig,
+    now: u64,
+) -> Result<TwapReading, OracleError>
+```
+
+Computes a liquidity-weighted TWAP from recent price samples. The guard rejects
+non-positive prices, non-positive liquidity, stale samples, insufficient sample
+counts, and windows shorter than `config.min_window_secs`.
+
+### `TwapOracle::validate_spot_price`
+
+```rust
+pub fn validate_spot_price(
+    spot_price: i128,
+    twap_price: i128,
+    max_deviation_bps: u32,
+) -> Result<u32, OracleError>
+```
+
+Returns the spot/TWAP deviation in basis points, or rejects prices that exceed
+the configured manipulation threshold.
+
+### `InterestRateGuard::validate_update`
+
+```rust
+pub fn validate_update(
+    previous: RateObservation,
+    next: RateObservation,
+    config: RateGuardConfig,
+    now: u64,
+) -> Result<(), RateGuardError>
+```
+
+Prevents rate manipulation by bounding absolute interest-rate movement,
+utilization jumps, maximum APR, stale observations, and asset mismatches.
+
+### `MevProtection::validate_operation`
+
+```rust
+pub fn validate_operation(
+    operation: LendingOperation,
+    quote: LendingQuote,
+    config: MevGuardConfig,
+    now: u64,
+) -> Result<(), MevGuardError>
+```
+
+Blocks sandwich-prone lending operations when quotes are stale, the configured
+order delay has not elapsed, liquidity is unavailable, price impact is too high,
+or expected execution slippage exceeds user-safe bounds.
+
+The TypeScript services expose the same policy concepts for API preflight:
+
+| Service | File | Responsibility |
+|---|---|---|
+| `MevProtectionService` | `api/src/services/mev.service.ts` | Preflight lending operations for delay, stale quote, slippage, price impact, cooldown, and sandwich-pattern risk |
+| `PriceAggregator` | `oracle/src/services/price-aggregator.ts` | Maintain samples and validate spot prices against liquidity-weighted TWAP |
+| `PriceValidator` | `oracle/src/services/price-validator.ts` | Validate rate updates against absolute rate, delta, utilization, and freshness policies |
+
+---
+
 ## Event Schema
 
 All events follow the topic layout:

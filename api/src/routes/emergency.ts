@@ -6,7 +6,7 @@
  * with comprehensive security, rate limiting, and audit logging.
  */
 
-import { Contract, SorobanRpc, xdr, Address, Keypair } from '@stellar/stellar-sdk';
+import { Contract, SorobanRpc, xdr, Address, Keypair } from 'stellar-sdk';
 
 /**
  * Emergency status enum matching contract implementation

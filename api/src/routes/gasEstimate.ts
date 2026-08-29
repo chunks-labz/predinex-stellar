@@ -6,7 +6,7 @@
  * recommendations for Stellar/Soroban smart contract operations.
  */
 
-import { Contract, SorobanRpc, xdr, Address } from '@stellar/stellar-sdk';
+import { Contract, SorobanRpc, xdr, Address } from 'stellar-sdk';
 
 /**
  * Gas estimation result with detailed breakdown
