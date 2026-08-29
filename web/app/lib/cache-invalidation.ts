@@ -31,6 +31,7 @@ import {
   invalidatePoolCache,
 } from './market-list-cache';
 import { createScopedCache } from './cache';
+import { clearPoolActivityCache } from '../hooks/usePoolActivity';
 
 // ---------------------------------------------------------------------------
 // Scoped in-memory caches (keyed by user address)
@@ -84,6 +85,10 @@ export function invalidateOnPlaceBet({ poolId, userAddress }: PlaceBetInvalidati
   invalidateMarketList();
   invalidatePool(poolId);
   invalidateUserCaches(userAddress);
+  // usePoolActivity.ts keeps its own 30s-TTL cache (issue #990) separate from
+  // the caches above; a fresh bet won't show up in the activity timeline
+  // until this is cleared too.
+  clearPoolActivityCache();
 }
 
 export interface ClaimWinningsInvalidationParams {
@@ -104,6 +109,7 @@ export function invalidateOnClaimWinnings({ poolId, userAddress }: ClaimWinnings
   invalidateMarketList();
   invalidatePool(poolId);
   invalidateUserCaches(userAddress);
+  clearPoolActivityCache();
 }
 
 /**

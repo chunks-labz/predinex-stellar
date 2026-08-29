@@ -64,7 +64,7 @@ export default function CountdownTimer({
     );
   }
 
-  const expired = remaining === null || remaining <= 0;
+  const expired = remaining !== null && remaining <= 0;
   const urgent = isUrgent(remaining);
 
   const stateClass = expired

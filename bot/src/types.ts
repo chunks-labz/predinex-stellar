@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TypeScript types mirroring the Soroban contract data structures.
  * See contracts/predinex/src/lib.rs for the canonical Rust definitions.
  */
@@ -115,4 +115,13 @@ export interface SettlementCycleContext {
   instanceId: string;
   /** ISO 8601 timestamp of when the settlement cycle completed. */
   settlementTimestamp: string;
+}
+
+/**
+ * Mirrors the on-chain incentive configuration.
+ * The volume bonus is expressed as a whole percentage (e.g., 2 = 2%).
+ */
+export interface IncentiveConfig {
+  /** Percentage used when calculating the volume bonus. */
+  volumeBonusPercent: number;
 }

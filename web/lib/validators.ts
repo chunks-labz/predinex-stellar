@@ -299,21 +299,21 @@ export function validatePoolForm(data: {
 
 export function validateDepositDeadline(
   depositDeadline: number,
-  duration: number
+  duration?: number
 ): { valid: boolean; error?: string } {
   if (!Number.isFinite(depositDeadline) || depositDeadline <= 0) {
     return { valid: false, error: 'Deposit deadline must be greater than 0 seconds' };
-  }
-  if (depositDeadline >= duration) {
-    return {
-      valid: false,
-      error: 'Deposit deadline must be shorter than the pool expiry duration',
-    };
   }
   if (depositDeadline < MIN_POOL_DURATION_SECS) {
     return {
       valid: false,
       error: `Deposit deadline must be at least ${MIN_POOL_DURATION_SECS} seconds`,
+    };
+  }
+  if (duration !== undefined && depositDeadline >= duration) {
+    return {
+      valid: false,
+      error: 'Deposit deadline must be shorter than the pool expiry duration',
     };
   }
   return { valid: true };
@@ -468,10 +468,7 @@ export function validateField(field: PoolCreationField | string, value: string):
         : field === 'duration'
           ? validateDuration(Number.parseInt(value, 10))
           : field === 'depositDeadline'
-            ? validateDepositDeadline(
-                Number.parseInt(value, 10),
-                Number.POSITIVE_INFINITY
-              )
+            ? validateDepositDeadline(Number.parseInt(value, 10))
             : field === 'protocolFeeBps'
               ? validateProtocolFeeBps(Number.parseInt(value, 10))
               : field === 'settlementType'

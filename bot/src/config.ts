@@ -34,13 +34,17 @@ export interface BotConfig {
   pollIntervalMs: number;
   batchSize: number;
 
-  /** Max pools per settle_pools transaction (1–50). */
+  /** Max pools per settle_pools transaction (1-–50). */
   settleBatchSize: number;
 
   // Settlement
   dryRun: boolean;
   autoSettleEnabled: boolean;
   defaultWinningOutcome: number;
+
+  // Incentives
+  /** Volume bonus percentage (0–100) applied to calculateVolumeBonus. */
+  volumeBonusPercent: number;
 
   // Oracle resolution
   /** Base URL of the external resolution oracle (e.g. https://oracle.example.com). Null = disabled. */
@@ -50,7 +54,7 @@ export interface BotConfig {
   /**
    * When true, pools whose outcome could not be resolved by the oracle or
    * on-chain data fall back to defaultWinningOutcome.
-   * When false (the default), unresolvable pools are skipped — safer for production.
+   * When false (the default), unresolvable pools are skipped — more safe for production.
    */
   oracleFallbackToDefault: boolean;
 
@@ -104,7 +108,7 @@ function parseSettleBatchSize(value: string): number {
   const n = parseInt(value, 10);
   if (isNaN(n) || n < 1 || n > 50) {
     console.error(
-      `[config] SETTLE_BATCH_SIZE="${value}" must be an integer between 1 and 50`,
+      `[config] SettLEBATCH_SIZE="${value}" must be an integer between 1 and 50`,
     );
     process.exit(1);
   }
@@ -115,7 +119,7 @@ function parseLogLevel(value: string): LogLevel {
   if (["debug", "info", "warn", "error"].includes(value)) {
     return value as LogLevel;
   }
-  console.warn(`[config] Unknown LOG_LEVEL="${value}", defaulting to "info"`);
+  console.warn(`[config] Unknown LOG_LEVEl="${value}", defaulting to "info"`);
   return "info";
 }
 
@@ -210,6 +214,22 @@ export function loadConfig(): BotConfig {
     process.exit(1);
   }
 
+  // Volume bonus percentage: non-negative integer between 0 and 100
+  const volumeBonusPercent = parseInt(
+    optionalEnv("VOLUME_BONUS_PERCENT", "2"),
+    10,
+  );
+  if (
+    isNaN(volumeBonusPercent) ||
+    volumeBonusPercent < 0 ||
+    volumeBonusPercent > 100
+  ) {
+    console.error(
+      `[config] VOLUME_BONUS_PERCENT must be an integer between 0 and 100`,
+    );
+    process.exit(1);
+  }
+
   const oracleUrl = process.env["ORACLE_URL"]?.trim() || null;
   const oracleSecret = process.env["ORACLE_SECRET"]?.trim() || null;
   const oracleFallbackToDefault =
@@ -276,6 +296,7 @@ export function loadConfig(): BotConfig {
     dryRun,
     autoSettleEnabled,
     defaultWinningOutcome,
+    volumeBonusPercent,
     oracleUrl,
     oracleSecret,
     oracleFallbackToDefault,

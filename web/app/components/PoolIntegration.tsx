@@ -8,7 +8,8 @@ import { useWallet } from '@/components/WalletAdapterProvider';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { Loader2, AlertCircle, CheckCircle, TrendingUp, Users, RefreshCw } from 'lucide-react';
 import { formatDisplayAddress } from '../lib/address-display';
-import { getMarkets, type Pool } from '../lib/stacks-api';
+import { getMarkets } from '../lib/soroban-read-api';
+import type { Pool } from '../lib/market-types';
 
 interface PoolStats {
   totalPools: number;

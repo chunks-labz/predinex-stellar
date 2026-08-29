@@ -16,13 +16,16 @@ on:
         required: false
         default: false
         type: boolean
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 # Only deploy from the canonical upstream repo. Forks that pull this
 # workflow do not have the secrets configured and would fail noisily.
 env:
   CANONICAL_REPO: dimka90/predinex-stellar
   STELLAR_NETWORK: mainnet
-  STELLAR_RPC_URL: https://horizon.stellar.org
+  STELLAR_RPC_URL: https://mainnet.stellar.validationcloud.io/v1/${{ secrets.VALIDATION_CLOUD_KEY }}
   STELLAR_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015'
   # Mainnet XLM Stellar Asset Contract
   XLM_TOKEN_MAINNET: CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2FC6NJT8BMI
@@ -34,14 +37,12 @@ concurrency:
 jobs:
   guard:
     name: Validate inputs
-    if: github.repository == 'dimka90/predinex-stellar'
+    if: github.repository == 'dimka90/predinex-stellar' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - name: Check confirmation string
-        # INPUT_CONFIRM is safe: workflow_dispatch inputs are caller-controlled but
-        # we only compare the value; no shell word-splitting risk when read via env var.
         env:
           INPUT_CONFIRM: ${{ github.event.inputs.confirm }}
         run: |
@@ -61,26 +62,37 @@ jobs:
           fi
           echo "Git tag format is valid: $INPUT_GIT_TAG"
 
-  build:
-    name: Build optimized WASM
-    needs: guard
-    if: github.repository == 'dimka90/predinex-stellar'
+  safety-checks:
+    name: Pre-deployment Safety Checks
+    needs: [guard]
+    if: always() && !cancelled() && github.repository == 'dimka90/predinex-stellar'
     runs-on: ubuntu-latest
-    environment: mainnet
     permissions:
       contents: read
+    outputs:
+      wasm-hash: ${{ steps.build.outputs.wasm-hash }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.git_tag }}
+          ref: ${{ github.event.inputs.git_tag || github.ref }}
 
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
+          components: rustfmt, clippy
+          target: wasm32-unknown-unknown
 
-      - name: Add Soroban WASM target
-        run: rustup target add wasm32v1-none
+      - name: Format check
+        working-directory: contracts/predinex
+        run: cargo fmt --check
+
+      - name: Clippy (deny warnings)
+        working-directory: contracts/predinex
+        run: cargo clippy -- -D warnings
+
+      - name: Full test suite
+        working-directory: contracts/predinex
+        run: cargo test
 
       - name: Cache stellar-cli
         id: stellar-cli-cache
@@ -93,78 +105,81 @@ jobs:
         if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
         run: cargo install --locked stellar-cli@22.0.1
 
-      - name: Build contract
-        working-directory: ./contracts/predinex
-        run: stellar contract build
-
-      - name: Optimize WASM
-        working-directory: ./contracts/predinex
+      - name: Build & optimize WASM
+        id: build
+        working-directory: contracts/predinex
         run: |
-          UNOPTIMIZED=$(find target/wasm32v1-none/release -maxdepth 1 -name '*.wasm' -not -name '*.optimized.wasm' | head -n1)
-          if [ -z "$UNOPTIMIZED" ]; then
-            echo "::error::no wasm output found under target/wasm32v1-none/release/"
-            exit 1
-          fi
-          echo "Optimizing $UNOPTIMIZED"
-          stellar contract optimize --wasm "$UNOPTIMIZED"
+          stellar contract build
+          stellar contract optimize \
+            --wasm target/wasm32-unknown-unknown/release/predinex.wasm
+          HASH=$(sha256sum target/wasm32-unknown-unknown/release/predinex.optimized.wasm | awk '{print $1}')
+          echo "wasm-hash=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Verify WASM size
         # Soroban enforces a hard 64 KiB (65536 bytes) limit on deployed
         # contract WASM. Fail fast here so we never burn mainnet XLM
         # attempting to deploy an over-size binary. (#836)
-        working-directory: ./contracts/predinex
+        working-directory: contracts/predinex
         run: |
           set -euo pipefail
-          MAX_WASM_BYTES=65536  # 64 KiB — Soroban hard limit
+          MAX_WASM_BYTES=65536
 
-          WASM_FILE=$(find target/wasm32v1-none/release -maxdepth 1 -name '*.optimized.wasm' | head -n1)
-          if [ -z "$WASM_FILE" ]; then
+          WASM_FILE=target/wasm32-unknown-unknown/release/predinex.optimized.wasm
+          if [ ! -f "$WASM_FILE" ]; then
             echo "::error::no optimized wasm found after optimization step"
             exit 1
           fi
 
-          WASM_SIZE=$(stat --format='%s' "$WASM_FILE")
+          WASM_SIZE=$(stat --format='%s' "$WASM_FILE" 2>/dev/null || stat -f'%z' "$WASM_FILE")
           echo "Optimized WASM size: $WASM_SIZE bytes (limit: $MAX_WASM_BYTES bytes / 64 KiB)"
 
           if [ "$WASM_SIZE" -gt "$MAX_WASM_BYTES" ]; then
             OVER=$(( WASM_SIZE - MAX_WASM_BYTES ))
-            echo "::error::Optimized WASM ($WASM_SIZE bytes) exceeds the Soroban 64 KiB limit by $OVER bytes. Reduce contract size before deploying."
+            echo "::error::Optimized WASM ($WASM_SIZE bytes) exceeds the Soroban 64 KiB limit by $OVER bytes."
             exit 1
           fi
 
           PCT=$(awk "BEGIN { printf \"%.1f\", ($WASM_SIZE / $MAX_WASM_BYTES) * 100 }")
-          echo "✅ WASM size check passed — $WASM_SIZE / $MAX_WASM_BYTES bytes (${PCT}% of limit)"
+          echo "WASM size check passed — $WASM_SIZE / $MAX_WASM_BYTES bytes (${PCT}% of limit)"
 
-      - name: Upload optimized WASM artifact
+      - name: Check deployer balance
+        env:
+          DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: |
+          DEPLOYER_ADDRESS=$(stellar keys add deployer --secret-key "$DEPLOYER_SECRET" --quiet && stellar keys address deployer)
+          BALANCE=$(stellar account show "$DEPLOYER_ADDRESS" --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+            | grep "XLM balance" | awk '{print $3}' | tr -d ,)
+          echo "Deployer balance: $BALANCE XLM"
+          python3 -c "
+          b = float('${BALANCE}' or '0')
+          if b < 20:
+              raise SystemExit(f'Insufficient deployer balance: {b} XLM (need >= 20)')
+          print(f'Balance OK: {b} XLM')
+          "
+
+      - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: predinex-wasm
-          path: contracts/predinex/target/wasm32v1-none/release/*.optimized.wasm
-          if-no-files-found: error
-          retention-days: 7
+          name: predinex-wasm-${{ github.ref_name }}
+          path: contracts/predinex/target/wasm32-unknown-unknown/release/predinex.optimized.wasm
+          retention-days: 90
 
   deploy:
-    name: Deploy to mainnet
-    needs: build
+    name: Deploy to Mainnet
+    needs: safety-checks
     if: github.repository == 'dimka90/predinex-stellar'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
+    environment: mainnet
     outputs:
-      contract_id: ${{ steps.deploy.outputs.contract_id }}
-      deploy_tx: ${{ steps.deploy.outputs.deploy_tx }}
-      init_tx: ${{ steps.deploy.outputs.init_tx }}
-      treasury: ${{ steps.deployer.outputs.treasury }}
+      contract-id: ${{ steps.deploy.outputs.contract-id }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.git_tag }}
-
-      - name: Download optimized WASM
-        uses: actions/download-artifact@v4
-        with:
-          name: predinex-wasm
-          path: ./wasm
+          ref: ${{ github.event.inputs.git_tag || github.ref }}
 
       - name: Cache stellar-cli
         uses: actions/cache@v4
@@ -175,7 +190,7 @@ jobs:
       - name: Setup Rust (for stellar-cli reuse)
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install stellar-cli if cache miss
         run: |
@@ -183,99 +198,87 @@ jobs:
             cargo install --locked stellar-cli@22.0.1
           fi
 
-      - name: Configure mainnet network
-        run: |
-          stellar network add mainnet \
-            --rpc-url "$STELLAR_RPC_URL" \
-            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" || true
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: predinex-wasm-${{ github.ref_name }}
+          path: wasm/
 
-      - name: Register deployer key
-        id: deployer
+      - name: Import deployer key
         env:
-          STELLAR_MAINNET_SECRET_KEY: ${{ secrets.STELLAR_MAINNET_SECRET_KEY }}
-        run: |
-          if [ -z "$STELLAR_MAINNET_SECRET_KEY" ]; then
-            echo "::error::STELLAR_MAINNET_SECRET_KEY is not configured for this repo. See .github/workflows/deploy-mainnet.yml for setup."
-            exit 1
-          fi
-          stellar keys add deployer \
-            --secret-key "$STELLAR_MAINNET_SECRET_KEY" \
-            --network mainnet
-          TREASURY=$(stellar keys address deployer)
-          echo "treasury=$TREASURY" >> "$GITHUB_OUTPUT"
+          DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: stellar keys add deployer --secret-key "$DEPLOYER_SECRET" --quiet
 
-      - name: Deploy contract and initialize
+      - name: Deploy contract
         id: deploy
         run: |
-          set -euo pipefail
-          WASM_PATH=$(find ./wasm -maxdepth 1 -name '*.optimized.wasm' | head -n1)
-          if [ -z "$WASM_PATH" ]; then
-            echo "::error::no optimized wasm found in artifact"
-            exit 1
-          fi
-          echo "Deploying $WASM_PATH"
-
           CONTRACT_ID=$(stellar contract deploy \
-            --wasm "$WASM_PATH" \
+            --wasm wasm/predinex.optimized.wasm \
             --network mainnet \
-            --source deployer)
-          echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
-          echo "deploy_tx=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+            --source deployer \
+            --fee 1000000)
+          echo "contract-id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
           echo "Deployed contract: $CONTRACT_ID"
 
-          TREASURY=$(stellar keys address deployer)
-          echo "treasury=$TREASURY" >> "$GITHUB_OUTPUT"
-
-          INIT_TX=$(stellar contract invoke \
+      - name: Initialize contract
+        env:
+          CONTRACT_ID: ${{ steps.deploy.outputs.contract-id }}
+          XLM_SAC: ${{ secrets.MAINNET_XLM_SAC }}
+          TREASURY_ADDRESS: ${{ secrets.MAINNET_TREASURY_ADDRESS }}
+        run: |
+          stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source deployer \
+            --fee 100000 \
             -- initialize \
-            --token "$XLM_TOKEN_MAINNET" \
-            --treasury_recipient "$TREASURY" \
-            --admin "$TREASURY")
-          echo "init_tx=$INIT_TX" >> "$GITHUB_OUTPUT"
-          echo "Initialized contract."
+            --token "$XLM_SAC" \
+            --treasury_recipient "$TREASURY_ADDRESS"
 
-      - name: Write deployment manifest
+      - name: Save deployment artifact
         env:
-          INPUT_GIT_TAG: ${{ github.event.inputs.git_tag }}
-          DEPLOY_CONTRACT_ID: ${{ steps.deploy.outputs.contract_id }}
-          DEPLOY_TX: ${{ steps.deploy.outputs.deploy_tx }}
-          DEPLOY_INIT_TX: ${{ steps.deploy.outputs.init_tx }}
-          DEPLOY_TREASURY: ${{ steps.deployer.outputs.treasury }}
-          DEPLOY_COMMIT: ${{ github.sha }}
-          DEPLOY_REF: ${{ github.ref }}
-          DEPLOY_RUN_ID: ${{ github.run_id }}
-          DEPLOY_SERVER_URL: ${{ github.server_url }}
-          DEPLOY_REPOSITORY: ${{ github.repository }}
+          CONTRACT_ID: ${{ steps.deploy.outputs.contract-id }}
+          WASM_HASH: ${{ needs.safety-checks.outputs.wasm-hash }}
         run: |
-          mkdir -p deployment
-          # Use jq to safely construct JSON — no raw interpolation into the heredoc
-          jq -n \
-            --arg network "mainnet" \
-            --arg git_tag "$INPUT_GIT_TAG" \
-            --arg contract_id "$DEPLOY_CONTRACT_ID" \
-            --arg deploy_tx "$DEPLOY_TX" \
-            --arg init_tx "$DEPLOY_INIT_TX" \
-            --arg treasury "$DEPLOY_TREASURY" \
-            --arg commit "$DEPLOY_COMMIT" \
-            --arg ref "$DEPLOY_REF" \
-            --arg timestamp_utc "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg run_url "$DEPLOY_SERVER_URL/$DEPLOY_REPOSITORY/actions/runs/$DEPLOY_RUN_ID" \
-            '{network: $network, git_tag: $git_tag, contract_id: $contract_id,
-              deploy_tx: $deploy_tx, init_tx: $init_tx, treasury: $treasury,
-              commit: $commit, ref: $ref, timestamp_utc: $timestamp_utc,
-              run_url: $run_url}' \
-            > deployment/deployment.json
-          cat deployment/deployment.json
+          mkdir -p deployments
+          cat > deployments/${{ github.ref_name }}.json <<EOF
+          {
+            "version": "${{ github.ref_name }}",
+            "contract_id": "$CONTRACT_ID",
+            "wasm_hash": "$WASM_HASH",
+            "git_sha": "${{ github.sha }}",
+            "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "network": "mainnet",
+            "deployed_by": "${{ github.actor }}"
+          }
+          EOF
+          cat deployments/${{ github.ref_name }}.json
 
-      - name: Upload deployment manifest
+      - name: Upload deployment artifact
         uses: actions/upload-artifact@v4
         with:
-          name: deployment-manifest
-          path: deployment/deployment.json
+          name: deployment-${{ github.ref_name }}
+          path: deployments/${{ github.ref_name }}.json
           retention-days: 365
+
+      - name: Commit deployment record
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          mkdir -p deployments
+          cp deployments/${{ github.ref_name }}.json deployments/
+          git add deployments/${{ github.ref_name }}.json
+          git diff --cached --quiet || git commit -m "deploy: record mainnet deployment ${{ github.ref_name }} [skip ci]"
+          git push origin main
 
   smoke:
     name: Smoke test
@@ -305,7 +308,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install stellar-cli if cache miss
         run: |
@@ -313,31 +316,18 @@ jobs:
             cargo install --locked stellar-cli@22.0.1
           fi
 
-      - name: Configure mainnet network
-        run: |
-          stellar network add mainnet \
-            --rpc-url "$STELLAR_RPC_URL" \
-            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" || true
-
-      - name: Register deployer key
+      - name: Import deployer key
         env:
-          STELLAR_MAINNET_SECRET_KEY: ${{ secrets.STELLAR_MAINNET_SECRET_KEY }}
-        run: |
-          stellar keys add deployer \
-            --secret-key "$STELLAR_MAINNET_SECRET_KEY" \
-            --network mainnet
+          DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: stellar keys add deployer --secret-key "$DEPLOYER_SECRET" --quiet
 
-      # The full betting lifecycle on mainnet spends real XLM and needs a second
-      # funded account (there is no friendbot on mainnet). It is therefore opt-in
-      # via the `run_lifecycle_smoke` input and uses a pre-funded bettor key
-      # supplied through the STELLAR_MAINNET_BETTOR_SECRET_KEY secret.
       - name: Register bettor key (optional lifecycle smoke)
         if: github.event.inputs.run_lifecycle_smoke == 'true'
         env:
           STELLAR_MAINNET_BETTOR_SECRET_KEY: ${{ secrets.STELLAR_MAINNET_BETTOR_SECRET_KEY }}
         run: |
           if [ -z "$STELLAR_MAINNET_BETTOR_SECRET_KEY" ]; then
-            echo "::error::run_lifecycle_smoke=true but STELLAR_MAINNET_BETTOR_SECRET_KEY is not configured. Add a pre-funded bettor key or run with the lifecycle smoke disabled."
+            echo "::error::run_lifecycle_smoke=true but STELLAR_MAINNET_BETTOR_SECRET_KEY is not configured."
             exit 1
           fi
           stellar keys add bettor \
@@ -348,54 +338,35 @@ jobs:
       - name: Run smoke checks
         id: run
         env:
-          CONTRACT_ID: ${{ needs.deploy.outputs.contract_id }}
-          TREASURY: ${{ needs.deploy.outputs.treasury }}
-          INPUT_GIT_TAG: ${{ github.event.inputs.git_tag }}
+          CONTRACT_ID: ${{ needs.deploy.outputs.contract-id }}
+          INPUT_GIT_TAG: ${{ github.event.inputs.git_tag || github.ref_name }}
           SMOKE_COMMIT: ${{ github.sha }}
-          RUN_LIFECYCLE: ${{ github.event.inputs.run_lifecycle_smoke }}
+          RUN_LIFECYCLE: ${{ github.event.inputs.run_lifecycle_smoke || 'false' }}
         run: |
           set -euo pipefail
+
           BEFORE=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source deployer \
             -- get_pool_count)
           echo "Pool count before: $BEFORE"
           echo "before=$BEFORE" >> "$GITHUB_OUTPUT"
 
-          # Minimum allowed pool duration (300s) so the optional lifecycle smoke
-          # can settle within the job. Simulate create_pool first to obtain the
-          # predicted pool id, then send it on-chain and capture the actual
-          # transaction hash returned by the CLI (#929).
-          # NOTE: a pool creation interleaving between the simulation and the
-          # send would desync the predicted POOL_ID. In CI this is negligible;
-          # if the pool count check below fails, re-run the workflow.
           SMOKE_TS=$(date -u +%Y%m%d-%H%M%S)
-
-          POOL_ID=$(stellar contract invoke \
-            --id "$CONTRACT_ID" \
-            --network mainnet \
-            --source deployer \
-            -- create_pool \
-            --creator "$TREASURY" \
-            --title "Mainnet smoke: $SMOKE_TS" \
-            --description "Automated mainnet smoke test from tag $INPUT_GIT_TAG commit $SMOKE_COMMIT" \
-            --outcome_a "Yes" \
-            --outcome_b "No" \
-            --duration 300 \
-            --amount 10000000)
-          POOL_ID=$(echo "$POOL_ID" | tr -d '"')
-          echo "Predicted pool id (from simulation): $POOL_ID"
-          echo "pool_id=$POOL_ID" >> "$GITHUB_OUTPUT"
 
           TX_HASH=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source deployer \
             --send=yes \
             --output hash \
             -- create_pool \
-            --creator "$TREASURY" \
+            --creator "$(stellar keys address deployer)" \
             --title "Mainnet smoke: $SMOKE_TS" \
             --description "Automated mainnet smoke test from tag $INPUT_GIT_TAG commit $SMOKE_COMMIT" \
             --outcome_a "Yes" \
@@ -408,6 +379,8 @@ jobs:
           AFTER=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source deployer \
             -- get_pool_count)
           echo "Pool count after: $AFTER"
@@ -419,8 +392,19 @@ jobs:
             exit 1
           fi
 
+          # Extract the newly created pool ID (last pool in the list)
+          POOL_ID=$(stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+            --source deployer \
+            -- get_pool_count)
+          POOL_ID=$((POOL_ID))
+          echo "pool_id=$POOL_ID" >> "$GITHUB_OUTPUT"
+
           if [ "$RUN_LIFECYCLE" != "true" ]; then
-            echo "Lifecycle smoke (place_bet -> settle -> claim) skipped. Enable it via the run_lifecycle_smoke input."
+            echo "Lifecycle smoke (place_bet -> settle -> claim) skipped."
             echo "bet=skipped" >> "$GITHUB_OUTPUT"
             echo "settle=skipped" >> "$GITHUB_OUTPUT"
             echo "claim=skipped" >> "$GITHUB_OUTPUT"
@@ -431,11 +415,11 @@ jobs:
           BETTOR=$(stellar keys address bettor)
           echo "Bettor address: $BETTOR"
 
-          # place_bet — the bettor stakes on outcome 0 before the pool expires.
-          # The optional referrer argument is omitted (defaults to None).
           stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source bettor \
             -- place_bet \
             --user "$BETTOR" \
@@ -448,22 +432,24 @@ jobs:
           echo "Waiting 330s for pool $POOL_ID to expire before settling..."
           sleep 330
 
-          # settle_pool — only the admin (the deployer) may settle.
           stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source deployer \
             -- settle_pool \
-            --caller "$TREASURY" \
+            --caller "$(stellar keys address deployer)" \
             --pool_id "$POOL_ID" \
             --winning_outcome 0
           echo "Settled pool $POOL_ID with winning outcome 0"
           echo "settle=true" >> "$GITHUB_OUTPUT"
 
-          # claim_winnings — the winning bettor claims; payout must be positive.
           CLAIM=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
+            --rpc-url "$STELLAR_RPC_URL" \
+            --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
             --source bettor \
             -- claim_winnings \
             --user "$BETTOR" \
@@ -487,165 +473,50 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      issues: write
+      issues: read
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download deployment manifest
-        uses: actions/download-artifact@v4
-        with:
-          name: deployment-manifest
-          path: ./deployment
-        continue-on-error: true
-
-      - name: Locate associated PR
-        id: pr
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const sha = context.sha;
-            const res = await github.rest.repos.listPullRequestsAssociatedWithCommit({
-              owner, repo, commit_sha: sha,
-            });
-            const merged = res.data.find((pr) => pr.merged_at);
-            const target = merged ?? res.data[0];
-            if (target) {
-              core.setOutput('number', String(target.number));
-              core.setOutput('url', target.html_url);
-            } else {
-              core.setOutput('number', '');
-              core.setOutput('url', '');
-            }
-
-      - name: Compose deployment summary
-        id: summary
-        env:
-          DEPLOY_OUTCOME: ${{ needs.deploy.result }}
-          SMOKE_OUTCOME: ${{ needs.smoke.result }}
-          CONTRACT_ID: ${{ needs.deploy.outputs.contract_id }}
-          DEPLOY_TX: ${{ needs.deploy.outputs.deploy_tx }}
-          INIT_TX: ${{ needs.deploy.outputs.init_tx }}
-          CREATE_TX: ${{ needs.smoke.outputs.create_tx }}
-          POOL_BEFORE: ${{ needs.smoke.outputs.pool_count_before }}
-          POOL_AFTER: ${{ needs.smoke.outputs.pool_count_after }}
-          POOL_ID: ${{ needs.smoke.outputs.pool_id }}
-          BET_PLACED: ${{ needs.smoke.outputs.bet_placed }}
-          SETTLED: ${{ needs.smoke.outputs.settled }}
-          CLAIM_AMOUNT: ${{ needs.smoke.outputs.claim_amount }}
-          GIT_TAG: ${{ github.event.inputs.git_tag }}
-          REPORT_RUN_ID: ${{ github.run_id }}
-          REPORT_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          COMMIT: ${{ github.sha }}
+      - name: Determine status
+        id: status
         run: |
-          if [ "$DEPLOY_OUTCOME" = "success" ] && [ "$SMOKE_OUTCOME" = "success" ]; then
-            STATUS_ICON="✅"
-            STATUS_TEXT="Success"
-          elif [ "$DEPLOY_OUTCOME" = "success" ]; then
-            STATUS_ICON="⚠️"
-            STATUS_TEXT="Deployed, smoke failed"
+          if [ "${{ needs.smoke.result }}" = "success" ]; then
+            echo "emoji=✅" >> "$GITHUB_OUTPUT"
+            echo "text=Success" >> "$GITHUB_OUTPUT"
+          elif [ "${{ needs.deploy.result }}" = "success" ]; then
+            echo "emoji=⚠️" >> "$GITHUB_OUTPUT"
+            echo "text=Deployed, smoke failed" >> "$GITHUB_OUTPUT"
           else
-            STATUS_ICON="❌"
-            STATUS_TEXT="Failed"
+            echo "emoji=❌" >> "$GITHUB_OUTPUT"
+            echo "text=Failed" >> "$GITHUB_OUTPUT"
           fi
-          echo "status_icon=$STATUS_ICON" >> "$GITHUB_OUTPUT"
-          echo "status_text=$STATUS_TEXT" >> "$GITHUB_OUTPUT"
-
-          {
-            echo "$STATUS_ICON **Mainnet deploy: $STATUS_TEXT** — tag \`${GIT_TAG}\` commit \`${COMMIT:0:7}\`"
-            echo ""
-            echo "| Field | Value |"
-            echo "|---|---|"
-            echo "| Network | mainnet |"
-            echo "| Git tag | \`${GIT_TAG:-—}\` |"
-            echo "| Contract ID | \`${CONTRACT_ID:-—}\` |"
-            echo "| Deploy tx | \`${DEPLOY_TX:-—}\` |"
-            echo "| Initialize tx | \`${INIT_TX:-—}\` |"
-            echo "| Smoke pool id | \`${POOL_ID:-—}\` |"
-            echo "| Create pool tx | \`${CREATE_TX:-—}\` |"
-            echo "| Pool count (before → after) | \`${POOL_BEFORE:-—} → ${POOL_AFTER:-—}\` |"
-            echo "| place_bet | \`${BET_PLACED:-—}\` |"
-            echo "| settle_pool | \`${SETTLED:-—}\` |"
-            echo "| claim_winnings (stroops) | \`${CLAIM_AMOUNT:-—}\` |"
-            echo "| Workflow run | [$REPORT_RUN_ID]($REPORT_RUN_URL) |"
-            echo ""
-            if [ "$SMOKE_OUTCOME" != "success" ]; then
-              echo "> **Rollback:** the previous good contract ID can be retrieved from prior PR comments or the \`deployment-manifest\` artifact of a previous run. See \`docs/deployments/rollback.md\` for steps."
-            fi
-          } > summary.md
-
-          {
-            echo "## Mainnet deploy summary"
-            echo ""
-            cat summary.md
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Comment on associated PR
-        if: steps.pr.outputs.number != ''
-        uses: actions/github-script@v7
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('summary.md', 'utf8');
-            const { owner, repo } = context.repo;
-            await github.rest.issues.createComment({
-              owner,
-              repo,
-              issue_number: Number(process.env.PR_NUMBER),
-              body,
-            });
-
-      - name: Create GitHub Release
-        if: needs.deploy.result == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GIT_TAG: ${{ github.event.inputs.git_tag }}
-          CONTRACT_ID: ${{ needs.deploy.outputs.contract_id }}
-          SMOKE_OUTCOME: ${{ needs.smoke.result }}
-          RELEASE_REPO: ${{ github.repository }}
-        run: |
-          SMOKE_NOTE=""
-          if [ "$SMOKE_OUTCOME" != "success" ]; then
-            SMOKE_NOTE=" (smoke tests failed — verify manually before directing traffic)"
-          fi
-          RELEASE_NOTES="Mainnet deployment of contract \`${CONTRACT_ID:-—}\`${SMOKE_NOTE}. Deployment artifact attached. See workflow run for full details."
-          gh release create "$GIT_TAG" \
-            --title "Mainnet release $GIT_TAG" \
-            --notes "$RELEASE_NOTES" \
-            ./deployment/deployment.json \
-            --repo "$RELEASE_REPO" \
-            2>/dev/null || \
-          gh release upload "$GIT_TAG" \
-            ./deployment/deployment.json \
-            --repo "$RELEASE_REPO" \
-            --clobber
 
       - name: Notify Slack
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          STATUS_TEXT: ${{ steps.summary.outputs.status_text }}
-          STATUS_ICON: ${{ steps.summary.outputs.status_icon }}
-          CONTRACT_ID: ${{ needs.deploy.outputs.contract_id }}
-          GIT_TAG: ${{ github.event.inputs.git_tag }}
+          STATUS_TEXT: ${{ steps.status.outputs.text }}
+          STATUS_EMOJI: ${{ steps.status.outputs.emoji }}
+          CONTRACT_ID: ${{ needs.deploy.outputs.contract-id }}
+          GIT_TAG: ${{ github.event.inputs.git_tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        if: env.SLACK_WEBHOOK_URL != ''
         run: |
-          curl -sS -X POST -H 'Content-Type: application/json' \
-            --data "$(jq -n --arg text "$STATUS_ICON Mainnet deploy: $STATUS_TEXT — tag \`${GIT_TAG}\` contract \`${CONTRACT_ID:-—}\` (<$RUN_URL|run>)" '{text: $text}')" \
-            "$SLACK_WEBHOOK_URL"
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"text\": \"$STATUS_EMOJI Mainnet deploy: $STATUS_TEXT — tag \`$GIT_TAG\` contract \`$CONTRACT_ID\` (<$RUN_URL|run>)\"
+            }"
 
       - name: Notify Discord
+        if: ${{ secrets.DISCORD_WEBHOOK_URL != '' }}
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          STATUS_TEXT: ${{ steps.summary.outputs.status_text }}
-          STATUS_ICON: ${{ steps.summary.outputs.status_icon }}
-          CONTRACT_ID: ${{ needs.deploy.outputs.contract_id }}
-          GIT_TAG: ${{ github.event.inputs.git_tag }}
+          STATUS_TEXT: ${{ steps.status.outputs.text }}
+          STATUS_EMOJI: ${{ steps.status.outputs.emoji }}
+          CONTRACT_ID: ${{ needs.deploy.outputs.contract-id }}
+          GIT_TAG: ${{ github.event.inputs.git_tag || github.ref_name }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        if: env.DISCORD_WEBHOOK_URL != ''
         run: |
-          curl -sS -X POST -H 'Content-Type: application/json' \
-            --data "$(jq -n --arg content "$STATUS_ICON Mainnet deploy: $STATUS_TEXT — tag \`${GIT_TAG}\` contract \`${CONTRACT_ID:-—}\` ($RUN_URL)" '{content: $content}')" \
-            "$DISCORD_WEBHOOK_URL"
+          curl -s -X POST "$DISCORD_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"content\": \"$STATUS_EMOJI Mainnet deploy: $STATUS_TEXT — tag \`$GIT_TAG\` contract \`$CONTRACT_ID\` ($RUN_URL)\"
+            }"

@@ -4,11 +4,11 @@ import { NETWORK_CONFIG as ANALYTICS_NETWORK_CONFIG } from './analytics/config';
 export type SupportedNetwork = 'mainnet' | 'testnet';
 
 export type ContractConfig = {
-  /** Contract address (principal) used as `contractAddress` in Stacks contract calls. */
+  /** Contract address (strkey) used as `contractAddress` in Stellar contract calls. */
   address: string;
-  /** Contract name used as `contractName` in Stacks contract calls. */
+  /** Legacy field, kept for compatibility. */
   name: string;
-  /** Full contract id in `<address>.<name>` form. */
+  /** Full contract id. */
   id: string;
 };
 
@@ -75,17 +75,9 @@ function parseContractId(contractAddress: string): { address: string; name: stri
     return { address: trimmed, name: '', id: trimmed };
   }
 
-  // Legacy Stacks contract principal + name in `<address>.<name>` form.
-  const separatorIndex = trimmed.indexOf('.');
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    throw new Error(
-      `Invalid contract id '${trimmed}'. Expected a Stellar contract ID (C... strkey) or Stacks '<address>.<name>' coordinates.`
-    );
-  }
-
-  const address = trimmed.slice(0, separatorIndex).trim();
-  const name = trimmed.slice(separatorIndex + 1).trim();
-  return { address, name, id: `${address}.${name}` };
+  throw new Error(
+    `Invalid contract id '${trimmed}'. Expected a Stellar contract ID (C... strkey).`
+  );
 }
 
 function getOptionalEnv(name: string): string | undefined {

@@ -3,7 +3,7 @@ import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('PoolDetailPage');
 
 import Link from "next/link";
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback, useRef } from "react";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
@@ -52,11 +52,15 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
     const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
 
+    const mountedRef = useRef(true);
+
     const fetchPool = useCallback(async () => {
         try {
             const data = await predinexReadApi.getPool(poolId);
-            setPool(data);
-            setError(null);
+            if (mountedRef.current) {
+                setPool(data);
+                setError(null);
+            }
             return data;
         } catch (e) {
             throw e;
@@ -65,16 +69,23 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
 
     const fetchUserBet = useCallback(async () => {
         if (!stxAddress) {
-            setUserBet(null);
+            if (mountedRef.current) setUserBet(null);
             return;
         }
         try {
             const bet = await predinexReadApi.getUserBet(poolId, stxAddress);
-            setUserBet(bet);
+            if (mountedRef.current) setUserBet(bet);
         } catch {
-            setUserBet(null);
+            if (mountedRef.current) setUserBet(null);
         }
     }, [poolId, stxAddress]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;

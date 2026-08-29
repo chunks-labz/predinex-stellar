@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { ActivityItem } from '../../app/lib/stacks-api';
+import type { ActivityItem } from '../../app/lib/market-types';
 import {
   EXPORT_MAX_WINDOW_DAYS,
   activitiesToCSV,
@@ -108,6 +108,32 @@ describe('activitiesToCSV', () => {
   it('escapes fields containing commas or quotes', () => {
     const csv = activitiesToCSV([makeActivity({ poolTitle: 'Apple, "Inc"' })]);
     expect(csv.split('\n')[1]).toContain('"Apple, ""Inc"""');
+  });
+
+  it('keeps every column in the same position across header and data rows (issue #991)', () => {
+    // CSV_COLUMNS (activity-export.ts) generates the header and every data
+    // cell from the same array of {key, header} pairs, so a swap like the
+    // one issue #991 describes (date/type transposed) can't happen here —
+    // this locks that in explicitly, one column at a time, rather than
+    // relying on the reader to eyeball two full CSV lines against each other.
+    const csv = activitiesToCSV([makeActivity()]);
+    const [headerLine, dataLine] = csv.split('\n');
+    const headers = headerLine.split(',');
+    const cells = dataLine.split(',');
+
+    const expectedPairs: [string, string][] = [
+      ['pool_id', '7'],
+      ['type', 'bet-placed'],
+      ['amount', '2.5'],
+      ['timestamp', '2026-03-15T12:00:00.000Z'],
+      ['tx_hash', '0xabc'],
+      ['pool_title', 'Will it rain?'],
+    ];
+
+    expectedPairs.forEach(([header, value], index) => {
+      expect(headers[index]).toBe(header);
+      expect(cells[index]).toBe(value);
+    });
   });
 });
 

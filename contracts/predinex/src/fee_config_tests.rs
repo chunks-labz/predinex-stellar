@@ -129,7 +129,7 @@ fn set_fee_config_emits_event() {
                     Symbol::new(&env, EVENT_SCHEMA_VERSION),
                 )
                     .into_val(&env),
-                (150u32, recipient).into_val(&env),
+                (0u32, admin.clone(), 150u32, recipient).into_val(&env),
             ),
         ]
     );

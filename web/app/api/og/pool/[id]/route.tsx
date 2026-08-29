@@ -1,13 +1,36 @@
 import { ImageResponse } from 'next/og';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getPoolFromSoroban } from '../../../../lib/soroban-read-api';
+import { checkRateLimit, rateLimitHeaders } from '@/app/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
+// ---------------------------------------------------------------------------
+// Rate limit: max 60 OG image requests per minute per IP.
+// Abuse posture: prevents runaway crawlers from hammering the Soroban RPC on
+// every request.  Keyed by forwarded IP so individual bots can be throttled
+// without affecting other users.
+// ---------------------------------------------------------------------------
+const OG_RATE_LIMIT_MAX = 60;
+const OG_RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  // Rate-limit by forwarded IP (best-effort; anonymous bucket for unknown IPs).
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'anonymous';
+  const rl = checkRateLimit(`og-pool:${ip}`, {
+    max: OG_RATE_LIMIT_MAX,
+    windowMs: OG_RATE_LIMIT_WINDOW_MS,
+  });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Rate limit exceeded.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
+
   const { id } = await params;
   const poolId = parseInt(id, 10);
 

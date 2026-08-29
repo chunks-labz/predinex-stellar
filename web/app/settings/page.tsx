@@ -4,7 +4,9 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState, type ElementType, type ReactNode } from 'react';
 import Navbar from '@/components/Navbar';
 import { useWallet } from '@/components/WalletAdapterProvider';
-import { getMarkets, getUserActivity, type Pool, type ActivityItem } from '../lib/stacks-api';
+import { getMarkets } from '../lib/soroban-read-api';
+import { predinexReadApi } from '../lib/adapters/predinex-read-api';
+import type { Pool, ActivityItem } from '../lib/market-types';
 import { useI18n, supportedLanguages, type AppLanguage } from '../lib/i18n';
 import { useBrowserNotifications } from '../lib/notifications';
 import { useNotificationPreferences } from '../lib/hooks/useNotificationPreferences';
@@ -67,7 +69,7 @@ export default function SettingsPage() {
       try {
         const [marketData, activityData] = await Promise.all([
           getMarkets('all'),
-          address ? getUserActivity(address, 25) : Promise.resolve([]),
+          address ? predinexReadApi.getUserActivity(address, 25) : Promise.resolve([]),
         ]);
 
         if (!active) return;

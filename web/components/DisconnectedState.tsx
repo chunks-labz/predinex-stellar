@@ -1,8 +1,13 @@
+'use client';
+
+import { useI18n } from '@/app/lib/i18n';
+
 export function DisconnectedState() {
+  const { t } = useI18n();
   return (
     <div>
-      <p>Wallet not connected</p>
-      <button>Connect Wallet</button>
+      <p>{t('disconnected.walletNotConnected')}</p>
+      <button>{t('disconnected.connectButton')}</button>
     </div>
   );
 }

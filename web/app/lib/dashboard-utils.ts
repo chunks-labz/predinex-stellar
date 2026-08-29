@@ -3,10 +3,10 @@
  * These helpers support the portfolio overview, market statistics, and platform metrics.
  */
 
-import { UserBet, BetHistory, UserPortfolio, MarketStatistics, PlatformMetrics } from './dashboard-types';
+import { UserBet, BetHistory, UserPortfolio, MarketStatistics, PlatformMetrics } from './market-types';
 import { PoolData } from './market-types';
 import { getCurrentBlockHeight } from './market-utils';
-import { formatNumberCompact, formatPercentage, TOKEN_SYMBOL } from '@/lib/formatting';
+import { formatNumberCompact, formatPercentage, TOKEN_SYMBOL } from '@/app/lib/formatting';
 export { formatPercentage };
 
 /**

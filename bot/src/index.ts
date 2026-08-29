@@ -58,6 +58,8 @@ async function main(): Promise<void> {
 
   // ── Graceful shutdown ─────────────────────────────────────────────────────
   let shuttingDown = false;
+  let hadErrors = false;
+
   const shutdown = (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -70,6 +72,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown("SIGTERM"));
 
   process.on("uncaughtException", (err) => {
+    hadErrors = true;
     logger.error("Uncaught exception", {
       error: String(err),
       stack: err.stack,
@@ -79,12 +82,22 @@ async function main(): Promise<void> {
   });
 
   process.on("unhandledRejection", (reason) => {
+    hadErrors = true;
     logger.error("Unhandled promise rejection", { reason: String(reason) });
     setTimeout(() => process.exit(1), 200);
   });
 
   await poller.start();
-  process.exit(0);
+
+  const { errorCount } = poller.getMetrics();
+  const exitCode = hadErrors || errorCount > 0 ? 1 : 0;
+  if (exitCode !== 0) {
+    logger.warn("Exiting with non-zero status due to errors during operation", {
+      uncaughtErrors: hadErrors,
+      settlementErrors: errorCount,
+    });
+  }
+  process.exit(exitCode);
 }
 
 main().catch((err) => {

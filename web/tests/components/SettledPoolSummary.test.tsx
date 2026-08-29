@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 import SettledPoolSummary from '../../app/components/SettledPoolSummary';
-import type { Pool } from '../../app/lib/stacks-api';
+import type { Pool } from '../../app/lib/market-types';
 
 // Wallet mock — component doesn't use it, but providers need it
 vi.mock('@/components/WalletAdapterProvider', () => ({

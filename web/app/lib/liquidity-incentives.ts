@@ -108,18 +108,21 @@ export function calculateTotalIncentive(
   betPosition: number,
   poolVolume: number,
   previousBetsCount: number,
+  isReferred: boolean,
   config: IncentiveConfig
 ): { total: number; breakdown: Record<string, number> } {
   const earlyBird = calculateEarlyBirdBonus(betAmount, betPosition, config);
   const volume = calculateVolumeBonus(betAmount, poolVolume, config);
   const loyalty = calculateLoyaltyBonus(betAmount, previousBetsCount, config);
+  const referral = isReferred ? calculateReferralBonus(betAmount, config) : 0;
 
   return {
-    total: earlyBird + volume + loyalty,
+    total: earlyBird + volume + loyalty + referral,
     breakdown: {
       earlyBird,
       volume,
       loyalty,
+      referral,
     },
   };
 }

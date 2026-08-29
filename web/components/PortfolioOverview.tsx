@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { TrendingUp, TrendingDown, DollarSign, Target, Trophy, Activity } from 'lucide-react';
-import { UserPortfolio } from '@/app/lib/dashboard-types';
+import { UserPortfolio } from '@/app/lib/market-types';
 import { formatCurrency, formatPercentage, formatProfitLoss } from '@/app/lib/dashboard-utils';
 import { selectPortfolioMetricCards } from '@/app/lib/dashboard-selectors';
 

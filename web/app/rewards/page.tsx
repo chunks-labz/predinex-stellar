@@ -8,7 +8,7 @@ import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Leaderboard from "../../components/Leaderboard";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useLeaderboard } from "../lib/hooks/useLeaderboard";
-import { TOKEN_SYMBOL } from "@/lib/formatting";
+import { TOKEN_SYMBOL } from "@/app/lib/formatting";
 
 export default function RewardsPage() {
   const { address: stxAddress } = useWallet();

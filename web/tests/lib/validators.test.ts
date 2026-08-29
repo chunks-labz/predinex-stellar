@@ -7,11 +7,14 @@ import {
   validateDuration,
   validateStellarAddress,
   validateStellarContractAddress,
+  validateOutcomesList,
   MAX_TITLE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
   MAX_OUTCOME_LENGTH,
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
+  MAX_OUTCOME_COUNT,
+} from '../../app/lib/validators';
 } from '../../lib/validators';
 
 describe('validateContractId', () => {
@@ -246,5 +249,41 @@ describe('metadata length validation (issue #154)', () => {
     const result = validateOutcome('A'.repeat(MAX_OUTCOME_LENGTH + 1));
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/50.*fewer/i);
+  });
+});
+
+describe('validateOutcomesList (issue #1001)', () => {
+  it('rejects fewer than two outcomes', () => {
+    const result = validateOutcomesList(['Yes']);
+    expect(result.valid).toBe(false);
+  });
+
+  it('accepts a two-outcome pool', () => {
+    const result = validateOutcomesList(['Yes', 'No']);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a 20-outcome pool (contract maximum)', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects more than 20 outcomes', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT + 1 }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/at most 20/i);
+  });
+
+  it('rejects duplicate outcomes', () => {
+    const result = validateOutcomesList(['Yes', 'yes']);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/unique/i);
+  });
+
+  it('rejects an invalid outcome label', () => {
+    const result = validateOutcomesList(['Yes', 'x']);
+    expect(result.valid).toBe(false);
   });
 });

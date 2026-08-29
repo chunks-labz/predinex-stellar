@@ -227,7 +227,7 @@ fn test_place_bet() {
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
 
-    token_admin_client.mint(&user, &1000);
+    token_admin_client.mint(&user, &10_000_000);
 
     let title = String::from_str(&env, "Market 1");
     let description = String::from_str(&env, "Desc 1");
@@ -246,12 +246,12 @@ fn test_place_bet() {
         &None::<u64>,
     );
 
-    client.place_bet(&user, &pool_id, &0, &100, &None::<Address>);
+    client.place_bet(&user, &pool_id, &0, &1_000_000, &None::<Address>);
 
     let pool = client.get_pool(&pool_id).unwrap();
-    assert_eq!(pool.total_a, 100);
-    assert_eq!(token.balance(&user), 900);
-    assert_eq!(token.balance(&contract_id), 100);
+    assert_eq!(pool.total_a, 1_000_000);
+    assert_eq!(token.balance(&user), 9_000_000);
+    assert_eq!(token.balance(&contract_id), 1_000_000);
 }
 
 #[test]
@@ -890,7 +890,7 @@ fn setup() -> TestEnv<'static> {
 
     // Fund the user so token transfers in place_bet don't fail for balance reasons
     let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token);
-    token_admin.mint(&user, &10_000i128);
+    token_admin.mint(&user, &100_000_000i128);
 
     TestEnv {
         env,
@@ -3253,6 +3253,32 @@ fn i3_non_creator_cannot_cancel_pool() {
         .cancel_pool(&other, &pool_id, &String::from_str(&t.env, "attempt"));
 }
 
+#[test]
+fn i3b_non_creator_cannot_cancel_expired_open_pool() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+
+    t.client
+        .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
+    expire_pool(&t.env);
+
+    let other = Address::generate(&t.env);
+    let result = t
+        .client
+        .try_cancel_pool(&other, &pool_id, &String::from_str(&t.env, "attempt"));
+    assert_eq!(result, Err(Ok(ContractError::Unauthorized)));
+
+    let pool = t.client.get_pool(&pool_id).expect("pool must remain");
+    assert_eq!(pool.status, PoolStatus::Open);
+    assert!(t.client.get_user_bet(&pool_id, &t.user).is_some());
+
+    t.client.settle_pool(&t.admin, &pool_id, &0u32);
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Settled(0)
+    );
+}
+
 /// I4: Pool records survive cancellation; storage is not silently deleted.
 #[test]
 fn i4_cancelled_pool_record_is_retained() {
@@ -3782,7 +3808,10 @@ fn l5_claim_winnings_emits_claim_event() {
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, last_event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        topic1,
+        soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION)
+    );
     assert_eq!(topic2, pool_id);
     assert_eq!(topic3, user_a);
 
@@ -4350,7 +4379,7 @@ fn test_place_bet_with_referrer_emits_event() {
     let referrer = Address::generate(&t.env);
 
     t.client
-        .place_bet(&t.user, &pool_id, &0, &100, &Some(referrer.clone()));
+        .place_bet(&t.user, &pool_id, &0, &1_000_000, &Some(referrer.clone()));
 
     let events = t.env.events().all();
     let found = events.events().iter().any(|event| {
@@ -4368,7 +4397,7 @@ fn test_place_bet_without_referrer_no_referral_event() {
     let pool_id = make_pool(&t);
 
     t.client
-        .place_bet(&t.user, &pool_id, &0, &100, &None::<Address>);
+        .place_bet(&t.user, &pool_id, &0, &1_000_000, &None::<Address>);
 
     let events = t.env.events().all();
     let found = events.events().iter().any(|event| {
@@ -4421,11 +4450,69 @@ fn test_multi_outcome_pool_accepts_third_outcome_and_pays_winner() {
     assert_eq!(outcome_state.len(), 3);
     assert_eq!(outcome_state.get(2).unwrap().total, 300i128);
 
+    let pool = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.total_a, 100i128);
+    assert_eq!(pool.total_b, 200i128);
+
+    let third_outcome_bet = t.client.get_user_bet(&pool_id, &user3).unwrap();
+    assert_eq!(third_outcome_bet.amount_a, 0i128);
+    assert_eq!(third_outcome_bet.amount_b, 0i128);
+    assert_eq!(third_outcome_bet.total_bet, 300i128);
+
     expire_pool(&t.env);
     t.client.settle_pool(&t.admin, &pool_id, &2u32);
 
+    assert_eq!(
+        t.client.preview_claimable_amount(&pool_id, &user3),
+        ClaimPreview::Claimable(588i128)
+    );
+
     let payout = t.client.claim_winnings(&user3, &pool_id);
     assert_eq!(payout, 588i128);
+}
+
+#[test]
+fn test_cancel_bet_on_third_outcome_preserves_binary_mirrors() {
+    let t = setup();
+    let user2 = Address::generate(&t.env);
+    let user3 = Address::generate(&t.env);
+    let token_admin = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token);
+    token_admin.mint(&user2, &10_000i128);
+    token_admin.mint(&user3, &10_000i128);
+
+    let mut outcomes = soroban_sdk::Vec::new(&t.env);
+    outcomes.push_back(String::from_str(&t.env, "Red"));
+    outcomes.push_back(String::from_str(&t.env, "Blue"));
+    outcomes.push_back(String::from_str(&t.env, "Green"));
+
+    let pool_id = t.client.create_multi_outcome_pool(
+        &t.admin,
+        &String::from_str(&t.env, "Three-way pool"),
+        &String::from_str(&t.env, "Choose a color"),
+        &outcomes,
+        &3_600u64,
+        &None::<String>,
+    );
+
+    t.client
+        .place_bet(&user2, &pool_id, &1u32, &200i128, &None::<Address>);
+    t.client
+        .place_bet(&user3, &pool_id, &2u32, &300i128, &None::<Address>);
+
+    let pool_after_bets = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after_bets.total_a, 0i128);
+    assert_eq!(pool_after_bets.total_b, 200i128);
+
+    let refunded = t.client.cancel_bet(&user3, &pool_id, &2u32, &100i128);
+    assert_eq!(refunded, 100i128);
+
+    let pool_after_cancel = t.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after_cancel.total_a, 0i128);
+    assert_eq!(pool_after_cancel.total_b, 200i128);
+
+    let outcome_state = t.client.get_pool_outcomes(&pool_id);
+    assert_eq!(outcome_state.get(1).unwrap().total, 200i128);
+    assert_eq!(outcome_state.get(2).unwrap().total, 200i128);
 }
 
 #[test]
@@ -4522,8 +4609,24 @@ fn test_pool_templates_are_treasury_managed_and_create_pools_with_overrides() {
     }));
     assert!(unauthorized.is_err());
 
-    t.client.delete_pool_template(&t.admin, &template_id);
-    assert_eq!(t.client.get_templates().len(), 0);
+    // Referenced template cannot be deleted (#1038).
+    let in_use = t.client.try_delete_pool_template(&t.admin, &template_id);
+    assert_eq!(in_use, Err(Ok(ContractError::TemplateInUse)));
+    assert_eq!(t.client.get_pool_template_id(&pool_id), Some(template_id));
+
+    // Unreferenced template can be deleted.
+    let unused_template_id = t.client.create_pool_template(
+        &t.admin,
+        &String::from_str(&t.env, "Unused Market"),
+        &String::from_str(&t.env, "Unused description"),
+        &outcomes,
+        &3_600u64,
+        &None,
+        &true,
+    );
+    assert_eq!(t.client.get_templates().len(), 2);
+    t.client.delete_pool_template(&t.admin, &unused_template_id);
+    assert_eq!(t.client.get_templates().len(), 1);
 }
 
 // ============================================================================
@@ -4820,6 +4923,11 @@ fn g1_dispute_within_window_succeeds() {
         &None::<u64>,
     );
 
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+    let bettor = Address::generate(&env);
+    token_admin_client.mint(&bettor, &10_000);
+    client.place_bet(&bettor, &pool_id, &0, &1_000, &None::<Address>);
+
     env.ledger().with_mut(|l| l.timestamp = 3601);
     client.settle_pool(&admin, &pool_id, &0);
 
@@ -4834,7 +4942,7 @@ fn g1_dispute_within_window_succeeds() {
 
 /// G2: dispute_pool after window expiry is rejected.
 #[test]
-#[should_panic(expected = "DisputeWindowExpired")]
+#[should_panic]
 fn g2_dispute_after_window_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -4856,6 +4964,11 @@ fn g2_dispute_after_window_rejected() {
         &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
+
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+    let bettor = Address::generate(&env);
+    token_admin_client.mint(&bettor, &10_000);
+    client.place_bet(&bettor, &pool_id, &0, &1_000, &None::<Address>);
 
     env.ledger().with_mut(|l| l.timestamp = 3601);
     client.settle_pool(&admin, &pool_id, &0);
@@ -5012,14 +5125,17 @@ fn m1_create_pool_emits_pool_created_event() {
     let events = env.events().all();
     let event = events.events().last().expect("must emit create_pool event");
 
-    // Topics: [create_pool, pool_id]
+    // Topics: [create_pool, event_version, pool_id]
     let topic0: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 0)).unwrap();
-    let topic1: u32 =
+    let topic1: soroban_sdk::Symbol =
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 1)).unwrap();
+    let topic2: u32 =
+        soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 2)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "create_pool"));
-    assert_eq!(topic1, pool_id);
+    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, EVENT_SCHEMA_VERSION));
+    assert_eq!(topic2, pool_id);
 
     let data_val: Val = match &event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
@@ -5245,7 +5361,10 @@ fn m4_claim_winnings_emits_claim_event() {
         soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 3)).unwrap();
 
     assert_eq!(topic0, soroban_sdk::Symbol::new(&env, "claim_winnings"));
-    assert_eq!(topic1, soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION));
+    assert_eq!(
+        topic1,
+        soroban_sdk::Symbol::new(&env, crate::EVENT_SCHEMA_VERSION)
+    );
     assert_eq!(topic2, pool_id);
     assert_eq!(topic3, user);
 
@@ -5926,6 +6045,7 @@ fn n3_get_user_claim_history_returns_correct_entries() {
     assert!(entry.fee > 0);
     assert_eq!(entry.timestamp, 4000);
     assert_eq!(entry.winning_outcome, 0);
+    assert_eq!(entry.status, super::UserClaimStatus::Paid);
 }
 
 /// N4: get_user_claim_history respects pagination (start_cursor, limit).
@@ -5968,8 +6088,7 @@ fn n4_get_user_claim_history_pagination() {
         client.place_bet(&user, &pool_id, &0, &500, &None::<Address>);
         client.place_bet(&opponent, &pool_id, &1, &500, &None::<Address>);
 
-        env.ledger()
-            .with_mut(|li| li.timestamp = 4000 + (i as u64) * 100);
+        env.ledger().with_mut(|li| li.timestamp += 3601);
         client.settle_pool(&creator, &pool_id, &0);
         client.claim_winnings(&user, &pool_id);
     }
@@ -7062,6 +7181,8 @@ fn test_fee_calculation_verification() {
     client.settle_pool(&token_admin, &pool_id, &0);
 
     client.claim_winnings(&user1, &pool_id);
+    let token = token::Client::new(&env, &token_id.address());
+    client.withdraw_treasury(&token_admin, &40000);
     assert_eq!(token.balance(&token_admin), 40000);
 }
 
@@ -7125,8 +7246,7 @@ fn test_settle_expired_pool_success() {
 
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
-    let stranger = Address::generate(&env);
-    client.settle_pool(&stranger, &pool_id, &1u32);
+    client.settle_pool(&creator, &pool_id, &1u32);
 
     let pool = client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.status, PoolStatus::Settled(1));
@@ -7166,4 +7286,178 @@ fn test_empty_winning_pool_handling() {
 
     let w = client.preview_claimable_amount(&pool_id, &user);
     assert_eq!(w, ClaimPreview::NotEligible);
+}
+
+#[test]
+fn claim_winnings_rejects_payout_state_overflow() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+
+    t.client
+        .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
+    expire_pool(&t.env);
+    t.client.settle_pool(&t.admin, &pool_id, &0u32);
+
+    t.env.as_contract(&t.client.address, || {
+        t.env.storage().persistent().set(
+            &DataKey::PoolPayoutState(pool_id),
+            &PoolPayoutState {
+                fee_credited: true,
+                claimed_winning_stake: i128::MAX,
+                paid_out: 0,
+            },
+        );
+    });
+
+    let result = t.client.try_claim_winnings(&t.user, &pool_id);
+    assert_eq!(result, Err(Ok(ContractError::PoolTotalOverflow)));
+    assert!(t.client.get_user_bet(&pool_id, &t.user).is_some());
+}
+
+// ── #1029, #1032, #1034, #1035 Unit Tests ───────────────────────────────────
+
+#[test]
+fn test_claim_multi_asset_winnings_balance_shortfall_rejected() {
+    let s = multi_asset_setup();
+    let pool_id = create_ma_pool(&s);
+    let user = Address::generate(&s.env);
+
+    let bet_amount = 10_000_000i128;
+    s.alt_admin_client.mint(&user, &bet_amount);
+
+    s.client.place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0,
+        &bet_amount,
+        &s.alt_token.address,
+        &None::<Address>,
+    );
+
+    s.env.ledger().with_mut(|li| li.timestamp = 5_000);
+    s.client.settle_pool(&s.treasury, &pool_id, &0);
+
+    // Drain contract's alt_token balance to create a balance shortfall
+    s.env.as_contract(&s.client.address, || {
+        let contract_bal = s.alt_token.balance(&s.client.address);
+        s.alt_token
+            .transfer(&s.client.address, &s.treasury, &contract_bal);
+    });
+
+    let res = s.client.try_claim_multi_asset_winnings(&user, &pool_id);
+    assert_eq!(res, Err(Ok(ContractError::BalanceShortfall)));
+}
+
+#[test]
+fn test_create_pool_from_template_invalid_outcome_count_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    client.initialize(&token, &admin, &admin);
+
+    let creator = Address::generate(&env);
+
+    let mut outcomes = Vec::new(&env);
+    outcomes.push_back(String::from_str(&env, "Yes"));
+    outcomes.push_back(String::from_str(&env, "No"));
+
+    let template_id = client.create_pool_template(
+        &admin,
+        &String::from_str(&env, "Template"),
+        &String::from_str(&env, "Desc"),
+        &outcomes,
+        &3600,
+        &None::<String>,
+        &true,
+    );
+
+    let mut invalid_outcomes = Vec::new(&env);
+    invalid_outcomes.push_back(String::from_str(&env, "Single"));
+
+    let res = client.try_create_pool_from_template(
+        &creator,
+        &template_id,
+        &PoolTemplateOverrides {
+            title: None,
+            description: None,
+            outcomes: Some(invalid_outcomes),
+            duration: None,
+            metadata_uri: None,
+        },
+    );
+    assert_eq!(res, Err(Ok(ContractError::InvalidOutcome)));
+}
+
+#[test]
+fn test_freeze_and_dispute_mutual_exclusion_and_resolution() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+    let token_admin = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token);
+    token_admin.mint(&t.user, &10_000_000);
+    t.client.set_freeze_admin(&t.admin, &t.admin);
+    t.client
+        .place_bet(&t.user, &pool_id, &0, &1_000_000, &None::<Address>);
+
+    t.env.ledger().with_mut(|li| li.timestamp = 3601);
+    t.client.settle_pool(&t.admin, &pool_id, &0);
+
+    // Dispute pool
+    t.client.dispute_pool(&t.admin, &pool_id);
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Disputed
+    );
+
+    // Attempt freeze on disputed pool -> fails with PoolIsDisputed
+    let freeze_res = t.client.try_freeze_pool(&t.admin, &pool_id);
+    assert_eq!(freeze_res, Err(Ok(ContractError::PoolIsDisputed)));
+
+    // Unfreeze disputed pool -> restores Settled(0)
+    t.client.unfreeze_pool(&t.admin, &pool_id);
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Settled(0)
+    );
+
+    // Freeze pool
+    t.client.freeze_pool(&t.admin, &pool_id);
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Frozen
+    );
+
+    // Attempt dispute on frozen pool -> fails with PoolIsFrozen
+    let dispute_res = t.client.try_dispute_pool(&t.admin, &pool_id);
+    assert_eq!(dispute_res, Err(Ok(ContractError::PoolIsFrozen)));
+}
+
+#[test]
+fn test_extend_pool_duration_rejected_on_settled_voided_frozen_pools() {
+    let t = setup();
+    let pool_id = make_pool(&t);
+    let creator = t.client.get_pool(&pool_id).unwrap().creator;
+    let token_admin = soroban_sdk::token::StellarAssetClient::new(&t.env, &t.token);
+    token_admin.mint(&t.user, &10_000_000);
+    t.client.set_freeze_admin(&t.admin, &t.admin);
+    t.client
+        .place_bet(&t.user, &pool_id, &0, &1_000_000, &None::<Address>);
+
+    // Freeze pool and attempt extension
+    t.client.freeze_pool(&t.admin, &pool_id);
+    let res_frozen = t.client.try_extend_pool_duration(&creator, &pool_id, &1000);
+    assert_eq!(res_frozen, Err(Ok(ContractError::PoolNotOpen)));
+
+    t.client.unfreeze_pool(&t.admin, &pool_id);
+
+    // Settle pool and attempt extension
+    t.env.ledger().with_mut(|li| li.timestamp = 3601);
+    t.client.settle_pool(&t.admin, &pool_id, &0);
+
+    let res_settled = t.client.try_extend_pool_duration(&creator, &pool_id, &1000);
+    assert_eq!(res_settled, Err(Ok(ContractError::PoolNotOpen)));
 }

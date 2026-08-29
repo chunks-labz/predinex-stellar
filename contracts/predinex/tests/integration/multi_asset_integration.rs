@@ -600,7 +600,9 @@ fn ma8_leaderboard_populated_for_multi_asset_pool() {
         &None::<Address>,
     );
 
-    let lb = ctx.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
+    let lb = ctx
+        .client
+        .get_leaderboard(&pool_id, &50u32, &None::<Address>);
     assert_eq!(lb.len(), 2, "leaderboard must have 2 entries");
     assert_eq!(lb.get(0).unwrap().total_bet, 200i128);
     assert_eq!(lb.get(1).unwrap().total_bet, 100i128);

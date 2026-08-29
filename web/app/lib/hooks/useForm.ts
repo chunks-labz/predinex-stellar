@@ -39,7 +39,7 @@ export function useForm<T extends Record<string, unknown>>({
 
       setValues(prev => ({
         ...prev,
-        [name]: type === 'number' ? parseFloat(value) : value,
+        [name]: type === 'number' && value !== '' ? parseFloat(value) : value,
       }));
 
       // Clear error when user starts typing

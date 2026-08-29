@@ -22,7 +22,7 @@ import {
 } from "../soroban-read-api";
 import { getPublicTemplatesFromSoroban } from '../soroban-template-api';
 import { getUserActivityFromSoroban } from "../soroban-event-service";
-import { getMarkets, getTotalVolume, getUserActivity } from "../stacks-api";
+import { getMarkets, getTotalVolume } from "../soroban-read-api";
 import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('predinexReadApi');
 import type { ActivityItem } from "./types";
@@ -173,6 +173,4 @@ export const predinexReadApi = {
   getTotalVolume,
   getStacksCoreApiBaseUrl,
   fetchPredinexContractEvents,
-  /** Legacy delegate: get user activity via the Stacks API */
-  getStacksActivity: getUserActivity,
 };

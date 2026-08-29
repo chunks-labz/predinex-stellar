@@ -27,7 +27,8 @@ export function useIncentives() {
       betAmount: number,
       betPosition: number,
       poolVolume: number,
-      previousBetsCount: number
+      previousBetsCount: number,
+      isReferred: boolean
     ) => {
       try {
         const { total, breakdown } = calculateTotalIncentive(
@@ -35,6 +36,7 @@ export function useIncentives() {
           betPosition,
           poolVolume,
           previousBetsCount,
+          isReferred,
           config
         );
 
