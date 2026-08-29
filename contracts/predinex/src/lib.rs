@@ -22,6 +22,7 @@ mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
+mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
 mod multi_user_tests;
@@ -31,6 +32,7 @@ mod protocol_fee_tests;
 mod test;
 mod validation_hardening_tests;
 mod validation_prop_tests;
+mod verification;
 mod webhook_test;
 
 
@@ -7203,11 +7205,10 @@ impl PredinexContract {
         let end_index = core::cmp::min(start_index + effective_limit, all_entries.len());
         for i in start_index..end_index {
             let mut entry = all_entries.get(i).unwrap();
-            entry.winnings_claimed =
-                match Self::get_claim_status(env.clone(), pool_id, entry.user.clone()) {
-                    ClaimStatus::AlreadyClaimed => true,
-                    _ => false,
-                };
+            entry.winnings_claimed = matches!(
+                Self::get_claim_status(env.clone(), pool_id, entry.user.clone()),
+                ClaimStatus::AlreadyClaimed
+            );
             limited.push_back(entry);
         }
         limited
@@ -8434,7 +8435,7 @@ impl PredinexContract {
         // Ensure the URL contains valid ASCII/UTF-8 hostname characters after scheme.
         // Reject control characters and non-printable bytes.
         for &byte in after_scheme.iter().take(after_scheme.len().min(64)) {
-            if byte < 0x20 || byte > 0x7E {
+            if !(0x20..=0x7E).contains(&byte) {
                 return Err(ContractError::InvalidWebhookUrl);
             }
         }
@@ -8570,7 +8571,7 @@ impl PredinexContract {
         // bet normalization and payouts.
         const MIN_RATE_BPS: i128 = 1_000; // 0.1x (10%)
         const MAX_RATE_BPS: i128 = 1_000_000; // 100x (10,000%)
-        if rate_bps < MIN_RATE_BPS || rate_bps > MAX_RATE_BPS {
+        if !(MIN_RATE_BPS..=MAX_RATE_BPS).contains(&rate_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
 
@@ -10349,6 +10350,7 @@ impl PredinexContract {
     }
 
     pub fn get_pending_lp_rewards(env: Env, pool_id: u32, user: Address) -> i128 {
+        // `user` is needed again below to compute the pending amount.
         let position: LpPosition = env
             .storage()
             .persistent()
