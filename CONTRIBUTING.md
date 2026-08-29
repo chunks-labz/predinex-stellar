@@ -144,7 +144,15 @@ To build the WASM artifact:
 stellar contract build
 ```
 
-The compiled output lands at `contracts/predinex/target/wasm32-unknown-unknown/release/predinex.wasm`.
+The compiled output lands at `contracts/predinex/target/wasm32v1-none/release/predinex.wasm`.
+
+### Troubleshooting Local Test Failures
+
+If tests fail locally but pass in CI, consult the [Contract Test Determinism Guide](./docs/CONTRACT_TEST_DETERMINISM.md). Common causes include:
+
+- **Rust version mismatch:** The workspace uses a pinned toolchain (1.87.0) via `rust-toolchain.toml`. Verify with `rustc --version`.
+- **Wrong WASM target:** Use `wasm32v1-none`, not `wasm32-unknown-unknown`. Add it with `rustup target add wasm32v1-none`.
+- **Stale build cache:** Clear with `cargo clean` before retrying.
 
 For a full local deploy-to-testnet walkthrough, see the [Local End-to-End Runbook](./docs/local-runbook.md).
 
@@ -172,11 +180,18 @@ Any change that touches the contract state or upgrade flow must follow the proce
 
 ## 6. Issue and PR Workflow
 
+### Stellar Wave Program
+
+This repository participates in the **Stellar Wave** program, a community-driven initiative to accelerate protocol development. Issues eligible for the Wave program are labeled with an `area:` tag indicating the impacted subsystem (`area: contract`, `area: web`, `area: docs`, or `area: ops`).
+
+For full details on the Wave program, area taxonomy, acceptance criteria, and triage process, see [`.github/PROGRAM.md`](./.github/PROGRAM.md).
+
 ### Picking up an issue
 
 1. Comment on the issue to let others know you are working on it.
-2. Fork the repository and clone your fork.
-3. Create a branch from `main` using the convention below.
+2. Check application limits if the issue is part of the Wave program.
+3. Fork the repository and clone your fork.
+4. Create a branch from `main` using the convention below.
 
 ### Branch naming
 
