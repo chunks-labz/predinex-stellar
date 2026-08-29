@@ -6,8 +6,8 @@ import { renderWithProviders } from '../helpers/renderWithProviders';
 import DashboardPage from '../../app/dashboard/page';
 import PoolDetailsPage from '../../app/markets/[id]/page';
 import type { ActivityItem } from '../../app/lib/adapters/types';
-import type { UserBet } from '../../app/lib/dashboard-types';
-import type { Pool } from '../../app/lib/stacks-api';
+import type { UserBet } from '../../app/lib/market-types';
+import type { Pool } from '../../app/lib/market-types';
 import type { UserBetData } from '../../app/lib/soroban-read-api';
 import { userActivityCache, userDashboardCache } from '../../app/lib/cache-invalidation';
 
@@ -121,16 +121,16 @@ vi.mock('../../app/lib/adapters/predinex-read-api', () => ({
   },
 }));
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: mockUseWallet,
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/Navbar', () => ({
+vi.mock('@/components/Navbar', () => ({
   default: () => <nav data-testid="navbar" />,
 }));
 
-vi.mock('../../app/components/AuthGuard', () => ({
+vi.mock('@/components/AuthGuard', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -146,7 +146,7 @@ vi.mock('../../components/PortfolioOverview', () => ({
   default: () => <div data-testid="portfolio-overview" />,
 }));
 
-vi.mock('../../app/components/BettingSection', () => ({
+vi.mock('@/components/BettingSection', () => ({
   default: () => <div data-testid="betting-section" />,
 }));
 

@@ -7,44 +7,53 @@ import {
   validateDuration,
   validateStellarAddress,
   validateStellarContractAddress,
+  validateOutcomesList,
   MAX_TITLE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
   MAX_OUTCOME_LENGTH,
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
+  MAX_OUTCOME_COUNT,
 } from '../../app/lib/validators';
+} from '../../lib/validators';
 
 describe('validateContractId', () => {
-  it('accepts a valid mainnet contract identifier', () => {
+  it('accepts a valid Stellar contract address', () => {
     const result = validateContractId(
-      'SPENV2J0V4BHRFAZ6FVF97K9ZGQJ0GT19RC3JFN7.predinex-pool',
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
       'mainnet'
     );
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('accepts a valid testnet contract identifier', () => {
+  it('does not require network-specific prefixes for Stellar contract addresses', () => {
     const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
+      'CCV2F3HHPJ5KQWZIQYBXLF3D5XDY4D5MHKXZ4FFLFKSKNIOGOHYRFTMP',
       'testnet'
     );
     expect(result.valid).toBe(true);
   });
 
-  it('rejects missing separators', () => {
-    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM');
+  it('rejects legacy Stacks contract identifiers', () => {
+    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool');
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/format/i);
+    expect(result.error).toMatch(/stellar contract address/i);
   });
 
-  it('rejects a network/address mismatch', () => {
+  it('rejects account public keys', () => {
+    const result = validateContractId('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ');
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/stellar contract address/i);
+  });
+
+  it('rejects invalid Stellar contract characters', () => {
     const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
-      'mainnet'
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSG0',
+      'testnet'
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/mainnet/i);
+    expect(result.error).toMatch(/stellar contract address/i);
   });
 });
 
@@ -240,5 +249,41 @@ describe('metadata length validation (issue #154)', () => {
     const result = validateOutcome('A'.repeat(MAX_OUTCOME_LENGTH + 1));
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/50.*fewer/i);
+  });
+});
+
+describe('validateOutcomesList (issue #1001)', () => {
+  it('rejects fewer than two outcomes', () => {
+    const result = validateOutcomesList(['Yes']);
+    expect(result.valid).toBe(false);
+  });
+
+  it('accepts a two-outcome pool', () => {
+    const result = validateOutcomesList(['Yes', 'No']);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a 20-outcome pool (contract maximum)', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects more than 20 outcomes', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT + 1 }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/at most 20/i);
+  });
+
+  it('rejects duplicate outcomes', () => {
+    const result = validateOutcomesList(['Yes', 'yes']);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/unique/i);
+  });
+
+  it('rejects an invalid outcome label', () => {
+    const result = validateOutcomesList(['Yes', 'x']);
+    expect(result.valid).toBe(false);
   });
 });

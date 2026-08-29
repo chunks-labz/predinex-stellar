@@ -4,10 +4,10 @@ import { Page } from '@playwright/test';
  * Mocks Soroban RPC responses for visual tests to ensure deterministic snapshots.
  */
 export async function mockSorobanRPC(page: Page, options: {
-  pools?: any[];
+  pools?: Record<string, unknown>[];
   poolCount?: number;
-  activity?: any[];
-  userBet?: any;
+  activity?: Record<string, unknown>[];
+  userBet?: Record<string, unknown>;
 }) {
   await page.route('**/', async (route) => {
     const request = route.request();

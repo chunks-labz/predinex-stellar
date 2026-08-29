@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { getRuntimeConfig } from '../../app/lib/runtime-config';
 import { createScopedLogger } from '../../app/lib/logger';
 
+import { fetchHorizon } from '../../app/lib/horizon-client';
+
 const log = createScopedLogger('useWalletAccount');
 
 interface WalletAccountData {
@@ -31,7 +33,7 @@ export function useWalletAccount(): WalletAccountData {
         : 'https://horizon.stellar.org';
 
       try {
-        const response = await fetch(`${horizonUrl}/accounts/${address}`);
+        const response = await fetchHorizon(`${horizonUrl}/accounts/${address}`);
         if (!response.ok) {
           log.error(`Failed to fetch balance: ${response.statusText}`);
           return '0';
@@ -55,11 +57,4 @@ export function useWalletAccount(): WalletAccountData {
     balance: balance || '0',
     isConnected,
   };
-}
-
-/**
- * @deprecated Use useWalletAccount instead. Maintained for backward compatibility.
- */
-export function useStacksAccount() {
-  return useWalletAccount();
 }

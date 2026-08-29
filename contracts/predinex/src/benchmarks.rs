@@ -28,7 +28,7 @@ impl BenchCtx {
 
         let contract_id = env.register(PredinexContract, ());
         let client: PredinexContractClient<'static> =
-            unsafe { core::mem::transmute(PredinexContractClient::new(&env, &contract_id)) };
+            PredinexContractClient::new(&env, &contract_id);
 
         let treasury = Address::generate(&env);
         let token_admin = Address::generate(&env);
@@ -36,9 +36,13 @@ impl BenchCtx {
             .register_stellar_asset_contract_v2(token_admin.clone())
             .address();
 
-        client.initialize(&token_id, &treasury);
+        client.initialize(&token_id, &treasury, &treasury);
 
-        BenchCtx { env, client, token_id }
+        BenchCtx {
+            env,
+            client,
+            token_id,
+        }
     }
 
     fn mint(&self, user: &Address, amount: i128) {
@@ -53,6 +57,8 @@ impl BenchCtx {
             &String::from_str(&self.env, "Yes"),
             &String::from_str(&self.env, "No"),
             &3600,
+            &MIN_CREATOR_DEPOSIT,
+            &None::<u64>,
         )
     }
 
@@ -81,7 +87,8 @@ fn bench_place_bet() {
     let pool_id = ctx.make_pool(&creator);
     ctx.mint(&user, 10_000);
     BenchCtx::measure(&ctx.env, "place_bet", || {
-        ctx.client.place_bet(&user, &pool_id, &0, &1_000, &None::<Address>);
+        ctx.client
+            .place_bet(&user, &pool_id, &0, &1_000, &None::<Address>);
     });
 }
 
@@ -94,8 +101,10 @@ fn bench_settle_pool() {
     let pool_id = ctx.make_pool(&creator);
     ctx.mint(&user_a, 10_000);
     ctx.mint(&user_b, 10_000);
-    ctx.client.place_bet(&user_a, &pool_id, &0, &5_000, &None::<Address>);
-    ctx.client.place_bet(&user_b, &pool_id, &1, &5_000, &None::<Address>);
+    ctx.client
+        .place_bet(&user_a, &pool_id, &0, &5_000, &None::<Address>);
+    ctx.client
+        .place_bet(&user_b, &pool_id, &1, &5_000, &None::<Address>);
     ctx.env.ledger().with_mut(|l| l.timestamp = 7200);
     BenchCtx::measure(&ctx.env, "settle_pool", || {
         ctx.client.settle_pool(&creator, &pool_id, &0);
@@ -111,8 +120,10 @@ fn bench_claim_winnings() {
     let pool_id = ctx.make_pool(&creator);
     ctx.mint(&winner, 10_000);
     ctx.mint(&loser, 10_000);
-    ctx.client.place_bet(&winner, &pool_id, &0, &5_000, &None::<Address>);
-    ctx.client.place_bet(&loser, &pool_id, &1, &5_000, &None::<Address>);
+    ctx.client
+        .place_bet(&winner, &pool_id, &0, &5_000, &None::<Address>);
+    ctx.client
+        .place_bet(&loser, &pool_id, &1, &5_000, &None::<Address>);
     ctx.env.ledger().with_mut(|l| l.timestamp = 7200);
     ctx.client.settle_pool(&creator, &pool_id, &0);
     BenchCtx::measure(&ctx.env, "claim_winnings", || {
@@ -127,7 +138,8 @@ fn bench_cancel_bet() {
     let user = Address::generate(&ctx.env);
     let pool_id = ctx.make_pool(&creator);
     ctx.mint(&user, 10_000);
-    ctx.client.place_bet(&user, &pool_id, &0, &2_000, &None::<Address>);
+    ctx.client
+        .place_bet(&user, &pool_id, &0, &2_000, &None::<Address>);
     BenchCtx::measure(&ctx.env, "cancel_bet", || {
         ctx.client.cancel_bet(&user, &pool_id, &0, &1_000);
     });

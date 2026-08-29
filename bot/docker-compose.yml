@@ -1,0 +1,47 @@
+version: "3.9"
+
+services:
+  settlement-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: predinex-settlement-bot:latest
+    container_name: predinex-settlement-bot
+    restart: unless-stopped
+
+    environment:
+      # ── Required ─────────────────────────────────────────────────────────
+      - STELLAR_RPC_URL=${STELLAR_RPC_URL}
+      - STELLAR_NETWORK=${STELLAR_NETWORK:-testnet}
+      - CONTRACT_ID=${CONTRACT_ID}
+      - BOT_SECRET_KEY=${BOT_SECRET_KEY}
+
+      # ── Polling ───────────────────────────────────────────────────────────
+      - POLL_INTERVAL_MS=${POLL_INTERVAL_MS:-300000}
+      - BATCH_SIZE=${BATCH_SIZE:-100}
+
+      # ── Settlement ────────────────────────────────────────────────────────
+      - DRY_RUN=${DRY_RUN:-false}
+      - AUTO_SETTLE_ENABLED=${AUTO_SETTLE_ENABLED:-false}
+      - DEFAULT_WINNING_OUTCOME=${DEFAULT_WINNING_OUTCOME:-0}
+
+      # ── Retry ─────────────────────────────────────────────────────────────
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - RETRY_BASE_DELAY_MS=${RETRY_BASE_DELAY_MS:-1000}
+
+      # ── Notifications ─────────────────────────────────────────────────────
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+
+      # ── Logging ───────────────────────────────────────────────────────────
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=production
+
+    # Logs are JSON — route to stdout for collection by the container runtime
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+    # No ports exposed — this is a headless background worker

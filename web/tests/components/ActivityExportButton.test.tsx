@@ -3,7 +3,7 @@ import { fireEvent, screen, render as rtlRender } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { ToastProvider } from '../../providers/ToastProvider';
 import ActivityExportButton from '../../app/components/ActivityExportButton';
-import type { ActivityItem } from '../../app/lib/stacks-api';
+import type { ActivityItem } from '../../app/lib/market-types';
 
 // Wrap with only ToastProvider — the component's sole context dependency — to
 // avoid the wallet/AppKit provider chain pulled in by the shared test-utils.

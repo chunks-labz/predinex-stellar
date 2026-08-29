@@ -1,0 +1,36 @@
+{
+  "name": "@predinex/widget",
+  "version": "0.1.0",
+  "description": "Embeddable Predinex prediction-pool widget",
+  "license": "ISC",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "build:types": "tsc --emitDeclarationOnly --declaration --outDir dist",
+    "dev": "vite build --watch",
+    "test": "vitest"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "jsdom": "^29.1.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^5",
+    "vite": "^6.4.3",
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^3.2.6"
+  }
+}

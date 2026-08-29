@@ -4,102 +4,101 @@ const log = createScopedLogger('useLeaderboard');
 
 import { useState, useEffect, useCallback } from 'react';
 
-export interface LeaderboardEntry {
+export type LeaderboardTab = 'bettors' | 'creators';
+
+export interface BettorEntry {
   address: string;
-  /** Total predictions made by this address */
-  totalPredictions: number;
-  /** Win percentage (0-100) */
-  winPercentage: number;
-  /** Total net profits in μSTX (winnings - wagered) */
-  totalProfits: number;
-  /** Current winning streak (consecutive pools won) */
-  currentStreak: number;
-  /** Composite score used for ranking: totalProfits (μSTX) */
-  score: number;
   rank: number;
+  totalVolume: number;
+  wins: number;
+  totalPredictions: number;
+  winPercentage: number;
 }
 
-interface UseLeaderboardReturn {
-  entries: LeaderboardEntry[];
-  userRank: number | null;
+export interface CreatorEntry {
+  address: string;
+  rank: number;
+  totalPools: number;
+  totalVolume: number;
+}
+
+export interface UseLeaderboardReturn {
+  bettors: BettorEntry[];
+  creators: CreatorEntry[];
+  userBettorRank: number | null;
+  userCreatorRank: number | null;
   isLoading: boolean;
   error: string | null;
   refresh: () => void;
 }
 
-/**
- * Builds a leaderboard from mock data.
- *
- * Ranking formula (score):
- *   score = totalProfits (in μSTX)
- *
- * Metrics:
- *   - totalPredictions: Total bets placed
- *   - winPercentage: Win rate as percentage (0-100)
- *   - totalProfits: Net winnings - total wagered
- *   - currentStreak: Consecutive pools won
- */
+// Mock data — replace with on-chain event queries when indexer is available.
+const MOCK_BETTORS: Omit<BettorEntry, 'rank'>[] = [
+  { address: 'GBETTOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 12_500_000, wins: 32, totalPredictions: 47, winPercentage: 68.1 },
+  { address: 'GBETTOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 9_800_000, wins: 23, totalPredictions: 32, winPercentage: 71.9 },
+  { address: 'GBETTOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 7_200_000, wins: 18, totalPredictions: 28, winPercentage: 64.3 },
+  { address: 'GBETTOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_500_000, wins: 32, totalPredictions: 55, winPercentage: 58.2 },
+  { address: 'GBETTOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_100_000, wins: 15, totalPredictions: 19, winPercentage: 78.9 },
+  { address: 'GBETTOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 5_800_000, wins: 25, totalPredictions: 41, winPercentage: 61.0 },
+  { address: 'GBETTOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 4_500_000, wins: 16, totalPredictions: 23, winPercentage: 69.6 },
+  { address: 'GBETTOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 3_200_000, wins: 20, totalPredictions: 36, winPercentage: 55.6 },
+  { address: 'GBETTOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 2_800_000, wins: 11, totalPredictions: 15, winPercentage: 73.3 },
+  { address: 'GBETTOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 1_500_000, wins: 15, totalPredictions: 29, winPercentage: 51.7 },
+];
+
+const MOCK_CREATORS: Omit<CreatorEntry, 'rank'>[] = [
+  { address: 'GCREATOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 24, totalVolume: 45_000_000 },
+  { address: 'GCREATOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 18, totalVolume: 32_000_000 },
+  { address: 'GCREATOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 15, totalVolume: 28_000_000 },
+  { address: 'GCREATOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 12, totalVolume: 21_000_000 },
+  { address: 'GCREATOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 10, totalVolume: 18_500_000 },
+  { address: 'GCREATOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 9, totalVolume: 15_000_000 },
+  { address: 'GCREATOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 7, totalVolume: 11_000_000 },
+  { address: 'GCREATOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 6, totalVolume: 8_500_000 },
+  { address: 'GCREATOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 4, totalVolume: 5_200_000 },
+  { address: 'GCREATOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 3, totalVolume: 2_800_000 },
+];
+
 export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboardReturn {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
-  const [userRank, setUserRank] = useState<number | null>(null);
+  const [bettors, setBettors] = useState<BettorEntry[]>([]);
+  const [creators, setCreators] = useState<CreatorEntry[]>([]);
+  const [userBettorRank, setUserBettorRank] = useState<number | null>(null);
+  const [userCreatorRank, setUserCreatorRank] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock leaderboard data with the new metrics
-  const mockLeaderboardData: LeaderboardEntry[] = [
-    { address: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE2VGZJSHRTB3J2J', totalPredictions: 47, winPercentage: 68.1, totalProfits: 12500000, currentStreak: 8, score: 0, rank: 0 },
-    { address: 'ST2CY5V39TQDPWCZ6W5K6N2ZJH2G5W8TR3T6V3N1M5', totalPredictions: 32, winPercentage: 71.9, totalProfits: 9800000, currentStreak: 5, score: 0, rank: 0 },
-    { address: 'ST3AM1M5V4N6Z8K9P0R2S4T6V8W0X2Y4Z6A8B0C2D4', totalPredictions: 28, winPercentage: 64.3, totalProfits: 7200000, currentStreak: 3, score: 0, rank: 0 },
-    { address: 'ST4BQ9V8W0X2Y4Z6A8B0C2D4E6F8G0H2I4J6K8L0M2', totalPredictions: 55, winPercentage: 58.2, totalProfits: 6500000, currentStreak: 2, score: 0, rank: 0 },
-    { address: 'ST5CR7E9V1X3Y5Z7A9B1C3D5E7F9G1H3I5J7K9L1M3', totalPredictions: 19, winPercentage: 78.9, totalProfits: 6100000, currentStreak: 6, score: 0, rank: 0 },
-    { address: 'ST6DS8F0W2X4Y6Z8A0B2C4D6E8F0G2H4I6J8K0L2M4', totalPredictions: 41, winPercentage: 61.0, totalProfits: 5800000, currentStreak: 4, score: 0, rank: 0 },
-    { address: 'ST7ET9G1X3Y5Z7A9B1C3D5E7F9G1H3I5J7K9L1M3', totalPredictions: 23, winPercentage: 69.6, totalProfits: 4500000, currentStreak: 1, score: 0, rank: 0 },
-    { address: 'ST8FU0H2X4Y6Z8A0B2C4D6E8F0G2H4I6J8K0L2M4', totalPredictions: 36, winPercentage: 55.6, totalProfits: 3200000, currentStreak: 0, score: 0, rank: 0 },
-    { address: 'ST9GV1I3X5Y7Z9A1B3C5D7E9F1G3H5I7J9K1L3M5', totalPredictions: 15, winPercentage: 73.3, totalProfits: 2800000, currentStreak: 3, score: 0, rank: 0 },
-    { address: 'ST0HW2J4X6Y8Z0A2B4C6D8E0F2G4H6I8J0K2L4M6', totalPredictions: 29, winPercentage: 51.7, totalProfits: 1500000, currentStreak: 0, score: 0, rank: 0 },
-  ];
-
-  const buildLeaderboard = useCallback(async () => {
+  const load = useCallback(async () => {
     setIsLoading(true);
     setError(null);
-
     try {
-      // Simulate network delay
-      await new Promise(resolve => setTimeout(resolve, 500));
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
 
-      // Add current user to leaderboard if specified
-      const entriesWithUser = [...mockLeaderboardData];
-      
-      if (currentUserAddress) {
-        // Check if user already exists in mock data
-        const existingUser = entriesWithUser.find(e => e.address === currentUserAddress);
-        
-        if (!existingUser) {
-          // Add mock entry for current user
-          const userEntry: LeaderboardEntry = {
-            address: currentUserAddress,
-            totalPredictions: 12,
-            winPercentage: 58.3,
-            totalProfits: 850000,
-            currentStreak: 2,
-            score: 0,
-            rank: 0,
-          };
-          entriesWithUser.push(userEntry);
-        }
+      // Build bettors list (top 100 by volume)
+      const bettorData = [...MOCK_BETTORS];
+      if (currentUserAddress && !bettorData.find((e) => e.address === currentUserAddress)) {
+        bettorData.push({ address: currentUserAddress, totalVolume: 850_000, wins: 7, totalPredictions: 12, winPercentage: 58.3 });
       }
+      const rankedBettors: BettorEntry[] = bettorData
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 100)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
 
-      // Sort by totalProfits (descending) and assign ranks
-      const sorted = entriesWithUser
-        .map(entry => ({ ...entry, score: entry.totalProfits }))
-        .sort((a, b) => b.score - a.score)
-        .map((entry, idx) => ({ ...entry, rank: idx + 1 }));
+      // Build creators list (top 100 by volume)
+      const creatorData = [...MOCK_CREATORS];
+      if (currentUserAddress && !creatorData.find((e) => e.address === currentUserAddress)) {
+        creatorData.push({ address: currentUserAddress, totalPools: 1, totalVolume: 200_000 });
+      }
+      const rankedCreators: CreatorEntry[] = creatorData
+        .sort((a, b) => b.totalVolume - a.totalVolume)
+        .slice(0, 100)
+        .map((e, i) => ({ ...e, rank: i + 1 }));
 
-      setEntries(sorted);
+      setBettors(rankedBettors);
+      setCreators(rankedCreators);
 
       if (currentUserAddress) {
-        const found = sorted.find(e => e.address === currentUserAddress);
-        setUserRank(found?.rank ?? null);
+        setUserBettorRank(rankedBettors.find((e) => e.address === currentUserAddress)?.rank ?? null);
+        setUserCreatorRank(rankedCreators.find((e) => e.address === currentUserAddress)?.rank ?? null);
       }
     } catch (e) {
       log.error('useLeaderboard error:', e);
@@ -110,8 +109,8 @@ export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboa
   }, [currentUserAddress]);
 
   useEffect(() => {
-    buildLeaderboard();
-  }, [buildLeaderboard]);
+    void load();
+  }, [load]);
 
-  return { entries, userRank, isLoading, error, refresh: buildLeaderboard };
+  return { bettors, creators, userBettorRank, userCreatorRank, isLoading, error, refresh: load };
 }

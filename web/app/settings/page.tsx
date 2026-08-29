@@ -2,12 +2,15 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ElementType, type ReactNode } from 'react';
-import Navbar from '../components/Navbar';
-import { useWallet } from '../components/WalletAdapterProvider';
-import { getMarkets, getUserActivity, type Pool, type ActivityItem } from '../lib/stacks-api';
+import Navbar from '@/components/Navbar';
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { getMarkets } from '../lib/soroban-read-api';
+import { predinexReadApi } from '../lib/adapters/predinex-read-api';
+import type { Pool, ActivityItem } from '../lib/market-types';
 import { useI18n, supportedLanguages, type AppLanguage } from '../lib/i18n';
 import { useBrowserNotifications } from '../lib/notifications';
 import { useNotificationPreferences } from '../lib/hooks/useNotificationPreferences';
+import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { exportRecords } from '../lib/export';
 import { Bell, Download, Languages, LoaderCircle, FileDown, Globe2, ChevronRight } from 'lucide-react';
 
@@ -66,7 +69,7 @@ export default function SettingsPage() {
       try {
         const [marketData, activityData] = await Promise.all([
           getMarkets('all'),
-          address ? getUserActivity(address, 25) : Promise.resolve([]),
+          address ? predinexReadApi.getUserActivity(address, 25) : Promise.resolve([]),
         ]);
 
         if (!active) return;
@@ -149,6 +152,7 @@ export default function SettingsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
 
+      <RouteErrorBoundary routeName="Settings">
       <div className="mx-auto max-w-7xl px-4 pb-16 pt-24 sm:px-6 lg:px-8">
         <div className="mb-8 flex flex-col gap-3">
           <div className="inline-flex items-center gap-2 text-sm font-medium text-primary">
@@ -282,6 +286,7 @@ export default function SettingsPage() {
           </SettingsCard>
         </div>
       </div>
+      </RouteErrorBoundary>
     </main>
   );
 }

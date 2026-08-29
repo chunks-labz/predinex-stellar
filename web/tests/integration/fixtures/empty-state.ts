@@ -4,7 +4,7 @@
  * tests are deterministic without hitting the Stellar network.
  */
 
-import type { Pool } from '../../../app/lib/stacks-api';
+import type { Pool } from '../../../app/lib/market-types';
 import type { UserBetData } from '../../../app/lib/soroban-read-api';
 import type { SorobanRpcEvent } from '../../helpers/mock-surfaces';
 

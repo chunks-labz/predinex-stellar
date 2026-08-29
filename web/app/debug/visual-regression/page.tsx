@@ -1,6 +1,6 @@
 'use client';
 
-import MarketCard from '@/app/components/MarketCard';
+import MarketCard from '@/components/MarketCard';
 import ActivityFeed from '@/app/components/ActivityFeed';
 import PoolIntegration from '@/app/components/PoolIntegration';
 import ActiveBetsCard from '@/app/components/dashboard/ActiveBetsCard';

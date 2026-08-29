@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
-import PWAInstallPrompt from '../../app/components/PWAInstallPrompt';
+import PWAInstallPrompt from '@/components/PWAInstallPrompt';
 
 interface MockPromptEvent extends Event {
   prompt: ReturnType<typeof vi.fn>;

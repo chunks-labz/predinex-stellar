@@ -105,7 +105,7 @@ duration_extended      →  'duration-extended'
 'use client';
 
 import { use } from 'react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 import PoolActivityTimeline from '../../components/PoolActivityTimeline';
 import { predinexReadApi } from '../../lib/adapters/predinex-read-api';
 import type { Pool } from '../../lib/adapters/types';

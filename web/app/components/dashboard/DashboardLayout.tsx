@@ -134,7 +134,7 @@ export default function DashboardLayout({
 
         {/* Main Content */}
         <div className="flex-1 lg:ml-0">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 lg:py-12 pl-14 sm:pl-6 lg:pl-8">
             {/* Breadcrumbs */}
             {breadcrumbs.length > 0 && (
               <nav className="flex items-center gap-2 text-sm text-muted-foreground mb-6">

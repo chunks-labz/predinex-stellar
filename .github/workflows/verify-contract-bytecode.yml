@@ -41,29 +41,29 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: contracts/predinex
 
-      - name: Install Soroban CLI
+      - name: Install Stellar CLI
         run: |
-          cargo install soroban-cli --features opt
-          soroban version
+          cargo install --locked stellar-cli@22.0.1
+          stellar --version
 
       - name: Build contract from source
         working-directory: contracts/predinex
         run: |
-          cargo build --target wasm32-unknown-unknown --release
-          stellar contract optimize --wasm target/wasm32-unknown-unknown/release/predinex.wasm
+          cargo build --target wasm32v1-none --release
+          stellar contract optimize --wasm target/wasm32v1-none/release/predinex.wasm
           
           # Store the path for later
-          echo "SOURCE_WASM_PATH=target/wasm32-unknown-unknown/release/predinex.optimized.wasm" >> $GITHUB_ENV
+          echo "SOURCE_WASM_PATH=target/wasm32v1-none/release/predinex.optimized.wasm" >> $GITHUB_ENV
           
           # Compute hash of source-built bytecode
-          SOURCE_HASH=$(sha256sum target/wasm32-unknown-unknown/release/predinex.optimized.wasm | cut -d' ' -f1)
+          SOURCE_HASH=$(sha256sum target/wasm32v1-none/release/predinex.optimized.wasm | cut -d' ' -f1)
           echo "SOURCE_HASH=$SOURCE_HASH" >> $GITHUB_ENV
           echo "Source-built WASM hash: $SOURCE_HASH"
 
@@ -110,7 +110,7 @@ jobs:
           echo "Fetching bytecode for contract $CONTRACT_ID from $NETWORK..."
           
           # Fetch the WASM from the contract
-          soroban contract fetch \
+          stellar contract fetch \
             --id "${{ env.CONTRACT_ID }}" \
             --network "${{ env.NETWORK }}" \
             --out-file /tmp/onchain.wasm
@@ -281,7 +281,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
           echo "# Fetch and verify" >> $GITHUB_STEP_SUMMARY
-          echo "soroban contract fetch --id ${{ env.CONTRACT_ID }} --network ${{ env.NETWORK }} --out-file onchain.wasm" >> $GITHUB_STEP_SUMMARY
+          echo "stellar contract fetch --id ${{ env.CONTRACT_ID }} --network ${{ env.NETWORK }} --out-file onchain.wasm" >> $GITHUB_STEP_SUMMARY
           echo "sha256sum onchain.wasm" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Compare with this report:" >> $GITHUB_STEP_SUMMARY

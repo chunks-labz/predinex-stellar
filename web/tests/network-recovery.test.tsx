@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { NetworkMismatchWarning } from '../app/components/NetworkMismatchWarning';
+import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 import PoolIntegration from '../app/components/PoolIntegration';
 import { renderWithProviders } from './helpers/renderWithProviders';
 import * as AppKitReact from '@reown/appkit/react';
 import * as RuntimeConfig from '../app/lib/runtime-config';
-import * as WalletAdapterProvider from '../app/components/WalletAdapterProvider';
-import * as StacksApi from '../app/lib/stacks-api';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
+import * as SorobanReadApi from '../app/lib/soroban-read-api';
 import { stellarNetworks } from '../lib/appkit-config';
 
 // Mock the dependencies
@@ -20,12 +20,12 @@ vi.mock('../app/lib/runtime-config', () => ({
   getRuntimeConfig: vi.fn(),
 }));
 
-vi.mock('../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../app/lib/stacks-api', () => ({
+vi.mock('../app/lib/soroban-read-api', () => ({
   getMarkets: vi.fn(),
 }));
 
@@ -60,7 +60,7 @@ describe('Network Mismatch Recovery Integration', () => {
     vi.mocked(RuntimeConfig.getRuntimeConfig).mockReturnValue({ network: 'testnet' } as any);
     
     // Mock API
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool as any]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool as any]);
   });
 
   it('detects mismatch, shows warning, and recovers when network is switched', async () => {

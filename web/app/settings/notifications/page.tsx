@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Bell, ChevronLeft, LoaderCircle, RotateCcw } from 'lucide-react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 import { useWalletConnect } from '../../lib/hooks/useWalletConnect';
 import { useNotificationPreferences } from '../../lib/hooks/useNotificationPreferences';
 import { useBrowserNotifications, updatePushPreferences } from '../../lib/notifications';

@@ -1,5 +1,10 @@
 # Wallet Connection Components
 
+Shared UI components should live in [`../../components`](../../components) and
+be imported with `@/components/...`. This directory is for App Router-specific
+components and temporary compatibility re-exports for older `app/components`
+imports.
+
 This directory contains the wallet connection UI for Predinex. The current support matrix is documented in [WALLET_NETWORK_SUPPORT.md](../../docs/WALLET_NETWORK_SUPPORT.md).
 
 ## Components

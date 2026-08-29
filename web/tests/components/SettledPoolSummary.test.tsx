@@ -3,10 +3,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { screen } from '@testing-library/react';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 import SettledPoolSummary from '../../app/components/SettledPoolSummary';
-import type { Pool } from '../../app/lib/stacks-api';
+import type { Pool } from '../../app/lib/market-types';
 
 // Wallet mock — component doesn't use it, but providers need it
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(() => ({
     chain: 'stacks', isConnected: false, isLoading: false,
     address: null, connect: vi.fn(), disconnect: vi.fn(),

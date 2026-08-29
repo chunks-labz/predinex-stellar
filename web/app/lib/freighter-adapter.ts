@@ -107,7 +107,7 @@ export function createFreighterAdapter(
   }
 
   const adapter: FreighterWalletClient = {
-    chain: 'stacks' as WalletChain, // kept for interface compat; Freighter is Stellar
+    chain: 'stellar' as WalletChain,
     get isLoading() { return _isLoading; },
     get isConnected() { return _isConnected; },
     get address() { return _address; },

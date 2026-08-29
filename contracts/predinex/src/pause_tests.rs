@@ -31,12 +31,12 @@ impl TestCtx {
 
         let contract_id = env.register(PredinexContract, ());
         let client: PredinexContractClient<'static> =
-            unsafe { core::mem::transmute(PredinexContractClient::new(&env, &contract_id)) };
+            PredinexContractClient::new(&env, &contract_id);
 
         let token_admin = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-        client.initialize(&token_id.address(), &token_admin);
+        client.initialize(&token_id.address(), &token_admin, &token_admin);
 
         let freeze_admin = Address::generate(&env);
         client.set_freeze_admin(&token_admin, &freeze_admin);
@@ -62,6 +62,8 @@ impl TestCtx {
             &String::from_str(&self.env, "Yes"),
             &String::from_str(&self.env, "No"),
             &3600,
+            &MIN_CREATOR_DEPOSIT,
+            &None::<u64>,
         )
     }
 

@@ -6,6 +6,9 @@ on:
     - cron: '0 8 * * 1'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   npm-audit:
     name: npm dependency audit
@@ -27,11 +30,7 @@ jobs:
         run: npm ci
 
       - name: Audit (high and critical only)
-        # --audit-level=high surfaces high/critical findings without blocking on moderate/low.
-        # The step is marked continue-on-error so unrelated PRs are never blocked;
-        # findings are still visible in the workflow summary.
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - name: Generate audit report
         run: npm audit --json > npm-audit-report.json || true
@@ -41,6 +40,38 @@ jobs:
         with:
           name: npm-audit-report
           path: web/npm-audit-report.json
+          retention-days: 30
+
+  bot-npm-audit:
+    name: Bot npm dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit (high and critical only)
+        run: npm audit --audit-level=high
+
+      - name: Generate audit report
+        run: npm audit --json > bot-npm-audit-report.json || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-npm-audit-report
+          path: bot/bot-npm-audit-report.json
           retention-days: 30
 
   cargo-audit:
@@ -55,14 +86,13 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
       - name: Audit
         run: cargo audit
-        continue-on-error: true
 
       - name: Generate audit report
         run: cargo audit --json > cargo-audit-report.json || true

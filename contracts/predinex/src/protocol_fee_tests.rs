@@ -1,8 +1,8 @@
 #![cfg(test)]
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env, String,
+    testutils::{Address as _, Events, Ledger},
+    vec, Address, Env, IntoVal, String, Symbol,
 };
 
 fn setup_contract() -> (Env, PredinexContractClient<'static>, Address, Address) {
@@ -10,16 +10,36 @@ fn setup_contract() -> (Env, PredinexContractClient<'static>, Address, Address) 
     env.mock_all_auths();
 
     let contract_id = env.register(PredinexContract, ());
-    let client = PredinexContractClient::new(&env, &contract_id);
+    let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
 
     let token_admin = Address::generate(&env);
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-    client.initialize(&token_id.address(), &token_admin);
-
-    let client: PredinexContractClient<'static> = unsafe { core::mem::transmute(client) };
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
 
     (env, client, token_admin, token_id.address())
+}
+
+/// Like `setup_contract` but returns the contract_id for event assertion.
+fn setup_contract_for_events() -> (
+    Env,
+    PredinexContractClient<'static>,
+    Address,
+    Address,
+    Address,
+) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register(PredinexContract, ());
+    let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
+
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
+
+    (env, client, contract_id, token_admin, token_id.address())
 }
 
 #[test]
@@ -70,6 +90,8 @@ fn test_claim_winnings_uses_configured_fee() {
         &String::from_str(&env, "Yes"),
         &String::from_str(&env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     client.place_bet(&user, &pool_id, &0, &100, &None::<Address>);
@@ -93,7 +115,35 @@ fn test_create_pool_event_includes_metadata() {
         &String::from_str(&_env, "Yes"),
         &String::from_str(&_env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
 
     assert_eq!(pool_id, 1);
+}
+
+/// `set_protocol_fee` emits a single `protocol_fee_set` event carrying the new
+/// fee and `event_version` in its topic tuple, consistent with all other events.
+#[test]
+fn test_set_protocol_fee_emits_event_with_version() {
+    let (env, client, cid, admin, _) = setup_contract_for_events();
+
+    client.set_protocol_fee(&admin, &500);
+
+    let events = env.events().all();
+    assert_eq!(
+        events,
+        vec![
+            &env,
+            (
+                cid,
+                (
+                    Symbol::new(&env, "protocol_fee_set"),
+                    Symbol::new(&env, EVENT_SCHEMA_VERSION),
+                )
+                    .into_val(&env),
+                (admin, 200u32, 500u32).into_val(&env),
+            ),
+        ]
+    );
 }

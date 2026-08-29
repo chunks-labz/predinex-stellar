@@ -4,10 +4,10 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ClaimAllButton, { type ClaimablePool } from '../../components/ClaimAllButton';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import { useWallet } from '../../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -133,7 +133,7 @@ describe('ClaimAllButton', () => {
     expect(screen.getAllByText('Simulation failed').length).toBeGreaterThan(0);
   });
 
-  it('caps the batch at 20 pools', async () => {
+  it('caps the batch at 20 pools and displays batch limit warning/notice', async () => {
     const many: ClaimablePool[] = Array.from({ length: 25 }, (_, i) => ({
       poolId: i + 1,
       marketTitle: `Pool ${i + 1}`,
@@ -143,10 +143,15 @@ describe('ClaimAllButton', () => {
 
     renderWithProviders(<ClaimAllButton claimablePools={many} userAddress="GTESTADDRESS" />);
     expect(screen.getByTestId('claim-all-button')).toHaveTextContent('Claim All (20)');
+    expect(screen.getByTestId('claim-all-limit-warning')).toHaveTextContent('Capped at 20 per batch. 5 pools remaining for next batch.');
 
     await userEvent.click(screen.getByTestId('claim-all-button'));
     await waitFor(() => expect(mockClaimAll).toHaveBeenCalledTimes(1));
     expect(mockClaimAll.mock.calls[0][0].poolIds).toHaveLength(20);
+
+    expect(screen.getByTestId('claim-all-limit-notice')).toHaveTextContent(
+      'Batch size is limited to 20 pools per transaction. 5 remaining pools can be claimed in a subsequent transaction.'
+    );
 
     deferred.resolve({ txHash: 'ok', claimedPoolIds: many.slice(0, 20).map((p) => p.poolId) });
   });

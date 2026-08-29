@@ -4,15 +4,38 @@
 //
 // `cancel_bet` lets a bettor reduce or close their exposure on an outcome while
 // the market is still live; `extend_pool_duration` lets the creator push out an
-// open pool's expiry up to the maximum total lifetime.
+// open pool's expiry by at most `MAX_EXTENSION_SECS` per call and up to the
+// maximum total lifetime.
 // ============================================================================
 
 #![cfg(test)]
 extern crate std;
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String,
+    testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, String, Val,
 };
+
+// ── Event helpers ─────────────────────────────────────────────────────────────
+
+fn xdr_topic_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent, i: usize) -> Val {
+    match &event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+            Env,
+            soroban_sdk::xdr::ScVal,
+        >>::try_from_val(env, &v0.topics[i])
+        .unwrap(),
+    }
+}
+
+fn xdr_data_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent) -> Val {
+    match &event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+            Env,
+            soroban_sdk::xdr::ScVal,
+        >>::try_from_val(env, &v0.data)
+        .unwrap(),
+    }
+}
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -31,11 +54,9 @@ fn setup_bm() -> BmEnv<'static> {
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
     let contract_id = env.register(PredinexContract, ());
-    let client = PredinexContractClient::new(&env, &contract_id);
+    let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
 
-    client.initialize(&token_id.address(), &token_admin);
-
-    let client: PredinexContractClient<'static> = unsafe { core::mem::transmute(client) };
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
 
     BmEnv {
         env,
@@ -60,6 +81,8 @@ fn make_pool_bm(t: &BmEnv) -> (u32, Address) {
         &String::from_str(&t.env, "Yes"),
         &String::from_str(&t.env, "No"),
         &3_600u64,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     );
     (pool_id, creator)
 }
@@ -67,13 +90,16 @@ fn make_pool_bm(t: &BmEnv) -> (u32, Address) {
 /// Find the most recent `bet_cancelled` event and decode its payload.
 fn last_bet_cancelled(env: &Env) -> (u32, Address, BetCancelledEvent) {
     let events = env.events().all();
-    for i in (0..events.len()).rev() {
-        let event = events.get(i).unwrap();
-        let topic0: Symbol = soroban_sdk::FromVal::from_val(env, &event.1.get(0).unwrap());
+    for event in events.events().iter().rev() {
+        let topic0: Symbol =
+            soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 0)).unwrap();
         if topic0 == Symbol::new(env, "bet_cancelled") {
-            let pool_id: u32 = soroban_sdk::FromVal::from_val(env, &event.1.get(2).unwrap());
-            let user: Address = soroban_sdk::FromVal::from_val(env, &event.1.get(3).unwrap());
-            let payload: BetCancelledEvent = soroban_sdk::FromVal::from_val(env, &event.2);
+            let pool_id: u32 =
+                soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 2)).unwrap();
+            let user: Address =
+                soroban_sdk::TryFromVal::try_from_val(env, &xdr_topic_val(env, event, 3)).unwrap();
+            let payload: BetCancelledEvent =
+                soroban_sdk::TryFromVal::try_from_val(env, &xdr_data_val(env, event)).unwrap();
             return (pool_id, user, payload);
         }
     }
@@ -299,7 +325,7 @@ fn c9_min_bet_rechecked_after_cancellation() {
     // Cancelling 250 would leave 50, below the 100 minimum → rejected.
     assert_eq!(
         t.client.try_cancel_bet(&user, &pool_id, &0u32, &250i128),
-        Err(Ok(ContractError::BetBelowMinBet)),
+        Err(Ok(ContractError::InvalidBetAmount)),
         "remaining stake below the min bet must be rejected"
     );
 
@@ -455,27 +481,35 @@ fn e4_zero_extension_rejected() {
     );
 }
 
-/// E5: Boundary — extending exactly to MAX_POOL_DURATION_SECS from creation is
-/// allowed, but one second more is rejected.
+/// E5: Boundary — repeated capped extensions can reach exactly
+/// MAX_POOL_DURATION_SECS from creation, but one second more is rejected.
 #[test]
 fn e5_boundary_at_max_pool_duration() {
     let t = setup_bm();
     t.env.ledger().with_mut(|li| li.timestamp = 0);
     let (pool_id, creator) = make_pool_bm(&t); // created_at = 0, expiry = 3600
 
-    // Extend so total lifetime == MAX exactly.
-    let to_max = MAX_POOL_DURATION_SECS - 3_600;
-    let new_expiry = t.client.extend_pool_duration(&creator, &pool_id, &to_max);
-    assert_eq!(new_expiry, MAX_POOL_DURATION_SECS);
+    // The per-call cap means reaching the total-lifetime ceiling takes several
+    // calls; walk the expiry up to MAX exactly.
+    let mut remaining = MAX_POOL_DURATION_SECS - 3_600;
+    while remaining > 0 {
+        let step = core::cmp::min(remaining, MAX_EXTENSION_SECS);
+        t.client.extend_pool_duration(&creator, &pool_id, &step);
+        remaining -= step;
+    }
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().expiry,
+        MAX_POOL_DURATION_SECS
+    );
 
-    // Any further extension exceeds the cap.
+    // Any further extension exceeds the total-lifetime cap.
     assert_eq!(
         t.client.try_extend_pool_duration(&creator, &pool_id, &1u64),
         Err(Ok(ContractError::DurationTooLong))
     );
 }
 
-/// E6: Extending beyond the max cap in a single call is rejected.
+/// E6: An extension larger than the per-call cap is rejected.
 #[test]
 fn e6_extension_beyond_cap_rejected() {
     let t = setup_bm();
@@ -486,6 +520,59 @@ fn e6_extension_beyond_cap_rejected() {
         t.client
             .try_extend_pool_duration(&creator, &pool_id, &MAX_POOL_DURATION_SECS),
         Err(Ok(ContractError::DurationTooLong))
+    );
+}
+
+/// E6a: Boundary — exactly MAX_EXTENSION_SECS is accepted, one second more is
+/// rejected, and the rejected call leaves the stored expiry untouched.
+#[test]
+fn e6a_boundary_at_max_extension_per_call() {
+    let t = setup_bm();
+    t.env.ledger().with_mut(|li| li.timestamp = 0);
+    let (pool_id, creator) = make_pool_bm(&t); // expiry = 3600
+
+    assert_eq!(
+        t.client
+            .try_extend_pool_duration(&creator, &pool_id, &(MAX_EXTENSION_SECS + 1)),
+        Err(Ok(ContractError::DurationTooLong)),
+        "one second over the per-call cap is rejected"
+    );
+    assert_eq!(
+        t.client.get_pool(&pool_id).unwrap().expiry,
+        3_600,
+        "rejected extension must not mutate the pool"
+    );
+
+    let new_expiry = t
+        .client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+    assert_eq!(
+        new_expiry,
+        3_600 + MAX_EXTENSION_SECS,
+        "exactly the per-call cap is accepted"
+    );
+}
+
+/// E6b: The per-call cap is not a total cap — a creator can still extend again
+/// on a later call, each capped in turn.
+#[test]
+fn e6b_repeated_extensions_each_capped() {
+    let t = setup_bm();
+    t.env.ledger().with_mut(|li| li.timestamp = 0);
+    let (pool_id, creator) = make_pool_bm(&t); // expiry = 3600
+
+    t.client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+    let new_expiry = t
+        .client
+        .extend_pool_duration(&creator, &pool_id, &MAX_EXTENSION_SECS);
+
+    assert_eq!(new_expiry, 3_600 + 2 * MAX_EXTENSION_SECS);
+    assert_eq!(
+        t.client
+            .try_extend_pool_duration(&creator, &pool_id, &(MAX_EXTENSION_SECS + 1)),
+        Err(Ok(ContractError::DurationTooLong)),
+        "the per-call cap still applies on subsequent calls"
     );
 }
 
@@ -543,13 +630,16 @@ fn e8_duration_extended_event_payload() {
     let new_expiry = t.client.extend_pool_duration(&creator, &pool_id, &900u64);
 
     let events = t.env.events().all();
-    let last = events.last().expect("must emit an event");
-    let topic0: Symbol = soroban_sdk::FromVal::from_val(&t.env, &last.1.get(0).unwrap());
-    let topic_pool: u32 = soroban_sdk::FromVal::from_val(&t.env, &last.1.get(2).unwrap());
+    let last = events.events().last().expect("must emit an event");
+    let topic0: Symbol =
+        soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_topic_val(&t.env, last, 0)).unwrap();
+    let topic_pool: u32 =
+        soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_topic_val(&t.env, last, 2)).unwrap();
     assert_eq!(topic0, Symbol::new(&t.env, "pool_duration_extended"));
     assert_eq!(topic_pool, pool_id);
 
-    let payload: PoolDurationExtendedEvent = soroban_sdk::FromVal::from_val(&t.env, &last.2);
+    let payload: PoolDurationExtendedEvent =
+        soroban_sdk::TryFromVal::try_from_val(&t.env, &xdr_data_val(&t.env, last)).unwrap();
     assert_eq!(payload.creator, creator);
     assert_eq!(payload.new_expiry, new_expiry);
 }

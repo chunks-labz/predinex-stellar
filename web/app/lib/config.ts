@@ -3,15 +3,18 @@
  * Centralized configuration for the entire application
  */
 
+import { MAX_POOL_DURATION_SECONDS } from './constants';
+import { MIN_POOL_DURATION_SECS } from '@/lib/validators';
+
 /**
  * Token/Currency configuration
  * Configurable token symbol for rewards, incentives, and display
  */
 export const TOKEN_CONFIG = {
   /** Display symbol for the native token (e.g., 'STX', 'XLM', 'USD') */
-  SYMBOL: process.env.NEXT_PUBLIC_TOKEN_SYMBOL ?? 'STX',
+  SYMBOL: process.env.NEXT_PUBLIC_TOKEN_SYMBOL ?? 'XLM',
   /** Full token name for display */
-  NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stacks Token',
+  NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stellar Lumens',
   /** Decimal places for display formatting */
   DECIMALS: 2,
   /** Stroops/micro units per token (for conversion) */
@@ -31,8 +34,8 @@ export const BET_CONFIG = {
  * Pool configuration
  */
 export const POOL_CONFIG = {
-  MINIMUM_DURATION: 10, // blocks
-  MAXIMUM_DURATION: 1_000_000, // blocks
+  MINIMUM_DURATION: MIN_POOL_DURATION_SECS, // seconds — matches the Soroban contract's minimum
+  MAXIMUM_DURATION: MAX_POOL_DURATION_SECONDS, // seconds — matches the Soroban contract's maximum
   TITLE_MAX_LENGTH: 256,
   DESCRIPTION_MAX_LENGTH: 512,
   OUTCOME_MAX_LENGTH: 128,
@@ -74,9 +77,9 @@ export const UI_CONFIG = {
  * Block time configuration
  */
 export const BLOCK_TIME = {
-  AVERAGE_BLOCK_TIME: 10 * 60, // 10 minutes in seconds
-  BLOCKS_PER_DAY: 144,
-  BLOCKS_PER_HOUR: 6,
+  AVERAGE_BLOCK_TIME: 5, // 5 seconds
+  BLOCKS_PER_DAY: 17280,
+  BLOCKS_PER_HOUR: 720,
 } as const;
 
 /**

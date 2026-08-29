@@ -1,13 +1,14 @@
 'use client';
 
-import Navbar from "../components/Navbar";
-import AuthGuard from "../components/AuthGuard";
+import Navbar from '@/components/Navbar';
+import AuthGuard from '@/components/AuthGuard';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../../components/ui/accordion";
 import { Info, Trophy } from "lucide-react";
+import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Leaderboard from "../../components/Leaderboard";
-import { useWallet } from "../components/WalletAdapterProvider";
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useLeaderboard } from "../lib/hooks/useLeaderboard";
-import { TOKEN_SYMBOL } from "../lib/formatting";
+import { TOKEN_SYMBOL } from "@/app/lib/formatting";
 
 export default function RewardsPage() {
   const { address: stxAddress } = useWallet();
@@ -23,6 +24,7 @@ export default function RewardsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
+      <RouteErrorBoundary routeName="Rewards">
       <AuthGuard>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="glass-panel p-8 rounded-2xl mb-8">
@@ -87,6 +89,7 @@ export default function RewardsPage() {
           </div>
         </div>
       </AuthGuard>
+      </RouteErrorBoundary>
     </main>
   );
 }

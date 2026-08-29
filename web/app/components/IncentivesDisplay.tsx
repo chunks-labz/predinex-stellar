@@ -4,10 +4,10 @@ const log = createScopedLogger('IncentivesDisplay');
 
 import { useState, useEffect, useCallback } from 'react';
 import { useIncentives } from '../lib/hooks/useIncentives';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { getStacksCoreApiBaseUrl, predinexReadApi } from '../lib/adapters/predinex-read-api';
 import { calculateTotalIncentive, DEFAULT_INCENTIVE_CONFIG, BetterIncentive } from '../lib/liquidity-incentives';
-import { TOKEN_SYMBOL } from '../lib/formatting';
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { Gift, TrendingUp, Award, Zap } from 'lucide-react';
 
 interface IncentivesDisplayProps {
@@ -16,6 +16,7 @@ interface IncentivesDisplayProps {
 }
 
 interface ContractIncentive {
+  id?: string;
   poolId: number;
   betterId: string;
   betAmount: number;
@@ -34,12 +35,14 @@ async function fetchIncentivesFromContract(userAddress: string): Promise<Contrac
     const incentives: ContractIncentive[] = [];
     const results = data.results || [];
     
-    for (const tx of results) {
+    for (let i = 0; i < results.length; i++) {
+      const tx = results[i];
       if (tx.contract_call?.function_name === 'claim-incentive') {
         const args = tx.contract_call.function_args || [];
-        const poolId = args.find((a: any) => a.name === 'pool-id')?.repr?.replace('u', '') || '0';
+        const poolId = args.find((a: { name: string; repr?: string }) => a.name === 'pool-id')?.repr?.replace('u', '') || '0';
         
         incentives.push({
+          id: `contract-${userAddress}-${poolId}-${tx.tx_id || i}`,
           poolId: parseInt(poolId),
           betterId: userAddress,
           betAmount: 0,
@@ -74,6 +77,7 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
       1,
       totalVolume / 1_000_000,
       previousBetsCount,
+      false, // isReferred
       DEFAULT_INCENTIVE_CONFIG
     );
     
@@ -83,6 +87,7 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
       'loyalty';
     
     return [{
+      id: `pending-${userAddress}-${poolId}-${bonusType}`,
       poolId,
       betterId: userAddress,
       betAmount: userBet.totalBet,
@@ -113,13 +118,15 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
         const pendingIncentives = await calculateRealIncentives(address, poolId || 0);
         
         const allIncentives: BetterIncentive[] = [
-          ...contractIncentives.map(inc => ({
+          ...contractIncentives.map((inc, idx) => ({
             ...inc,
+            id: inc.id || `contract-${address}-${inc.poolId}-${idx}`,
             bonusType: inc.bonusType,
             status: inc.status as 'pending' | 'claimed'
           })),
-          ...pendingIncentives.map(inc => ({
+          ...pendingIncentives.map((inc, idx) => ({
             ...inc,
+            id: inc.id || `pending-${address}-${inc.poolId}-${idx}`,
             bonusType: inc.bonusType,
             status: inc.status as 'pending' | 'claimed'
           }))
@@ -138,7 +145,7 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
     loadIncentives();
   }, [userAddress, poolId, setIncentives]);
 
-  const handleClaim = useCallback(async (incentiveId: number) => {
+  const handleClaim = useCallback(async (incentiveId: string | number) => {
     try {
       await claimIncentive(incentiveId);
     } catch (error) {
@@ -239,7 +246,7 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
             ) : (
               pendingIncentives.map((incentive, idx) => (
                 <div
-                  key={idx}
+                  key={incentive.id || idx}
                   className={`glass p-4 rounded-lg border flex justify-between items-center ${getIncentiveColor(
                     incentive.bonusType
                   )}`}
@@ -254,7 +261,7 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
                   <div className="text-right">
                     <p className="font-bold">{incentive.bonusAmount.toFixed(2)} {TOKEN_SYMBOL}</p>
                     <button
-                      onClick={() => handleClaim(idx)}
+                      onClick={() => handleClaim(incentive.id ?? idx)}
                       className="text-xs px-2 py-1 bg-primary/20 hover:bg-primary/30 rounded mt-1 transition-all"
                     >
                       Claim

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
-import CountdownTimer from '../../app/components/CountdownTimer';
+import CountdownTimer from '@/components/CountdownTimer';
 
 describe('CountdownTimer', () => {
   beforeEach(() => {
@@ -37,9 +37,9 @@ describe('CountdownTimer', () => {
     expect(screen.getByRole('timer')).toHaveTextContent('Expired');
   });
 
-  it('renders the Expired state immediately for a null countdown', () => {
+  it('renders the loading state immediately for a null countdown', () => {
     render(<CountdownTimer secondsRemaining={null} />);
-    expect(screen.getByRole('timer')).toHaveTextContent('Expired');
+    expect(screen.getByRole('timer')).toHaveTextContent('--');
   });
 
   it('shows a static Settled label for settled pools', () => {

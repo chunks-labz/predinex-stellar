@@ -1,11 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { kv } from '@vercel/kv';
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   type NotificationPreferences,
   type WebPushSubscriptionPayload,
 } from '../../lib/push-notification-types';
+import { checkRateLimit, rateLimitHeaders } from '@/app/lib/rate-limit';
 
 export const runtime = 'nodejs';
+
+const KV_PREFIX = 'push_sub:';
+
+// ---------------------------------------------------------------------------
+// Rate limit: max 30 requests per minute per wallet address.
+// Abuse posture: prevents a single client from hammering subscription
+// management endpoints (spam-subscribing or bulk-deleting).
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 
 interface StoredPushSubscription {
   userId: string;
@@ -14,18 +26,12 @@ interface StoredPushSubscription {
   updatedAt: string;
 }
 
-const STORE_KEY = '__predinexPushSubscriptions';
+function kvKey(userId: string, endpoint: string): string {
+  return `${KV_PREFIX}${userId}:${endpoint}`;
+}
 
-function getStore(): Map<string, StoredPushSubscription> {
-  const globalStore = globalThis as typeof globalThis & {
-    [STORE_KEY]?: Map<string, StoredPushSubscription>;
-  };
-
-  if (!globalStore[STORE_KEY]) {
-    globalStore[STORE_KEY] = new Map();
-  }
-
-  return globalStore[STORE_KEY];
+function userIndexKey(userId: string): string {
+  return `${KV_PREFIX}idx:${userId}`;
 }
 
 function jsonError(message: string, status: number) {
@@ -89,15 +95,32 @@ function getAuthenticatedUserId(request: NextRequest, bodyUserId?: unknown): str
   return normalizedBodyUserId;
 }
 
-function storeKey(userId: string, endpoint: string): string {
-  return `${userId}:${endpoint}`;
-}
-
 export async function GET(request: NextRequest) {
   const userId = request.headers.get('x-predinex-wallet-address')?.trim();
   if (!userId) return jsonError('Missing wallet identity.', 401);
 
-  const subscriptions = [...getStore().values()].filter((entry) => entry.userId === userId);
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
+
+  const endpoints = await kv.get<string[]>(userIndexKey(userId));
+  if (!endpoints || endpoints.length === 0) {
+    return NextResponse.json({ subscriptions: [] });
+  }
+
+  const subscriptions: StoredPushSubscription[] = [];
+  for (const ep of endpoints) {
+    const entry = await kv.get<StoredPushSubscription>(kvKey(userId, ep));
+    if (entry) {
+      subscriptions.push(entry);
+    }
+  }
+
   return NextResponse.json({ subscriptions });
 }
 
@@ -114,6 +137,15 @@ export async function POST(request: NextRequest) {
   const userId = getAuthenticatedUserId(request, body.userId);
   if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
 
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
+
   const subscription = validateSubscription(body.subscription);
   if (!subscription) return jsonError('Invalid push subscription.', 400);
 
@@ -126,7 +158,17 @@ export async function POST(request: NextRequest) {
     preferences,
     updatedAt: new Date().toISOString(),
   };
-  getStore().set(storeKey(userId, subscription.endpoint), entry);
+
+  const key = kvKey(userId, subscription.endpoint);
+  const idxKey = userIndexKey(userId);
+
+  await kv.set(key, entry);
+
+  const endpoints = (await kv.get<string[]>(idxKey)) || [];
+  if (!endpoints.includes(subscription.endpoint)) {
+    endpoints.push(subscription.endpoint);
+    await kv.set(idxKey, endpoints);
+  }
 
   return NextResponse.json({ subscription: entry }, { status: 201 });
 }
@@ -144,11 +186,22 @@ export async function DELETE(request: NextRequest) {
   const userId = getAuthenticatedUserId(request, body.userId);
   if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
 
-  for (const [key, entry] of getStore()) {
-    if (entry.userId === userId) {
-      getStore().delete(key);
-    }
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
   }
+
+  const idxKey = userIndexKey(userId);
+  const endpoints = (await kv.get<string[]>(idxKey)) || [];
+
+  for (const ep of endpoints) {
+    await kv.del(kvKey(userId, ep));
+  }
+  await kv.del(idxKey);
 
   return NextResponse.json({ ok: true });
 }

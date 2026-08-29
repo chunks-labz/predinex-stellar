@@ -56,24 +56,28 @@ export function useUserStats() {
   }, []);
 
   const fetchUserBets = useCallback(async (userAddress: string) => {
+    if (!userAddress) {
+      setError('User address is required');
+      return;
+    }
     setIsLoading(true);
     setError(null);
 
     try {
-      // In production, fetch from API
-      // const response = await fetch(`/api/user/${userAddress}/bets`);
-      // const data = await response.json();
-      // setBets(data);
-      // calculateStats(data);
-
-      // Mock data for now
-      const mockBets: UserBet[] = [];
-      setBets(mockBets);
-      calculateStats(mockBets);
+      const response = await fetch(`/api/user/${userAddress}/bets`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch user bets: ${response.statusText}`);
+      }
+      const data = await response.json();
+      setBets(data);
+      calculateStats(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch user bets';
       setError(message);
       log.error('Error fetching user bets:', err);
+      // Fallback to empty state on error
+      setBets([]);
+      calculateStats([]);
     } finally {
       setIsLoading(false);
     }

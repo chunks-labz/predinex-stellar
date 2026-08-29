@@ -44,12 +44,12 @@ const mockWallet = {
   disconnect: vi.fn(),
 };
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(() => mockWallet),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../app/components/StacksProvider', () => ({
+vi.mock('@/components/StacksProvider', () => ({
   useStacks: vi.fn(() => ({
     userData: null,
     authenticate: vi.fn(),
@@ -68,11 +68,11 @@ vi.mock('../../app/lib/hooks/useWalletConnect', () => ({
 
 // ── UI / layout mocks ─────────────────────────────────────────────────────────
 
-vi.mock('../../app/components/Navbar', () => ({
+vi.mock('@/components/Navbar', () => ({
   default: () => <nav data-testid="navbar" />,
 }));
 
-vi.mock('../../app/components/AuthGuard', () => ({
+vi.mock('@/components/AuthGuard', () => ({
   default: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
@@ -174,23 +174,23 @@ vi.mock('../../app/components/DisputeManagement', () => ({
   default: () => <div data-testid="dispute-management" />,
 }));
 
-vi.mock('../../app/components/SearchBar', () => ({
+vi.mock('@/components/SearchBar', () => ({
   default: () => <input data-testid="search-bar" />,
 }));
 
-vi.mock('../../app/components/FilterControls', () => ({
+vi.mock('@/components/FilterControls', () => ({
   default: () => <div data-testid="filter-controls" />,
 }));
 
-vi.mock('../../app/components/SortControls', () => ({
+vi.mock('@/components/SortControls', () => ({
   default: () => <div data-testid="sort-controls" />,
 }));
 
-vi.mock('../../app/components/MarketGrid', () => ({
+vi.mock('@/components/MarketGrid', () => ({
   default: () => <div data-testid="market-grid" />,
 }));
 
-vi.mock('../../app/components/Pagination', () => ({
+vi.mock('@/components/Pagination', () => ({
   default: () => <div data-testid="pagination" />,
 }));
 
@@ -270,6 +270,7 @@ vi.mock('@stacks/connect', () => ({
 
 import HomePage from '../../app/page';
 import MarketsPage from '../../app/markets/page';
+import PoolsPage from '../../app/pools/page';
 import PoolDetailPage from '../../app/markets/[id]/page';
 import CreatePage from '../../app/create/page';
 import DashboardPage from '../../app/dashboard/page';
@@ -280,7 +281,7 @@ import IncentivesPage from '../../app/incentives/page';
 
 // ── Smoke suite ───────────────────────────────────────────────────────────────
 
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 
 const connectedWallet = {
   chain: 'stacks' as const,
@@ -313,6 +314,13 @@ describe('Route smoke tests', () => {
     expect(screen.getByRole('main')).toBeInTheDocument();
   });
 
+  it('/pools renders the filtering list without crashing', () => {
+    renderWithProviders(<PoolsPage />);
+    expect(screen.getByRole('main')).toBeInTheDocument();
+    // The status filter dropdown is part of the pools list filter bar.
+    expect(screen.getByTestId('pool-status-select')).toBeInTheDocument();
+  });
+
   it('/dashboard renders without crashing', () => {
     // Dashboard shows the full layout only when a wallet is connected.
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
@@ -340,11 +348,11 @@ describe('Route smoke tests', () => {
     expect(screen.getByRole('main')).toBeInTheDocument();
   });
 
-  it('/markets/[id] renders without crashing (loading state)', () => {
+  it('/markets/[id] renders without crashing (loading state)', async () => {
     // Params resolve asynchronously; the page shows a loading skeleton first.
     renderWithProviders(
       <PoolDetailPage params={Promise.resolve({ id: '1' })} />
     );
-    expect(screen.getByRole('main')).toBeInTheDocument();
+    expect(await screen.findByRole('main')).toBeInTheDocument();
   });
 });

@@ -1,14 +1,35 @@
-name: Weekly Fuzz Test Suite
+name: Fuzz-Style Test Suite
+
+# Runs deterministic fuzz-style and validation property tests.
+#
+# The three test modules executed here use a seeded LCG to sweep large input
+# spaces (10 000+ iterations each) against the live contract:
+#
+#   src/fuzz.rs              — create_pool, place_bet, settle_pool boundary sweeps
+#   src/fuzz_tests.rs        — payout formula and fee-conservation properties (P1–P10)
+#   src/validation_prop_tests.rs — title / description / outcome / duration validation
+#
+# These are deterministic unit tests, not libfuzzer/honggfuzz targets.
+# The workflow is intentionally named "fuzz-style" to accurately reflect this.
+#
+# If libfuzzer coverage is needed in the future, add a `fuzz/` crate with a
+# `Cargo.toml` depending on `libfuzzer-sys` and `fuzz_target!` harnesses, then
+# invoke them here with:
+#   cargo fuzz run <target> -- -max_total_time=60
 
 on:
   schedule:
     - cron: '0 0 * * 0' # Every Sunday at midnight
-  workflow_dispatch: # On demand
+  workflow_dispatch:     # On-demand runs
+
+permissions:
+  contents: read
 
 jobs:
-  fuzz:
-    name: Run Fuzz Tests
+  fuzz-style-tests:
+    name: Fuzz-Style Tests (predinex)
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,6 +42,31 @@ jobs:
         with:
           workspaces: contracts/predinex
 
-      - name: Run Fuzz Harness
+      # Run all three fuzz-style modules in a single cargo test invocation.
+      # The filter matches the function-name prefixes used in each module:
+      #   fuzz_create_pool_target, fuzz_place_bet_target, fuzz_settle_pool_target  (fuzz.rs)
+      #   p1_ … p10_  (fuzz_tests.rs)
+      #   v1_ … v6_   (validation_prop_tests.rs)
+      - name: Run fuzz-style tests
+        working-directory: ./contracts/predinex
         run: |
-          cargo test --manifest-path contracts/predinex/Cargo.toml -- fuzz_
+          cargo test --features testutils -- \
+            fuzz_create_pool_target \
+            fuzz_place_bet_target \
+            fuzz_settle_pool_target \
+            p1_payout_formula_holds_for_uneven_distributions \
+            p2_fee_accounting_correct_for_diverse_pool_sizes \
+            p3_deterministic_fuzz_single_winner_distributions \
+            p4_deterministic_fuzz_multi_winner_distributions \
+            p5_seeded_edge_case_distribution_reproduces_expected_math \
+            p6_payout_invariant_holds_with_minimal_losing_side \
+            p7_payout_invariant_holds_with_minimal_winning_side \
+            p8_zero_fee_winner_receives_entire_pool \
+            p9_max_fee_payout_formula_holds \
+            p10_conservation_invariant_holds_for_random_distribution \
+            v1_test_title_validation \
+            v2_test_description_validation \
+            v3_test_outcomes_validation \
+            v4_test_duplicate_outcome_detection \
+            v5_test_duration_validation \
+            v6_test_metadata_uri_validation
