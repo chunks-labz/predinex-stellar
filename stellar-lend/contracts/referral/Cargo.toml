@@ -1,0 +1,10 @@
+[package]
+name = "referral"
+version = "0.1.0"
+edition = "2021"
+description = "Referral tracking contract for Predinex Stellar lending pool"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "referral"
+path = "src/lib.rs"
