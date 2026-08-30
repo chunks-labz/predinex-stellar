@@ -1053,6 +1053,113 @@ export async function getLpStakeFromSoroban(
 // ---------------------------------------------------------------------------
 
 /**
+ * Claim-state enum mirrored from the contract's `ClaimStatus`.
+ */
+export type ClaimStatus =
+  | 'NeverBet'
+  | 'Claimable'
+  | 'RefundClaimable'
+  | 'NotEligible'
+  | 'AlreadyClaimed';
+
+/**
+ * #1056 — Per-pool snapshot returned by `getUserPortfolioFromSoroban`.
+ * Combines bet position, LP stake, pending rewards, and claim status so
+ * dashboard screens need only a single batched call.
+ */
+export interface UserPoolSnapshot {
+  /** Pool identifier. */
+  poolId: number;
+  /** User's stake on outcome A (raw stroops). */
+  amountA: number;
+  /** User's stake on outcome B (raw stroops). */
+  amountB: number;
+  /** Total stake (amountA + amountB). */
+  totalBet: number;
+  /** LP shares held by the user; 0 if none. */
+  lpShares: number;
+  /** Accrued but unclaimed LP rewards in raw token units. */
+  pendingRewards: number;
+  /** Whether the user can claim winnings or a refund. */
+  claimStatus: ClaimStatus;
+}
+
+/**
+ * #1056 — Batched portfolio query.
+ *
+ * Calls the contract's `get_user_portfolio` function which returns one
+ * `UserPoolSnapshot` per pool where the user has a bet position or LP stake.
+ * Falls back to an empty result when the contract ID is not configured.
+ *
+ * @param userAddress - Stellar account address (`G...` strkey).
+ * @param startId - First pool ID to scan (inclusive, defaults to 1).
+ * @param count - Maximum pools to scan (capped server-side at 50).
+ * @param config - Optional RPC/contract override.
+ * @returns Array of snapshots for pools where the user has activity.
+ */
+export async function getUserPortfolioFromSoroban(
+  userAddress: string,
+  startId = 1,
+  count = 50,
+  config?: SorobanReadConfig,
+): Promise<UserPoolSnapshot[]> {
+  const toNum = (v: unknown): number => {
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    if (typeof v === 'number') return v;
+    return 0;
+  };
+
+  const normalizeClaimStatus = (raw: unknown): ClaimStatus => {
+    // Contract returns an enum tag, e.g. { tag: 'Claimable' } or the string itself.
+    if (typeof raw === 'string') {
+      const valid: ClaimStatus[] = [
+        'NeverBet', 'Claimable', 'RefundClaimable', 'NotEligible', 'AlreadyClaimed',
+      ];
+      if (valid.includes(raw as ClaimStatus)) return raw as ClaimStatus;
+    }
+    if (typeof raw === 'object' && raw !== null) {
+      const tag = (raw as Record<string, unknown>).tag;
+      if (typeof tag === 'string') return normalizeClaimStatus(tag);
+    }
+    return 'NeverBet';
+  };
+
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      // Contract not configured — return empty rather than fanning out.
+      return [];
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_user_portfolio',
+      [startId, count, userAddress],
+    );
+
+    if (!rawResult || !Array.isArray(rawResult)) {
+      return [];
+    }
+
+    return (rawResult as Record<string, unknown>[]).map((item) => ({
+      poolId: toNum(item.pool_id),
+      amountA: toNum(item.amount_a),
+      amountB: toNum(item.amount_b),
+      totalBet: toNum(item.total_bet),
+      lpShares: toNum(item.lp_shares),
+      pendingRewards: toNum(item.pending_rewards),
+      claimStatus: normalizeClaimStatus(item.claim_status),
+    }));
+  } catch (e) {
+    log.error('Failed to fetch user portfolio from Soroban:', e);
+    return [];
+  }
+}
+
+/**
  * Canonical Soroban read API object for pool and user-bet data.
  *
  * Prefer this namespace (or the named exports) over deprecated Stacks reads in `stacks-api.ts`.
@@ -1072,6 +1179,8 @@ export const sorobanReadApi = {
   getLpPosition: getLpPositionFromSoroban,
   getPendingLpRewards: getPendingLpRewardsFromSoroban,
   getLpStake: getLpStakeFromSoroban,
+  /** #1056 — Batched portfolio query (replaces N fan-out reads). */
+  getUserPortfolio: getUserPortfolioFromSoroban,
 };
 
 /** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */

@@ -1737,6 +1737,33 @@ pub struct UserPoolPosition {
     pub total_bet: i128,
 }
 
+/// #1056 — Batched snapshot returned by `get_user_portfolio`.
+///
+/// Combines the user's bet position, LP stake, pending LP rewards, and claim
+/// status for a single pool into one struct so dashboard screens can retrieve
+/// all per-pool data with a single contract call instead of N fan-out reads.
+///
+/// Fields
+/// ------
+/// - `pool_id`          – pool identifier
+/// - `amount_a`         – user's stake on outcome A (raw units / stroops)
+/// - `amount_b`         – user's stake on outcome B (raw units / stroops)
+/// - `total_bet`        – total tokens staked by the user (`amount_a + amount_b`)
+/// - `lp_shares`        – LP shares held by the user in this pool; 0 if none
+/// - `pending_rewards`  – accrued but unclaimed LP rewards in raw token units
+/// - `claim_status`     – whether the user can claim winnings / a refund
+#[derive(Clone)]
+#[contracttype]
+pub struct UserPoolSnapshot {
+    pub pool_id: u32,
+    pub amount_a: i128,
+    pub amount_b: i128,
+    pub total_bet: i128,
+    pub lp_shares: i128,
+    pub pending_rewards: i128,
+    pub claim_status: ClaimStatus,
+}
+
 /// #159 — Result type returned by `preview_claimable_amount`.
 ///
 /// Variants
@@ -6011,7 +6038,9 @@ impl PredinexContract {
             Self::claim_user_winning_stake(env, pool_id, user.clone(), &user_bet, winning_outcome)?;
 
         let totals = Self::read_outcome_totals(env, pool_id, &pool);
-        let pool_winning_total = totals.get(winning_outcome).ok_or(ContractError::InvalidOutcome)?;
+        let pool_winning_total = totals
+            .get(winning_outcome)
+            .ok_or(ContractError::InvalidOutcome)?;
         if pool_winning_total == 0 {
             return Err(ContractError::NoWinningBets);
         }
@@ -8129,6 +8158,100 @@ impl PredinexContract {
                 None => ClaimStatus::NeverBet,
             },
         }
+    }
+
+    /// #1056 — Batched portfolio query: returns one `UserPoolSnapshot` per pool
+    /// where the user has an active bet position, an LP stake, or both.
+    ///
+    /// Replaces the N-call fan-out (`get_lp_position` + `get_pending_lp_rewards`
+    /// + `get_claim_status` + `get_pool_info` per pool) used by the dashboard
+    /// with a single contract call, cutting per-pool read costs and RPC
+    /// round-trips. Pools with neither a bet nor an LP stake are skipped, so
+    /// the returned `Vec` may contain fewer entries than `count`.
+    ///
+    /// # Arguments
+    /// - `user`     – the account whose positions are being queried
+    /// - `start_id` – first pool ID to inspect (inclusive)
+    /// - `count`    – maximum number of pool IDs to scan (capped at 50)
+    pub fn get_user_portfolio(
+        env: Env,
+        user: Address,
+        start_id: u32,
+        count: u32,
+    ) -> Vec<UserPoolSnapshot> {
+        let mut result = Vec::new(&env);
+        let pool_count = Self::get_pool_count(env.clone());
+
+        if start_id > pool_count {
+            return result;
+        }
+
+        // Cap at 50 to bound read-budget consumption.
+        let effective_count = if count > 50 { 50 } else { count };
+
+        for i in 0..effective_count {
+            let pool_id = start_id + i;
+            if pool_id > pool_count {
+                break;
+            }
+
+            let bet_key = DataKey::UserBet(pool_id, user.clone());
+            let maybe_bet: Option<UserBet> = env.storage().persistent().get::<_, UserBet>(&bet_key);
+
+            let lp_position: LpPosition = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpPosition(pool_id, user.clone()))
+                .unwrap_or(LpPosition {
+                    shares: 0,
+                    reward_debt: 0,
+                });
+
+            // Skip pools where the user has neither a bet nor an LP stake.
+            if maybe_bet.is_none() && lp_position.shares == 0 {
+                continue;
+            }
+
+            let (amount_a, amount_b, total_bet) = match &maybe_bet {
+                Some(b) => (b.amount_a, b.amount_b, b.total_bet),
+                None => (0, 0, 0),
+            };
+
+            // Pending LP rewards (mirrors get_pending_lp_rewards logic).
+            let pending_rewards = if lp_position.shares > 0 {
+                let fee_per_share: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpFeePerShare(pool_id))
+                    .unwrap_or(0);
+                let raw =
+                    Self::pending_lp_rewards(&env, pool_id, &user, &lp_position, fee_per_share)
+                        .unwrap_or((0, 0))
+                        .0;
+                if raw < 0 {
+                    0
+                } else {
+                    raw
+                }
+            } else {
+                0
+            };
+
+            // Claim status (mirrors get_claim_status logic).
+            let claim_status = Self::get_claim_status(env.clone(), pool_id, user.clone());
+
+            result.push_back(UserPoolSnapshot {
+                pool_id,
+                amount_a,
+                amount_b,
+                total_bet,
+                lp_shares: lp_position.shares,
+                pending_rewards,
+                claim_status,
+            });
+        }
+
+        result
     }
 
     /// #159 — Read-only payout preview for a user in a given pool.
