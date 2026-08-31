@@ -1297,6 +1297,8 @@ pub enum ContractError {
     SelfReferral = 61,
     /// No referral rewards available to claim.
     NoReferralRewards = 62,
+    /// Referrer cannot be the contract address.
+    InvalidReferrer = 999,
     /// Pool grace period has not expired yet.
     PoolNotExpiredGracePeriod = 63,
     /// Computed pool deadline is not in the future.
@@ -8430,6 +8432,11 @@ impl PredinexContract {
     ) -> Result<(), ContractError> {
         if user == referrer {
             return Err(ContractError::SelfReferral);
+        }
+
+        // Security: disallow the contract itself being used as a referrer.
+        if referrer == env.current_contract_address() {
+            return Err(ContractError::InvalidReferrer);
         }
 
         let bps = Self::get_referral_bps(env.clone());
