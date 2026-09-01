@@ -173,6 +173,11 @@ body {
     border-radius: 4px;
 }
 
+/* Ensure focus-visible outlines also meet 3:1 contrast for non-text icons */
+:focus-visible::-webkit-focus-ring-color {
+    outline-color: var(--primary);
+}
+
 /* Remove default outline only when :focus-visible is supported */
 :focus:not(:focus-visible) {
     outline: none;

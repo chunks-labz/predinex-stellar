@@ -37,7 +37,25 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Bundle size budget check
+      - name: OpenAPI spec drift check
+        if: github.event_name == 'pull_request'
+        run: |
+          # Check if the OpenAPI spec has drifted from the route code
+          # This step regenerates the spec/SDK and fails the build if git diff shows changes
+          set -euo pipefail
+
+          # Generate SDK from spec
+          bash scripts/generate-sdk.sh
+
+          # Check if any files changed due to spec regeneration
+          # Only fails on pull requests to enforce spec/code sync
+          git diff --quiet || {
+            echo "::error::OpenAPI spec drift detected - route code and generated SDK/types are out of sync."
+            echo "Run './scripts/generate-sdk.sh' to regenerate the SDK, or update the spec to match the code."
+            exit 1
+          }
+
+- name: Bundle size budget check
         if: github.event_name == 'pull_request'
         run: |
           # Budget definitions (KB). Update intentionally with a comment explaining the reason.
@@ -85,6 +103,45 @@ jobs:
             echo "explaining why the increase is justified."
             exit 1
           fi
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      artifacts: write
+    defaults:
+      run:
+        working-directory: ./web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Upload Playwright test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: ./web/.playwright-report
+          retention-days: 30
 
   bot-checks:
     name: Bot Checks
