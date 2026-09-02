@@ -127,12 +127,17 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         return () => { cancelled = true; };
     }, []);
 
-    // Auto-refresh every 10 seconds.
+    // Auto-refresh every 10 seconds and announce updates to screen readers.
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
                 await fetchPool();
                 await fetchUserBet();
+                // Announce the update to screen readers
+                const liveRegion = document.getElementById('live-pool-update');
+                if (liveRegion) {
+                    liveRegion.textContent = 'Pool updated';
+                }
             } catch (e) {
                 log.error('Auto-refresh failed:', e);
             }
@@ -204,6 +209,12 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
                         <RefreshCw className="w-3 h-3" />
                         Updates every 10s &middot; Pool #{poolId}
+                    </div>
+
+                    {/* Live region for price/volume updates - announces on query, not every tick */}
+                    <div role="status" aria-live="polite" aria-atomic="true" className="hidden">
+                        <span className="sr-only">Live pool update</span>
+                        <span id="live-pool-update" />
                     </div>
 
                     {/* Header */}
