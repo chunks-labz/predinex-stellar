@@ -201,3 +201,20 @@ fn test_get_total_referral_volume_accumulates() {
 
     assert_eq!(ctx.client.get_total_referral_volume(), 3_000_000);
 }
+
+#[test]
+fn test_contract_address_cannot_be_referrer() {
+    let ctx = Ctx::new();
+    ctx.client.set_referral_bps(&ctx.admin, &100).unwrap();
+
+    let bettor = Address::generate(&ctx.env);
+    ctx.mint(&bettor, 1_000_000);
+    let pool_id = ctx.create_pool(&ctx.admin);
+
+    let contract_addr = ctx.env.current_contract_address();
+
+    let result = ctx
+        .client
+        .try_place_bet_with_referral(&bettor, &pool_id, &0, &1_000_000, &contract_addr);
+    assert_eq!(result, Err(Ok(ContractError::InvalidReferrer)));
+}

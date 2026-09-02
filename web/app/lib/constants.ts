@@ -21,8 +21,9 @@ export const CONTRACT_NAME: string =
     process.env.NEXT_PUBLIC_CONTRACT_NAME || 'predinex-contract';
 
 // Maximum pool duration that the frontend allows when creating a new market.
-// This mirrors the contract-side maximum and protects against long-lived pools.
-export const MAX_POOL_DURATION_SECONDS = 1_000_000;
+// This mirrors the contract-side maximum (1 year = 31,536,000 seconds) so that
+// the UI no longer rejects valid pools between ~11.5 days and 1 year.
+export const MAX_POOL_DURATION_SECONDS = 31_536_000;
 
 export interface NetworkConfig {
     rpcUrl: string;

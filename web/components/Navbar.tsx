@@ -110,12 +110,13 @@ export default function Navbar() {
                         {isConnected && address ? (
                             <div className="flex items-center gap-3">
                                 <WalletAddressCopyButton address={address} />
-                                <button
+                        <button
                                     onClick={disconnect}
                                     className="flex items-center gap-2 bg-primary/10 hover:bg-primary/20 text-primary px-3 py-2 rounded-full border border-primary/20 transition-colors font-medium text-sm"
                                     aria-label={t('nav.signOut')}
                                 >
-                                    <Wallet className={ICON_CLASS.sm + " text-primary"} />
+                                    <Wallet className={ICON_CLASS.sm + " text-primary"} aria-hidden="true" />
+                                    <span className="sr-only">{t('nav.signOut')}</span>
                                 </button>
                             </div>
                         ) : (
@@ -281,6 +282,7 @@ export default function Navbar() {
                                             closeMenu();
                                         }}
                                         className="w-full text-left px-3 py-2 text-base font-medium text-red-500 hover:bg-red-500/10 rounded-lg transition-colors"
+                                        aria-label={t('nav.signOut')}
                                     >
                                         {t('nav.signOut')}
                                     </button>

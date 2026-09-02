@@ -7,50 +7,52 @@ import {
   validateDuration,
   validateStellarAddress,
   validateStellarContractAddress,
+  validateOutcomesList,
   MAX_TITLE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
   MAX_OUTCOME_LENGTH,
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
-} from '../../lib/validators';
+  MAX_OUTCOME_COUNT,
+} from '../../app/lib/validators';
 
 describe('validateContractId', () => {
-  it('accepts a valid Stellar contract address', () => {
+  it('accepts a valid contract identifier', () => {
     const result = validateContractId(
-      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
+      'SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool',
       'mainnet'
     );
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('does not require network-specific prefixes for Stellar contract addresses', () => {
-    const result = validateContractId(
-      'CCV2F3HHPJ5KQWZIQYBXLF3D5XDY4D5MHKXZ4FFLFKSKNIOGOHYRFTMP',
-      'testnet'
-    );
+  it('does not enforce network-specific prefixes when no network is given', () => {
+    const result = validateContractId('SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool');
     expect(result.valid).toBe(true);
   });
 
-  it('rejects legacy Stacks contract identifiers', () => {
-    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool');
+  it('rejects bare Stellar contract addresses without a <address>.<name> structure', () => {
+    const result = validateContractId(
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
+      'mainnet'
+    );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
   });
 
   it('rejects account public keys', () => {
     const result = validateContractId('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ');
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
   });
 
-  it('rejects invalid Stellar contract characters', () => {
+  it('rejects invalid Stellar contract address prefixes', () => {
     const result = validateContractId(
-      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSG0',
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA.escrow',
       'testnet'
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Invalid Stacks contract address format');
   });
 });
 
@@ -246,5 +248,41 @@ describe('metadata length validation (issue #154)', () => {
     const result = validateOutcome('A'.repeat(MAX_OUTCOME_LENGTH + 1));
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/50.*fewer/i);
+  });
+});
+
+describe('validateOutcomesList (issue #1001)', () => {
+  it('rejects fewer than two outcomes', () => {
+    const result = validateOutcomesList(['Yes']);
+    expect(result.valid).toBe(false);
+  });
+
+  it('accepts a two-outcome pool', () => {
+    const result = validateOutcomesList(['Yes', 'No']);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a 20-outcome pool (contract maximum)', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects more than 20 outcomes', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT + 1 }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/at most 20/i);
+  });
+
+  it('rejects duplicate outcomes', () => {
+    const result = validateOutcomesList(['Yes', 'yes']);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/unique/i);
+  });
+
+  it('rejects an invalid outcome label', () => {
+    const result = validateOutcomesList(['Yes', 'x']);
+    expect(result.valid).toBe(false);
   });
 });

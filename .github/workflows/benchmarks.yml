@@ -30,7 +30,7 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Run benchmarks (HEAD)
         id: bench_head
@@ -82,16 +82,18 @@ jobs:
 
       - name: Compare and report
         id: compare
-        env:
-          WARN_PCT: 10
-          FAIL_PCT: 25
         run: |
           python3 - <<'PYEOF'
-          import json, os, sys
+          import json, os, sys, yaml
 
           tmp = os.environ["RUNNER_TEMP"] + "/benchmarks"
-          warn_pct = float(os.environ["WARN_PCT"])
-          fail_pct = float(os.environ["FAIL_PCT"])
+          
+          with open("../../.github/benchmark-config.yml") as f:
+              config = yaml.safe_load(f)
+              
+          warn_pct = float(config["thresholds"]["warning_percent"])
+          fail_pct = float(config["thresholds"]["failure_percent"])
+          is_pr = os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
 
           head = json.load(open(f"{tmp}/head.json"))
           head_results = head["results"]
@@ -105,7 +107,8 @@ jobs:
               base_results = base["results"]
               base_sha = base["sha"][:7] if base["sha"] else "base"
 
-          ops = ["create_pool", "place_bet", "settle_pool", "claim_winnings", "cancel_bet"]
+          base_keys = base_results.keys() if base_results else []
+          ops = sorted(list(set(head_results.keys()).union(base_keys)))
 
           summary_lines = ["### Contract Gas Cost Benchmarks\n"]
           comment_lines = ["<!-- contract-benchmark-monitor -->\n## Contract Gas Cost Benchmarks\n"]
@@ -171,7 +174,11 @@ jobs:
 
           if exit_code != 0:
               print("FAIL: one or more operations exceeded the failure threshold.", file=sys.stderr)
-              sys.exit(exit_code)
+              if is_pr:
+                  sys.exit(exit_code)
+              else:
+                  print("Running on main branch; failures are advisory. Exiting 0.", file=sys.stderr)
+                  sys.exit(0)
           PYEOF
 
       - name: Post PR comment

@@ -6,8 +6,8 @@ import { renderWithProviders } from '../helpers/renderWithProviders';
 import DashboardPage from '../../app/dashboard/page';
 import PoolDetailsPage from '../../app/markets/[id]/page';
 import type { ActivityItem } from '../../app/lib/adapters/types';
-import type { UserBet } from '../../app/lib/dashboard-types';
-import type { Pool } from '../../app/lib/stacks-api';
+import type { UserBet } from '../../app/lib/market-types';
+import type { Pool } from '../../app/lib/market-types';
 import type { UserBetData } from '../../app/lib/soroban-read-api';
 import { userActivityCache, userDashboardCache } from '../../app/lib/cache-invalidation';
 

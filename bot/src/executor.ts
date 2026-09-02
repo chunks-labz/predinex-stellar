@@ -43,7 +43,7 @@ export interface SettleCandidate {
 
 /** Binary pools only support outcome index 0 or 1. */
 function isValidSettlementOutcome(outcome: number): boolean {
-  return outcome >= 0;
+  return Number.isInteger(outcome) && (outcome === 0 || outcome === 1);
 }
 
 /**
@@ -126,7 +126,7 @@ async function submitTransaction(
     if (signal?.aborted) {
       throw new Error("Transaction polling aborted");
     }
-    const txResult = await server.getTransaction(hash, { signal });
+    const txResult = await server.getTransaction(hash);
 
     if (txResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       return { hash, returnValue: txResult.returnValue };

@@ -1,7 +1,7 @@
 'use client';
 
 import { Trophy, TrendingUp, PieChart, Percent } from 'lucide-react';
-import { Pool } from '@/app/lib/stacks-api';
+import { Pool } from '@/app/lib/market-types';
 
 const PROTOCOL_FEE_BPS = 200; // 2% — matches contract
 

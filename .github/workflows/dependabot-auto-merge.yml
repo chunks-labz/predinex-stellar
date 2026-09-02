@@ -20,19 +20,43 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Approve and Auto-Merge Patches
-        if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-patch' }}
+      # Policy: Dependabot PRs are explicitly governed to ensure stability.
+      # For low-risk groups (patch and minor versions), we enforce a strict gate:
+      # 1. Require review approval (provided by this workflow).
+      # 2. Require the repo's core status checks (web, bot, contract) to be green.
+      - name: Enforce Gate and Auto-Merge Low-Risk Updates
+        if: ${{ contains(fromJSON('["version-update:semver-patch", "version-update:semver-minor"]'), steps.metadata.outputs.update-type) }}
         run: |
+          echo "Policy: explicitly govern Dependabot PRs."
+          
+          # 1. Provide the required review approval
           gh pr review --approve "$PR_URL"
-          gh pr merge --auto --merge "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Auto-Merge Minor Updates (requires CI passing)
-        if: ${{ steps.metadata.outputs.update-type == 'version-update:semver-minor' }}
-        run: |
-          gh pr merge --auto --merge "$PR_URL"
+          
+          # 2. Enforce green CI gate for web, bot, and contract checks
+          echo "Waiting for required status checks (web/bot/contract) to pass..."
+          while true; do
+            JSON=$(gh pr checks "$PR_URL" --json name,bucket)
+            
+            WEB=$(echo "$JSON" | jq -r '.[] | select(.name == "Web Checks") | .bucket')
+            BOT=$(echo "$JSON" | jq -r '.[] | select(.name == "Bot Checks") | .bucket')
+            CONTRACT=$(echo "$JSON" | jq -r '.[] | select(.name == "Contract Checks") | .bucket')
+            
+            if [[ "$WEB" == "fail" || "$BOT" == "fail" || "$CONTRACT" == "fail" ]]; then
+              echo "One or more required CI checks failed. Aborting auto-merge."
+              exit 1
+            fi
+            
+            if [[ "$WEB" == "pass" && "$BOT" == "pass" && "$CONTRACT" == "pass" ]]; then
+              echo "All required CI checks are green."
+              break
+            fi
+            
+            echo "Checks are still pending. Sleeping for 15s..."
+            sleep 15
+          done
+          
+          # 3. Execute auto-merge
+          gh pr merge --merge "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

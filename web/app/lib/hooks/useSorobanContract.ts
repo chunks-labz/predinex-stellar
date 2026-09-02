@@ -2,7 +2,7 @@
 
 import { useCallback } from 'react';
 import { sorobanReadApi } from '../soroban-read-api';
-import type { Pool, UserBetData } from '../stacks-api';
+import type { Pool, UserBetData } from '../market-types';
 
 export function useSorobanContract() {
   const getPool = useCallback(

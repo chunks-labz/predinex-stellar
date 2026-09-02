@@ -2,10 +2,15 @@
  * Write-side adapter: Soroban contract calls for the Predinex pool contract.
  * Keeps wallet prompt details, argument encoding, and contract identity out of UI components.
  */
+import { openContractCall } from '@stacks/connect';
+import type { Finished } from '@stacks/connect';
+import { uintCV, stringAsciiCV } from '@stacks/transactions';
+import { scValToNative } from '@stellar/stellar-sdk';
 import { getRuntimeConfig } from '../runtime-config';
-import { SorobanTransactionService, TxStage } from '../soroban-transaction-service';
+import { ChainIdValue, SorobanTransactionService, TxStage } from '../soroban-transaction-service';
 import { FreighterWalletClient } from '../freighter-adapter';
 import { scValToNative } from '@stellar/stellar-sdk';
+import { invalidateOnPlaceBet, invalidateOnClaimWinnings } from '../cache-invalidation';
 
 let sorobanService: SorobanTransactionService | null = null;
 
@@ -160,6 +165,61 @@ export const predinexContract = {
   },
 
   /**
+   * Submit a `create_pool_mirror` Soroban contract call (wallet prompt).
+   *
+   * Registers a pool mirror so a source pool (e.g. a Stellar pool) can be
+   * settled from a bridge contract on a target chain (#928). Uses the bridge
+   * contract address from `soroban.bridgeContractId` in the runtime config.
+   *
+   * @returns The transaction hash and the assigned unified pool ID.
+   */
+  async createPoolMirrorSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    sourceChain: ChainIdValue;
+    targetChain: ChainIdValue;
+    bridgeContractId: string;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string; unifiedPoolId: number }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.createPoolMirror(
+      params.wallet,
+      soroban.contractId,
+      {
+        sourcePoolId: params.poolId,
+        sourceChain: params.sourceChain,
+        targetChain: params.targetChain,
+        bridgeContractId: params.bridgeContractId,
+      },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    let unifiedPoolId = 0;
+    try {
+      const decoded =
+        result.returnValue !== undefined
+          ? scValToNative(result.returnValue)
+          : 0;
+      unifiedPoolId =
+        typeof decoded === 'number' || typeof decoded === 'bigint'
+          ? Number(decoded)
+          : 0;
+    } catch {
+      // fall back to 0 when the return value cannot be decoded
+    }
+
+    return { txHash: result.txHash, unifiedPoolId };
+  },
+
+  /**
    * Submit a `place_bet` Soroban contract call (wallet prompt).
    */
   async placeBetSoroban(params: {
@@ -187,6 +247,14 @@ export const predinexContract = {
 
     if (result.status === 'FAILED') {
       throw new Error(result.error || 'Transaction failed');
+    }
+
+    // Issue #990: the pool detail page's manual fetchPool/fetchUserBet polling
+    // and the market list/activity caches all go stale until the invalidation
+    // policy already defined in cache-invalidation.ts actually runs — it was
+    // never called from anywhere.
+    if (params.wallet.address) {
+      invalidateOnPlaceBet({ poolId: params.poolId, userAddress: params.wallet.address });
     }
 
     return { txHash: result.txHash };
@@ -263,6 +331,11 @@ export const predinexContract = {
       throw new Error(result.error || 'Transaction failed');
     }
 
+    // See the matching note in placeBetSoroban above (issue #990).
+    if (params.wallet.address) {
+      invalidateOnClaimWinnings({ poolId: params.poolId, userAddress: params.wallet.address });
+    }
+
     return { txHash: result.txHash };
   },
 
@@ -322,7 +395,7 @@ export const predinexContract = {
     winningOutcome: number;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
-  }): Promise<{ txHash: string }> {
+  }): Promise<{ txHash: string; winningOutcome?: number }> {
     const { soroban } = getRuntimeConfig();
     const service = getSorobanService();
 
@@ -338,7 +411,25 @@ export const predinexContract = {
       throw new Error(result.error || 'Transaction failed');
     }
 
-    return { txHash: result.txHash };
+    // Report success/outcome from the real on-chain result only. The pre-submit
+    // simulation (`simulatedResults`) is stale once the transaction is mined and
+    // must never be used to report the settled outcome. If the actual return
+    // value cannot be decoded we fail loudly instead of silently reporting a
+    // fabricated outcome.
+    let decodedWinningOutcome: number | undefined;
+    if (result.returnValue !== undefined) {
+      try {
+        decodedWinningOutcome = Number(scValToNative(result.returnValue));
+      } catch (error) {
+        throw new Error(
+          `Settlement confirmed on-chain but its result could not be decoded: ${
+            error instanceof Error ? error.message : 'decode error'
+          }`
+        );
+      }
+    }
+
+    return { txHash: result.txHash, winningOutcome: decodedWinningOutcome };
   },
 
   async freezePoolSoroban(params: {

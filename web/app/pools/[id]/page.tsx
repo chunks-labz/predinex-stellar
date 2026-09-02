@@ -3,7 +3,7 @@ import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('PoolDetailPage');
 
 import Link from "next/link";
-import { use, useEffect, useState, useCallback } from "react";
+import { use, useEffect, useState, useCallback, useRef } from "react";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
@@ -52,11 +52,15 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
     const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
 
+    const mountedRef = useRef(true);
+
     const fetchPool = useCallback(async () => {
         try {
             const data = await predinexReadApi.getPool(poolId);
-            setPool(data);
-            setError(null);
+            if (mountedRef.current) {
+                setPool(data);
+                setError(null);
+            }
             return data;
         } catch (e) {
             throw e;
@@ -65,16 +69,23 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
 
     const fetchUserBet = useCallback(async () => {
         if (!stxAddress) {
-            setUserBet(null);
+            if (mountedRef.current) setUserBet(null);
             return;
         }
         try {
             const bet = await predinexReadApi.getUserBet(poolId, stxAddress);
-            setUserBet(bet);
+            if (mountedRef.current) setUserBet(bet);
         } catch {
-            setUserBet(null);
+            if (mountedRef.current) setUserBet(null);
         }
     }, [poolId, stxAddress]);
+
+    useEffect(() => {
+        mountedRef.current = true;
+        return () => {
+            mountedRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         let cancelled = false;
@@ -116,12 +127,17 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         return () => { cancelled = true; };
     }, []);
 
-    // Auto-refresh every 10 seconds.
+    // Auto-refresh every 10 seconds and announce updates to screen readers.
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
                 await fetchPool();
                 await fetchUserBet();
+                // Announce the update to screen readers
+                const liveRegion = document.getElementById('live-pool-update');
+                if (liveRegion) {
+                    liveRegion.textContent = 'Pool updated';
+                }
             } catch (e) {
                 log.error('Auto-refresh failed:', e);
             }
@@ -193,6 +209,12 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
                         <RefreshCw className="w-3 h-3" />
                         Updates every 10s &middot; Pool #{poolId}
+                    </div>
+
+                    {/* Live region for price/volume updates - announces on query, not every tick */}
+                    <div role="status" aria-live="polite" aria-atomic="true" className="hidden">
+                        <span className="sr-only">Live pool update</span>
+                        <span id="live-pool-update" />
                     </div>
 
                     {/* Header */}

@@ -1,4 +1,4 @@
-import { TOKEN_SYMBOL, unitsToStroops } from '@/lib/formatting';
+import { TOKEN_SYMBOL, unitsToStroops } from '@/app/lib/formatting';
 import type {
   MarketFilters,
   MarketStatusFilter,
@@ -139,8 +139,8 @@ export function filterAndSortMarkets(
   const query = normalized.search.toLowerCase();
   const minVolume = normalizeNumberInput(normalized.minVolume);
   const maxVolume = normalizeNumberInput(normalized.maxVolume);
-  const minVolumeStroops = minVolume === null ? null : unitsToStroops(Math.round(minVolume));
-  const maxVolumeStroops = maxVolume === null ? null : unitsToStroops(Math.round(maxVolume));
+  const minVolumeStroops = minVolume === null ? null : unitsToStroops(BigInt(Math.round(minVolume)));
+  const maxVolumeStroops = maxVolume === null ? null : unitsToStroops(BigInt(Math.round(maxVolume)));
   const selectedAsset = normalized.asset.toLowerCase();
 
   const filtered = markets.filter((market) => {

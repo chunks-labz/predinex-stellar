@@ -34,7 +34,7 @@ jobs:
         run: |
           npm run test -- --run \
             --reporter=verbose \
-            --testPathPattern="tests/integration"
+            tests/integration
         env:
           # Tests run fully in-process with mocked Soroban RPC.
           # No real Stellar network access is required.

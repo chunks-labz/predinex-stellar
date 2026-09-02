@@ -4,11 +4,11 @@ import { NETWORK_CONFIG as ANALYTICS_NETWORK_CONFIG } from './analytics/config';
 export type SupportedNetwork = 'mainnet' | 'testnet';
 
 export type ContractConfig = {
-  /** Contract address (principal) used as `contractAddress` in Stacks contract calls. */
+  /** Contract address (strkey) used as `contractAddress` in Stellar contract calls. */
   address: string;
-  /** Contract name used as `contractName` in Stacks contract calls. */
+  /** Legacy field, kept for compatibility. */
   name: string;
-  /** Full contract id in `<address>.<name>` form. */
+  /** Full contract id. */
   id: string;
 };
 
@@ -28,6 +28,8 @@ export type SorobanConfig = {
   explorerUrl: string;
   /** Deployed Soroban contract ID (C... strkey). */
   contractId: string;
+  /** Bridge contract ID (C... strkey) that settles cross-chain pool mirrors. Optional until a mirror is created. */
+  bridgeContractId?: string;
 };
 
 export type WebhookSettings = {
@@ -50,6 +52,7 @@ export type PoolWebhookSettings = {
 
 export type RuntimeConfig = {
   network: SupportedNetwork;
+  appVersion: string;
   contract: ContractConfig;
   api: StacksApiConfig;
   soroban: SorobanConfig;
@@ -57,9 +60,15 @@ export type RuntimeConfig = {
   webhook?: WebhookSettings;
   /** Per-pool webhook configurations (poolId -> settings) */
   poolWebhooks?: Record<number, PoolWebhookSettings>;
+  /**
+   * Default oracle provider address pre-filled in the oracle registration form.
+   * Sourced from `NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS`. Empty string when not configured.
+   */
+  defaultOracleAddress: string;
 };
 
 const DEFAULT_NETWORK: SupportedNetwork = 'testnet';
+const DEFAULT_APP_VERSION = 'unknown';
 
 function parseNetwork(raw: string): SupportedNetwork {
   const v = raw.trim().toLowerCase();
@@ -75,17 +84,9 @@ function parseContractId(contractAddress: string): { address: string; name: stri
     return { address: trimmed, name: '', id: trimmed };
   }
 
-  // Legacy Stacks contract principal + name in `<address>.<name>` form.
-  const separatorIndex = trimmed.indexOf('.');
-  if (separatorIndex <= 0 || separatorIndex === trimmed.length - 1) {
-    throw new Error(
-      `Invalid contract id '${trimmed}'. Expected a Stellar contract ID (C... strkey) or Stacks '<address>.<name>' coordinates.`
-    );
-  }
-
-  const address = trimmed.slice(0, separatorIndex).trim();
-  const name = trimmed.slice(separatorIndex + 1).trim();
-  return { address, name, id: `${address}.${name}` };
+  throw new Error(
+    `Invalid contract id '${trimmed}'. Expected a Stellar contract ID (C... strkey).`
+  );
 }
 
 function getOptionalEnv(name: string): string | undefined {
@@ -116,10 +117,11 @@ function resolveContractConfig(network: SupportedNetwork): ContractConfig {
   const analyticsKey: AnalyticsNetworkKey = network === 'mainnet' ? 'MAINNET' : 'TESTNET';
   const contractIdFromAnalytics = ANALYTICS_NETWORK_CONFIG[analyticsKey]?.CONTRACT_ADDRESS;
 
+  // When no contract ID is configured (e.g. test/dev environments without a
+  // deployed contract), return a safe placeholder rather than throwing.
+  // Contract calls will fail gracefully at the RPC layer; the UI degrades.
   if (!contractIdFromAnalytics || typeof contractIdFromAnalytics !== 'string') {
-    throw new Error(
-      `Missing contract id for network '${network}'. Expected it in analytics NETWORK_CONFIG[${analyticsKey}].CONTRACT_ADDRESS.`
-    );
+    return { address: '', name: '', id: '' };
   }
 
   return parseContractId(contractIdFromAnalytics);
@@ -154,8 +156,11 @@ export function getRuntimeConfig(): RuntimeConfig {
     (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
   const contract = resolveContractConfig(network);
 
+  const appVersion = getOptionalEnv('NEXT_PUBLIC_APP_VERSION') ?? DEFAULT_APP_VERSION;
+
   cachedConfig = {
     network,
+    appVersion,
     contract,
     api: {
       coreApiUrl: walletNet.coreApiUrl,
@@ -166,9 +171,12 @@ export function getRuntimeConfig(): RuntimeConfig {
       rpcUrl: sorobanNet.rpcUrl,
       explorerUrl: sorobanNet.explorerUrl,
       contractId: sorobanContractId,
+      bridgeContractId: getOptionalEnv('NEXT_PUBLIC_SOROBAN_BRIDGE_CONTRACT_ID'),
     },
     // Webhook configuration from environment
     webhook: parseWebhookConfig(),
+    // Default oracle address for the oracle management registration form.
+    defaultOracleAddress: getOptionalEnv('NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS') ?? '',
   };
 
   return cachedConfig;

@@ -10,7 +10,7 @@ import { getRuntimeConfig } from './runtime-config';
  * Determines the current status of a market based on its settlement state and expiry time.
  * 
  * @param pool - The raw pool data from the smart contract
- * @param currentBlockHeight - The current block height of the Stacks blockchain
+ * @param currentBlockHeight - The current block height of the Stellar network
  * @returns 'settled' if resolved, 'expired' if deadline passed, otherwise 'active'
  */
 export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number): MarketStatus {
@@ -103,7 +103,7 @@ export function formatSTXAmount(amount: number): string {
 
 /**
  * Estimates human-readable time remaining based on block count.
- * Assumes a block production time of approximately 10 minutes (Stacks average).
+ * Assumes a block production time of approximately 5 seconds (Stellar average).
  * 
  * @param blocksRemaining - The number of blocks until expiry
  * @returns Formatted duration string (e.g., "2d", "5h", "45m")
@@ -112,8 +112,8 @@ export function formatTimeRemaining(blocksRemaining: number | null): string {
   if (blocksRemaining === null) return 'Expired';
   if (blocksRemaining <= 0) return 'Expired';
 
-  // Assuming ~10 minutes per block on Stacks
-  const minutesRemaining = blocksRemaining * 10;
+  // Assuming ~5 seconds per block on Stellar
+  const minutesRemaining = Math.floor((blocksRemaining * 5) / 60);
 
   if (minutesRemaining < 60) {
     return `${minutesRemaining}m`;
@@ -125,7 +125,7 @@ export function formatTimeRemaining(blocksRemaining: number | null): string {
 }
 
 /**
- * Retrieves the current block height of the Stacks network.
+ * Retrieves the current block height of the Stellar network.
  *
  * This is computed from cached data first (fast path), while live fetching
  * happens via `fetchCurrentBlockHeightLive()`.
@@ -192,7 +192,7 @@ export function getCurrentBlockHeight(): number {
 }
 
 /**
- * Live fetch Stacks chain tip block height.
+ * Live fetch Stellar chain tip block height.
  * - On success: updates the cache and returns `warning = null`
  * - On failure: returns a fallback height (cached if present, else 0) and
  *   a user-facing warning string.
@@ -210,7 +210,7 @@ export async function fetchCurrentBlockHeightLive(options?: {
   }
 
   const cfg = getRuntimeConfig();
-  const url = `${cfg.api.coreApiUrl}/extended/v1/status`;
+  const url = cfg.soroban.rpcUrl;
 
   try {
     const controller =
@@ -218,32 +218,26 @@ export async function fetchCurrentBlockHeightLive(options?: {
     const timeoutId =
       controller && timeoutMs > 0 ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
 
-    const res = await fetch(url, controller ? { signal: controller.signal } : undefined);
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getLatestLedger' }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
     if (timeoutId) window.clearTimeout(timeoutId);
 
     if (!res.ok) {
-      throw new Error(`Stacks API status failed: ${res.status}`);
+      throw new Error(`Soroban API status failed: ${res.status}`);
     }
 
-    interface StacksStatusResponse {
-      stacks_tip_height?: number | string;
-      stacks_block_height?: number | string;
-      block_height?: number | string;
-      height?: number | string;
-    }
-
-    const data = (await res.json()) as StacksStatusResponse;
-    const rawHeight =
-      data?.stacks_tip_height ??
-      data?.stacks_block_height ??
-      data?.block_height ??
-      data?.height;
+    const data = await res.json();
+    const rawHeight = data?.result?.sequence;
 
     const height =
       typeof rawHeight === 'string' ? Number.parseInt(rawHeight, 10) : Number(rawHeight);
 
     if (!Number.isFinite(height) || height <= 0) {
-      throw new Error('Invalid stacks tip height response');
+      throw new Error('Invalid Soroban tip height response');
     }
 
     writeBlockHeightCache(height);

@@ -5,10 +5,19 @@ import {
   type NotificationPreferences,
   type WebPushSubscriptionPayload,
 } from '../../lib/push-notification-types';
+import { checkRateLimit, rateLimitHeaders } from '@/app/lib/rate-limit';
 
 export const runtime = 'nodejs';
 
 const KV_PREFIX = 'push_sub:';
+
+// ---------------------------------------------------------------------------
+// Rate limit: max 30 requests per minute per wallet address.
+// Abuse posture: prevents a single client from hammering subscription
+// management endpoints (spam-subscribing or bulk-deleting).
+// ---------------------------------------------------------------------------
+const RATE_LIMIT_MAX = 30;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 
 interface StoredPushSubscription {
   userId: string;
@@ -90,6 +99,15 @@ export async function GET(request: NextRequest) {
   const userId = request.headers.get('x-predinex-wallet-address')?.trim();
   if (!userId) return jsonError('Missing wallet identity.', 401);
 
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
+
   const endpoints = await kv.get<string[]>(userIndexKey(userId));
   if (!endpoints || endpoints.length === 0) {
     return NextResponse.json({ subscriptions: [] });
@@ -118,6 +136,15 @@ export async function POST(request: NextRequest) {
 
   const userId = getAuthenticatedUserId(request, body.userId);
   if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
+
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
 
   const subscription = validateSubscription(body.subscription);
   if (!subscription) return jsonError('Invalid push subscription.', 400);
@@ -158,6 +185,15 @@ export async function DELETE(request: NextRequest) {
 
   const userId = getAuthenticatedUserId(request, body.userId);
   if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
+
+  // Rate limit by wallet address.
+  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(rl) },
+    );
+  }
 
   const idxKey = userIndexKey(userId);
   const endpoints = (await kv.get<string[]>(idxKey)) || [];

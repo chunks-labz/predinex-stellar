@@ -23,20 +23,20 @@ import {
   formatTokenAmountCompact,
   TOKEN_SYMBOL,
   TOKEN_CONFIG,
-} from '../../lib/formatting';
+} from '../../app/lib/formatting';
 
 describe('Currency Formatting', () => {
   describe('Configurable Token Symbol', () => {
-    it('uses default STX symbol when env is not set', () => {
-      expect(TOKEN_SYMBOL).toBe('STX');
+    it('uses default XLM symbol when env is not set', () => {
+      expect(TOKEN_SYMBOL).toBe('XLM');
     });
 
     it('formatTokenAmount uses configurable symbol', () => {
-      expect(formatTokenAmount(1_000_000n)).toContain('STX');
+      expect(formatTokenAmount(1_000_000n)).toContain('XLM');
     });
 
     it('formatTokenAmountCompact uses configurable symbol', () => {
-      expect(formatTokenAmountCompact(1_000_000n)).toContain('STX');
+      expect(formatTokenAmountCompact(1_000_000n)).toContain('XLM');
     });
   });
 

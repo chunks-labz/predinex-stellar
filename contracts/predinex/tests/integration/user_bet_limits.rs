@@ -67,8 +67,8 @@ fn configure_limits(
 ) {
     ctx.client.set_user_exposure_config(
         &ctx.treasury,
-        &0u32,   // max_exposure_per_pool_bps — disabled
-        &0i128,  // max_bet_per_transaction — disabled
+        &0u32,  // max_exposure_per_pool_bps — disabled
+        &0i128, // max_bet_per_transaction — disabled
         &daily_loss_limit,
         &DAY_SECS,
         &weekly_loss_limit,

@@ -12,6 +12,7 @@ import {
   isOracleManagementPlaceholderEnabled,
   ORACLE_MANAGEMENT_PLACEHOLDER_FLAG,
 } from '../lib/feature-flags';
+import { getRuntimeConfig } from '../lib/runtime-config';
 
 type OracleManagementTab = 'providers' | 'submissions' | 'register';
 
@@ -207,7 +208,7 @@ function OracleManagementPreview() {
               </label>
               <input
                 type="text"
-                placeholder="SP1HTBVD3JG9C05J7HBJTHGR0GGW7KX975CN0QKA"
+                placeholder={getRuntimeConfig().defaultOracleAddress || 'G... (Stellar account address)'}
                 className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-muted-foreground cursor-not-allowed"
               />
             </div>

@@ -137,6 +137,30 @@ fn scheduled_claim_executes_when_due_and_can_be_cancelled() {
     assert!(executed.get(0).unwrap().amount > 0);
 }
 
+#[test]
+fn p1_user_claim_status_round_trips() {
+    let ctx = setup();
+    ctx.env.ledger().with_mut(|li| li.timestamp = 100);
+    let pool_id = create_pool(&ctx);
+    // place a bet so schedule_claim can succeed
+    ctx.client
+        .place_bet(&ctx.user, &pool_id, &0, &500, &None::<Address>);
+
+    // schedule a claim and verify history contains a pending entry
+    let _claim_id = ctx.client.schedule_claim(&ctx.user, &pool_id, &4_000);
+    let history = ctx.client.get_user_claim_history(&ctx.user, &0, &10);
+    let mut found = false;
+    for i in 0..history.len() {
+        let e = history.get(i).unwrap();
+        if e.pool_id == pool_id {
+            assert_eq!(e.status, super::UserClaimStatus::Pending);
+            found = true;
+            break;
+        }
+    }
+    assert!(found, "expected pending history entry for scheduled claim");
+}
+
 /// Ignored: exceeds Soroban test environment footprint limit when processing
 /// more than ~10 scheduled claims per invocation.
 #[test]

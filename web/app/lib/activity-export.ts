@@ -6,7 +6,7 @@
  * tx hash and pool title.
  */
 
-import type { ActivityItem } from './stacks-api';
+import type { ActivityItem } from './market-types';
 
 export type ExportFormat = 'csv' | 'json';
 
