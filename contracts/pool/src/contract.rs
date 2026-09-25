@@ -16,7 +16,12 @@
 //! informational and error messages are recorded using `env.log()`.
 //! This should be used only during development due to cost implications.
 
-#![deny(missing_docs, unsafe_code)]
+// missing_docs is a warn, not a deny: soroban-sdk's #[contract]/#[contracttype]/
+// #[contracterror] macros generate associated items (constructors, client
+// methods) that carry no doc comments of their own, which trips missing_docs
+// on code this crate doesn't author. unsafe_code stays denied.
+#![warn(missing_docs)]
+#![deny(unsafe_code)]
 #![deny(clippy::all, clippy::pedantic)]
 
 use soroban_sdk::{
@@ -333,6 +338,7 @@ mod test {
     #[test]
     fn test_successful_extension() {
         let env = Env::default();
+        env.mock_all_auths();
         // Set current ledger time to 1000
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
@@ -358,7 +364,7 @@ mod test {
         assert_eq!(updated.expiry, new_expiry);
 
         // Verify event
-        let events = env.events().all();
+        let events = env.events().all().events();
         assert_eq!(events.len(), 1);
         let (contract_id, topics, data) = &events[0];
         assert_eq!(topics.len(), 2);
@@ -368,7 +374,12 @@ mod test {
     }
 
     #[test]
+    #[should_panic]
     fn test_authorization_fails() {
+        // extend_duration takes no explicit caller argument — it authorizes
+        // via `pool.creator.require_auth()`. Without mock_all_auths() (or a
+        // matching set_auths() entry), the host has no authorization for
+        // that address and require_auth() traps.
         let env = Env::default();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
@@ -381,18 +392,14 @@ mod test {
             max_entry_ttl: 2000000,
         });
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
-        let other = Address::generate(&env);
-
-        // Switch invoker to other
-        env.invoker().set(&other);
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
-        assert_eq!(result, Err(PoolError::Unauthorized));
+        let (_creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let _ = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
     }
 
     #[test]
     fn test_pool_not_found() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -412,8 +419,9 @@ mod test {
     #[test]
     fn test_expired_pool_rejected() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
-            timestamp: 2000,
+            timestamp: 1000,
             protocol_version: 20,
             sequence_number: 1,
             network_id: Default::default(),
@@ -423,8 +431,12 @@ mod test {
             max_entry_ttl: 2000000,
         });
 
-        // Create pool with expiry at 1500 (already expired at ledger time 2000)
-        let (creator, pool_id, _) = setup_pool(&env, 0, -500, PoolState::Open);
+        // Create pool with expiry at 1500 (offsets are relative to the
+        // current ledger timestamp of 1000, and are u64 so must be
+        // non-negative — advance the ledger past expiry afterwards instead
+        // of trying to create an already-past expiry directly).
+        let (creator, pool_id, _) = setup_pool(&env, 0, 500, PoolState::Open);
+        env.ledger().set_timestamp(2000);
         // current time = 2000, expiry = 1500 (so expired)
         let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 3000);
         assert_eq!(result, Err(PoolError::PoolExpired));
@@ -433,6 +445,7 @@ mod test {
     #[test]
     fn test_expiry_must_increase() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -453,6 +466,7 @@ mod test {
     #[test]
     fn test_max_duration_exceeded() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -474,6 +488,7 @@ mod test {
     #[test]
     fn test_expiry_must_be_future() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 2000,
             protocol_version: 20,
@@ -494,6 +509,7 @@ mod test {
     #[test]
     fn test_frozen_pool_locked() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -513,6 +529,7 @@ mod test {
     #[test]
     fn test_disputed_pool_locked() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -532,6 +549,7 @@ mod test {
     #[test]
     fn test_non_open_state_rejected() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -553,6 +571,7 @@ mod test {
     #[test]
     fn test_boundary_max_duration_allowed() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,
@@ -574,6 +593,7 @@ mod test {
     #[test]
     fn test_boundary_max_duration_exceeded_by_one() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set(LedgerInfo {
             timestamp: 1000,
             protocol_version: 20,

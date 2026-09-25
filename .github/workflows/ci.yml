@@ -143,6 +143,31 @@ jobs:
           path: ./web/.playwright-report
           retention-days: 30
 
+  api-checks:
+    name: API Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build (also type-checks oracle/, which api/tsconfig.json includes)
+        run: npm run build
+
+      - name: Test (also covers oracle/, which api/jest.config.js roots include)
+        run: npm test
+
   bot-checks:
     name: Bot Checks
     runs-on: ubuntu-latest
