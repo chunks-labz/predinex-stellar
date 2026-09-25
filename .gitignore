@@ -9,6 +9,8 @@ contracts/predinex/test_snapshots/
 
 # Node.js
 **/node_modules/
+dist/
+**/dist/
 .next/
 out/
 build/

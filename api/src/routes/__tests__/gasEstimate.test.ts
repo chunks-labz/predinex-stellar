@@ -1,8 +1,4 @@
-/**
- * Comprehensive test suite for Gas Cost Estimator
- * Issue #1111: Build lending pool gas cost estimator and optimization suggestions
- */
-
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   GasEstimatorService,
   createGasEstimator,
@@ -10,7 +6,10 @@ import {
   GasEstimate,
   OptimizationSuggestion,
   GasAnalysisReport,
-} from '../gasEstimate';
+  handleGasEstimateRequest,
+  handleOptimizationSuggestionsRequest,
+  handleAnalysisReportRequest,
+} from '../gasEstimate.js';
 
 describe('GasEstimatorService', () => {
   let estimator: GasEstimatorService;
@@ -405,12 +404,6 @@ describe('GasEstimatorService', () => {
 });
 
 describe('Route Handlers', () => {
-  const { 
-    handleGasEstimateRequest,
-    handleOptimizationSuggestionsRequest,
-    handleAnalysisReportRequest,
-  } = require('../gasEstimate');
-
   describe('handleGasEstimateRequest', () => {
     it('should handle valid gas estimate request', async () => {
       const req = {
@@ -422,8 +415,8 @@ describe('Route Handlers', () => {
       };
 
       const res = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis(),
+        json: vi.fn(),
+        status: vi.fn().mockReturnThis(),
       };
 
       await handleGasEstimateRequest(req, res);
@@ -439,8 +432,8 @@ describe('Route Handlers', () => {
     it('should return error for missing required fields', async () => {
       const req = { body: {} };
       const res = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis(),
+        json: vi.fn(),
+        status: vi.fn().mockReturnThis(),
       };
 
       await handleGasEstimateRequest(req, res);
@@ -464,8 +457,8 @@ describe('Route Handlers', () => {
       };
 
       const res = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis(),
+        json: vi.fn(),
+        status: vi.fn().mockReturnThis(),
       };
 
       await handleOptimizationSuggestionsRequest(req, res);
@@ -489,8 +482,8 @@ describe('Route Handlers', () => {
       };
 
       const res = {
-        json: jest.fn(),
-        status: jest.fn().mockReturnThis(),
+        json: vi.fn(),
+        status: vi.fn().mockReturnThis(),
       };
 
       await handleAnalysisReportRequest(req, res);

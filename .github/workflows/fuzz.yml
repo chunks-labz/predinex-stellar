@@ -25,6 +25,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   fuzz-style-tests:
     name: Fuzz-Style Tests (predinex)

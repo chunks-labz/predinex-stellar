@@ -3,6 +3,7 @@
  * Issue #1109
  */
 
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   EmergencyWithdrawalService,
   EmergencyStatus,

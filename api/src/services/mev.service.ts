@@ -165,7 +165,8 @@ export class MevProtectionService {
     now: number,
     recentExecutions: ExecutedLendingOperation[]
   ): boolean {
-    const windowStart = now - this.config.minOrderDelaySecs;
+    const windowStart =
+      Math.min(operation.submittedAt, now) - this.config.minOrderDelaySecs;
     const surroundingTrades = recentExecutions.filter(
       (execution) =>
         execution.poolId === operation.poolId &&

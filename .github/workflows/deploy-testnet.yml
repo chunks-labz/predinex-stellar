@@ -8,6 +8,9 @@ on:
       - '.github/workflows/deploy-testnet.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Only deploy from the canonical upstream repo. Forks that pull this
 # workflow do not have the secrets configured and would fail noisily.
 env:
