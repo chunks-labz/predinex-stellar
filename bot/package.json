@@ -15,7 +15,7 @@
     "dry-run": "DRY_RUN=true node dist/index.js"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "16.0.1",
+    "@stellar/stellar-sdk": "17.1.0",
     "dotenv": "^16.4.5"
   },
   "devDependencies": {
