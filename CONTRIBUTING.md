@@ -286,7 +286,10 @@ Dependabot is configured in [`.github/dependabot.yml`](./.github/dependabot.yml)
 | Ecosystem | Directory | Label |
 |-----------|-----------|-------|
 | npm | `/web` | `dependencies`, `npm` |
+| npm | `/bot` | `dependencies`, `npm` |
+| npm | `/api` | `dependencies`, `npm` |
 | Cargo | `/contracts/predinex` | `dependencies`, `cargo` |
+| Cargo | `/` (workspace root) | `dependencies`, `cargo` |
 
 ### Merge policy
 

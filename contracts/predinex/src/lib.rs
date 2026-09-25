@@ -1354,6 +1354,11 @@ pub enum ContractError {
     BalanceShortfall = 87,
     /// Template is currently in use and cannot be deleted.
     TemplateInUse = 88,
+    /// #1176 — `get_leaderboard` was called with a `cursor` that does not match
+    /// any entry in the pool's leaderboard (unknown address, or an address whose
+    /// bet was removed). Returning page 1 in that case would silently duplicate
+    /// data, so the call fails instead.
+    InvalidLeaderboardCursor = 89,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -7180,12 +7185,16 @@ impl PredinexContract {
     ///
     /// Each entry includes the user address, total bet amount, and whether winnings
     /// have been claimed (for settled pools).
+    ///
+    /// #1176 — A `cursor` that is not present in the entry list is rejected with
+    /// `ContractError::InvalidLeaderboardCursor` instead of falling back to page 1,
+    /// which would otherwise hand the caller duplicated rows under a new page number.
     pub fn get_leaderboard(
         env: Env,
         pool_id: u32,
         limit: u32,
         cursor: Option<Address>,
-    ) -> Vec<PoolLeaderboardEntry> {
+    ) -> Result<Vec<PoolLeaderboardEntry>, ContractError> {
         let effective_limit = if limit > 50 { 50 } else { limit };
         let mut all_entries = Vec::new(&env);
 
@@ -7246,11 +7255,18 @@ impl PredinexContract {
         // Determine start index after cursor (if specified).
         let mut start_index: u32 = 0;
         if let Some(ref cursor_addr) = cursor {
+            let mut cursor_found = false;
             for i in 0..all_entries.len() {
                 if all_entries.get(i).unwrap().user == *cursor_addr {
                     start_index = i + 1;
+                    cursor_found = true;
                     break;
                 }
+            }
+            // #1176 — Never silently restart from page 1 for an unknown cursor:
+            // surface the mistake to the caller so it can re-read the first page.
+            if !cursor_found {
+                return Err(ContractError::InvalidLeaderboardCursor);
             }
         }
 
@@ -7265,7 +7281,7 @@ impl PredinexContract {
             );
             limited.push_back(entry);
         }
-        limited
+        Ok(limited)
     }
 
     /// #635 — Return the template ID used to create this pool, if any.

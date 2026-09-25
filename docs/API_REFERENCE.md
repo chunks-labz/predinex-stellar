@@ -1338,11 +1338,11 @@ pub fn get_pool_info(env: Env, pool_id: u32) -> Option<PoolInfo>
 ### `get_leaderboard`
 
 ```rust
-pub fn get_leaderboard(env: Env, pool_id: u32, limit: u32, cursor: Option<Address>,) -> Vec<PoolLeaderboardEntry>
+pub fn get_leaderboard(env: Env, pool_id: u32, limit: u32, cursor: Option<Address>,) -> Result<Vec<PoolLeaderboardEntry>, ContractError>
 ```
 
 **Auth:** TBD  
-**Description:** TBD
+**Description:** #1176 — a `cursor` that is not present in the pool's leaderboard returns `Err(ContractError::InvalidLeaderboardCursor)` instead of silently answering with page 1.
 
 ---
 

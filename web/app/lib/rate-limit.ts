@@ -108,3 +108,22 @@ export function parseLimitParam(raw: string | null, fallback = 20, max = 100): n
   if (Number.isNaN(n) || n < 1) return fallback;
   return Math.min(n, max);
 }
+
+/**
+ * Resolve the client IP used for rate-limit bucketing.
+ *
+ * Prefers the left-most entry of `x-forwarded-for` (set by Vercel and every
+ * other edge in front of this app) and falls back to `x-real-ip`. Requests
+ * without either header share the `"anonymous"` bucket.
+ *
+ * Use this — not a caller-supplied value such as a target wallet address — for
+ * limits that must bound enumeration: a caller can vary an `address` param on
+ * every request, but not the IP it connects from.
+ */
+export function clientIpFromHeaders(headers: Headers): string {
+  const forwarded = headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  if (forwarded) return forwarded;
+  const realIp = headers.get('x-real-ip')?.trim();
+  if (realIp) return realIp;
+  return 'anonymous';
+}

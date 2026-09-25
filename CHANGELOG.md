@@ -18,6 +18,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - New `DataKey::UserTotalClaimed(Address)` and `DataKey::UserClaimHistory(Address)` storage entries updated atomically after each successful claim
 - `extend_pool_duration` now rejects any single extension larger than `MAX_EXTENSION_SECS` (30 days) with `DurationTooLong`, so a creator can no longer push a market out by months in one call; the existing total-lifetime cap from `created_at` still applies
 - `rescue_tokens` now rejects `amount <= 0` with `InvalidWithdrawalAmount` instead of forwarding a zero or negative value to the token client
+- `get_leaderboard` now returns `Result<Vec<PoolLeaderboardEntry>, ContractError>` and fails with the new `InvalidLeaderboardCursor` when the supplied cursor is not in the entry list, instead of silently answering with page 1 (closes #1176)
 
 ### 🤖 Bot
 - Bounded the poller's consecutive-failure map: counts are capped at `MAX_FAILURE_COUNT` (10), after which the pool is escalated once and evicted, and every cycle prunes entries for pools that have left the active expired-unsettled scan
@@ -26,6 +27,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### 🌐 Web
 - Updated `getMarkets` and `fetchAllPools` to use the corrected pool count from `get_pool_count`
+- `/api/export/transactions` now requires the caller's wallet identity (`x-predinex-wallet-address`) and rejects exports for any other address, and it rate limits on the client IP (30/hour) in addition to the per-wallet bucket (10/hour) so walking a list of target addresses can no longer reset the counter (closes #1177)
+- Added `clientIpFromHeaders()` to the shared rate-limit helper for routes that need a caller identity they cannot vary per request
 
 ### 📖 Docs
 <!-- README, RELEASE, architectural docs, inline documentation -->
@@ -43,6 +46,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Added Vercel configuration file (`web/vercel.json`)
 - Fixed `tag-release.yml` to use `PAT_TOKEN` instead of `GITHUB_TOKEN` so tag pushes trigger downstream CI workflows (closes #600)
 - Regenerated `web/package-lock.json` so it is back in sync with `web/package.json`; `npm ci` was failing outright, which broke the install step of every workflow that builds `web/` and left the `actions/setup-node` npm cache unusable
+- Dependabot now also covers `/bot`, `/api` (npm) and the root Cargo workspace in addition to `/web` and `/contracts/predinex`, with the same weekly non-major grouping (closes #1174)
+- Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
 
 ---
 

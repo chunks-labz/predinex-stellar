@@ -28,7 +28,10 @@ jobs:
           close-pr-label: "auto-closed"
 
           # ── Exempt labels (never marked stale) ──────────────────────
-          exempt-issue-labels: "pinned,security,blocked,in-progress,area: contract"
+          # `wave` / `drips-wave` cover Stellar Wave program issues: they are
+          # assigned to contributors, so a quiet issue is expected and must not
+          # be auto-closed while the work is in flight.
+          exempt-issue-labels: "pinned,security,blocked,in-progress,wave,drips-wave,area: contract"
           exempt-pr-labels: "pinned,security,blocked,in-progress,do-not-merge"
 
           # ── Messages ────────────────────────────────────────────────

@@ -1008,3 +1008,46 @@ fn l6_leaderboard_limit_capped_at_fifty() {
         "leaderboard must be capped at 50 entries"
     );
 }
+
+/// L7: Leaderboard rejects a cursor that is not in the entry list.
+///
+/// #1176 — An unknown cursor used to leave `start_index` at 0, so the call
+/// silently answered with page 1. The caller must get a hard error instead.
+#[test]
+fn l7_leaderboard_unknown_cursor_rejected() {
+    let t = setup_multi_user();
+    let pool_id = make_pool_mu(&t);
+
+    let bettor = Address::generate(&t.env);
+    let outsider = Address::generate(&t.env);
+    mint(&t.env, &t.token, &bettor, 1_000);
+    t.client
+        .place_bet(&bettor, &pool_id, &0u32, &1_000i128, &None::<Address>);
+
+    assert_eq!(
+        t.client
+            .try_get_leaderboard(&pool_id, &50u32, &Some(outsider.clone()))
+            .err(),
+        Some(Ok(ContractError::InvalidLeaderboardCursor)),
+        "a cursor that never bet on this pool must not fall back to page 1"
+    );
+
+    // A pool with no bettors at all cannot resolve a cursor either.
+    let empty_pool = make_pool_mu(&t);
+    assert_eq!(
+        t.client
+            .try_get_leaderboard(&empty_pool, &50u32, &Some(outsider))
+            .err(),
+        Some(Ok(ContractError::InvalidLeaderboardCursor)),
+        "a cursor against an empty leaderboard must be rejected"
+    );
+
+    // The bettor themselves remains a valid cursor.
+    let entries = t
+        .client
+        .get_leaderboard(&pool_id, &50u32, &Some(bettor));
+    assert!(
+        entries.is_empty(),
+        "the last entry as cursor yields no further pages"
+    );
+}

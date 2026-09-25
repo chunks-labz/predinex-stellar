@@ -78,7 +78,7 @@ For an issue to be eligible for the Wave program, it must meet **all** of the fo
 
 An issue will be **auto-closed** by maintainers or bots if:
 
-- **No activity for 30 days** after the last maintainer comment.
+- **No activity for 30 days** after the last maintainer comment. Issues assigned to a Wave cycle (labelled `wave` or `drips-wave`) are exempt from stale auto-close — see `.github/workflows/stale.yml`.
 - **Duplicate of an existing issue.** The closer should link to the canonical issue.
 - **Out of scope.** The issue requests a feature or change that conflicts with the project roadmap or architecture.
 - **Insufficient detail.** The issue lacks enough context to be actionable, and the contributor has not responded to requests for clarification within 7 days.

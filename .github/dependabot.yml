@@ -15,8 +15,53 @@ updates:
           - "patch"
           - "minor"
 
+  - package-ecosystem: "npm"
+    directory: "/bot"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "npm"
+    directory: "/api"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
   - package-ecosystem: "cargo"
     directory: "/contracts/predinex"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "cargo"
+    groups:
+      cargo-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+          - "minor"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
     schedule:
       interval: "weekly"
     labels:
