@@ -23,7 +23,7 @@ on:
 # Only deploy from the canonical upstream repo. Forks that pull this
 # workflow do not have the secrets configured and would fail noisily.
 env:
-  CANONICAL_REPO: dimka90/predinex-stellar
+  CANONICAL_REPO: chunks-labz/predinex-stellar
   STELLAR_NETWORK: mainnet
   STELLAR_RPC_URL: https://mainnet.stellar.validationcloud.io/v1/${{ secrets.VALIDATION_CLOUD_KEY }}
   STELLAR_NETWORK_PASSPHRASE: 'Public Global Stellar Network ; September 2015'
@@ -37,7 +37,7 @@ concurrency:
 jobs:
   guard:
     name: Validate inputs
-    if: github.repository == 'dimka90/predinex-stellar' && github.event_name == 'workflow_dispatch'
+    if: github.repository == 'chunks-labz/predinex-stellar' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -65,7 +65,7 @@ jobs:
   build:
     name: Build & optimize WASM
     needs: guard
-    if: always() && github.repository == 'dimka90/predinex-stellar'
+    if: always() && github.repository == 'chunks-labz/predinex-stellar'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -131,7 +131,7 @@ jobs:
   safety-checks:
     name: Pre-deployment Safety Checks
     needs: build
-    if: always() && !cancelled() && github.repository == 'dimka90/predinex-stellar'
+    if: always() && !cancelled() && github.repository == 'chunks-labz/predinex-stellar'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -207,7 +207,7 @@ jobs:
   deploy:
     name: Deploy to Mainnet
     needs: safety-checks
-    if: github.repository == 'dimka90/predinex-stellar'
+    if: github.repository == 'chunks-labz/predinex-stellar'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -306,7 +306,7 @@ jobs:
   smoke:
     name: Smoke test
     needs: deploy
-    if: github.repository == 'dimka90/predinex-stellar'
+    if: github.repository == 'chunks-labz/predinex-stellar'
     runs-on: ubuntu-latest
     permissions:
       contents: read
