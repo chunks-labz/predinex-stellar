@@ -21,6 +21,13 @@ on:
   release:
     types: [published, created]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-contract-bytecode-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
 
@@ -28,9 +35,10 @@ jobs:
   verify-bytecode:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: read
       id-token: write
+      issues: write
 
     steps:
       - name: Checkout code

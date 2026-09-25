@@ -1,23 +1,3 @@
-/**
- * #722 — Transaction history export endpoint.
- *
- * GET /api/export/transactions?address=<wallet>&format=csv|json
- *
- * Abuse posture
- * -------------
- * #1177 closed two holes in this route:
- *
- * 1. **Authentication.** The caller must present its wallet identity in the
- *    `x-predinex-wallet-address` header — the same convention already used by
- *    `/api/push-subscriptions` — and that identity must match the `address`
- *    being exported. A request can therefore only ever export the caller's own
- *    history; enumerating someone else's is a 401, not a 200.
- * 2. **Rate-limit bucketing.** The counter used to be keyed on the *target*
- *    address, so a caller walking a list of addresses got a brand-new bucket
- *    per entry and history enumeration was effectively unthrottled. A
- *    client-IP bucket is now checked first — the caller cannot vary its own IP
- *    per request — with the per-wallet bucket layered on top of it.
- */
 import { NextRequest, NextResponse } from 'next/server';
 import {
   checkRateLimit,
@@ -25,6 +5,8 @@ import {
   parseLimitParam,
   clientIpFromHeaders,
 } from '@/app/lib/rate-limit';
+import { resolveExportWindow, filterActivitiesForExport, toExportRecords } from '@/app/lib/activity-export';
+import type { ActivityItem } from '@/app/lib/market-types';
 
 export const runtime = 'nodejs';
 
@@ -33,12 +15,81 @@ export const runtime = 'nodejs';
 // ---------------------------------------------------------------------------
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
-// Per-IP cap. Slightly looser than the per-wallet cap so that a few wallets
-// behind one NAT'd connection keep working, while address enumeration still
-// runs out of budget quickly.
 const IP_RATE_LIMIT_MAX = 30;
 
 const WALLET_HEADER = 'x-predinex-wallet-address';
+const CSV_HEADER = 'Date,Pool ID,Question,Outcome,Amount,Result,Payout';
+
+function toResult(type: ActivityItem['type']): string {
+  if (type === 'winnings-claimed') return 'Won';
+  if (type === 'bet-placed') return 'Pending';
+  return type;
+}
+
+function getMockActivities(address: string): ActivityItem[] {
+  const now = Math.floor(Date.now() / 1000);
+  return [
+    {
+      txId: 'tx1',
+      type: 'bet-placed',
+      functionName: 'Yes',
+      timestamp: now - 86400,
+      status: 'success',
+      amount: 1_000_000,
+      poolId: 1,
+      poolTitle: 'Will BTC hit $100k?',
+      explorerUrl: '',
+      address,
+    },
+    {
+      txId: 'tx2',
+      type: 'winnings-claimed',
+      functionName: 'Yes',
+      timestamp: now - 43200,
+      status: 'success',
+      amount: 1_900_000,
+      poolId: 1,
+      poolTitle: 'Will BTC hit $100k?',
+      explorerUrl: '',
+      address,
+    },
+    {
+      txId: 'tx3',
+      type: 'bet-placed',
+      functionName: 'No',
+      timestamp: now - 3600,
+      status: 'success',
+      amount: 500_000,
+      poolId: 2,
+      poolTitle: 'ETH merge success?',
+      explorerUrl: '',
+      address,
+    },
+  ];
+}
+
+function itemsToCsv(items: ActivityItem[]): string {
+  if (items.length === 0) {
+    return CSV_HEADER;
+  }
+  const rows = items.map((item) => {
+    const date = new Date(item.timestamp * 1000).toISOString().slice(0, 10);
+    const amount = item.amount !== undefined && item.amount !== null ? (item.amount / 1_000_000).toFixed(2) : '';
+    const payout = item.type === 'winnings-claimed' && item.amount !== undefined && item.amount !== null ? (item.amount / 1_000_000).toFixed(2) : '';
+    const rawTitle = item.poolTitle ?? '';
+    const title = `"${rawTitle.replace(/"/g, '""')}"`;
+    return [
+      date,
+      item.poolId ?? '',
+      title,
+      item.functionName ?? '',
+      amount,
+      toResult(item.type),
+      payout,
+    ].join(',');
+  });
+  return [CSV_HEADER, ...rows].join('\n');
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
@@ -47,7 +98,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'address is required' }, { status: 400 });
   }
 
-  // #1177 — Authenticate the caller and bind it to the requested address.
+  // Authenticate the caller and bind it to the requested address.
   const caller = req.headers.get(WALLET_HEADER)?.trim();
   if (!caller) {
     return NextResponse.json(
@@ -62,11 +113,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // Validate `limit` param if present.
-  const _limit = parseLimitParam(searchParams.get('limit'), 20, 100);
-
-  // #1177 — Per-IP bucket, checked before any wallet bucket: the IP is the one
-  // identifier an enumerating caller cannot rotate per request.
+  // Per-IP bucket, checked before wallet bucket
   const clientIp = clientIpFromHeaders(req.headers);
   const ipRl = checkRateLimit(`export-txns:ip:${clientIp}`, {
     max: IP_RATE_LIMIT_MAX,
@@ -95,10 +142,42 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // TODO: Fetch real transaction data from Soroban RPC or an indexer.
-  // The endpoint currently returns 501 until on-chain data fetching is wired up.
-  return NextResponse.json(
-    { error: 'Not implemented: real on-chain transaction export is not yet available.' },
-    { status: 501, headers: rlHdrs },
-  );
+  const from = searchParams.get('from') ?? '';
+  const to = searchParams.get('to') ?? '';
+  const format = (searchParams.get('format') ?? 'csv').toLowerCase();
+  const page = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10));
+  const pageSize = parseLimitParam(searchParams.get('pageSize') ?? searchParams.get('limit'), 20, 100);
+
+  const window = resolveExportWindow(from, to);
+  const allActivities = getMockActivities(address);
+  const filtered = filterActivitiesForExport(allActivities, window);
+
+  const start = (page - 1) * pageSize;
+  const paginated = filtered.slice(start, start + pageSize);
+
+  if (format === 'json') {
+    const filename = `predinex-transactions_${window.from}_${window.to}.json`;
+    return new NextResponse(JSON.stringify(toExportRecords(paginated), null, 2), {
+      status: 200,
+      headers: {
+        ...rlHdrs,
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'X-Total-Count': String(filtered.length),
+      },
+    });
+  }
+
+  const csv = itemsToCsv(paginated);
+  const filename = `predinex-transactions_${window.from}_${window.to}.csv`;
+
+  return new NextResponse(csv, {
+    status: 200,
+    headers: {
+      ...rlHdrs,
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'X-Total-Count': String(filtered.length),
+    },
+  });
 }

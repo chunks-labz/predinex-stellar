@@ -40,6 +40,25 @@ Assess portfolio risk
 ### GET /api/budget/health
 Health check
 
+## Testing
+
+Vitest is the authoritative test runner for the API package, standardizing testing across all TypeScript packages in the repository (`web`, `bot`, `api`).
+
+Run the test suite:
+```bash
+npm test
+```
+
+Run tests in watch mode:
+```bash
+npm run test:watch
+```
+
+Generate coverage report:
+```bash
+npm run test:coverage
+```
+
 ## Documentation
 
 See `/docs/BUDGET_PLANNER.md` for complete documentation.

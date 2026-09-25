@@ -8,14 +8,7 @@
  * License: Apache-2.0
  */
 
-import type { paths as budgetPaths } from '../routes/budget';
-import type { paths as compliancePaths } from '../routes/compliance';
-import type { paths as emergencyPaths } from '../routes/emergency';
-import type { paths as gasEstimatePaths } from '../routes/gasEstimate';
-import type { paths as insurancePaths } from '../routes/insurance';
-import type { paths as referralPaths } from '../routes/referral';
-import type { paths as reputationPaths } from '../routes/reputation';
-import type { paths as simulationPaths } from '../routes/simulation';
+
 
 /**
  * Base Schemas - Shared across all modules
@@ -348,37 +341,37 @@ export const gasEstimateSchemas = {
 /**
  * Insurance Module Schemas
  */
-export const insuranceSchemas {
+export const insuranceSchemas = {
   // Insurance route schemas would go here
-}
+};
 
 /**
  * Referral Module Schemas
  */
-export const referralSchemas {
+export const referralSchemas = {
   // Referral route schemas would go here
-}
+};
 
 /**
  * Reputation Module Schemas
  */
-export const reputationSchemas {
+export const reputationSchemas = {
   // Reputation route schemas would go here
-}
+};
 
 /**
  * Emergency Module Schemas
  */
-export const emergencySchemas {
+export const emergencySchemas = {
   // Emergency route schemas would go here
-}
+};
 
 /**
  * Simulation Module Schemas
  */
-export const simulationSchemas {
+export const simulationSchemas = {
   // Simulation route schemas would go here
-}
+};
 
 /**
  * Full OpenAPI 3.1 Specification
@@ -409,16 +402,7 @@ export const openApiDoc = {
       description: 'Production server',
     },
   ],
-  paths: {
-    ...budgetPaths,
-    ...compliancePaths,
-    ...emergencyPaths,
-    ...gasEstimatePaths,
-    ...insurancePaths,
-    ...referralPaths,
-    ...reputationPaths,
-    ...simulationPaths,
-  },
+  paths: {},
   components: {
     schemas: {
       ...baseSchemas,

@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   web-checks:
     name: Web Checks
@@ -30,6 +37,10 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Verify workflow permissions and concurrency
+        working-directory: .
+        run: python3 scripts/verify-workflows.py
 
       - name: Test
         run: npm run test -- --run
@@ -194,6 +205,36 @@ jobs:
 
       - name: Test
         run: npm test -- --run
+
+  api-checks:
+    name: API Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
 
   contract-checks:
     name: Contract Checks
