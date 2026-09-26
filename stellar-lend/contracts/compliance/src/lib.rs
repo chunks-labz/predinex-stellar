@@ -8,7 +8,7 @@
 pub mod types;
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
 };
 use types::{
     ComplianceAction, ComplianceError, ComplianceRecord, ComplianceTier,

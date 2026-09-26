@@ -8,8 +8,8 @@
 #![allow(unused_imports)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, 
-    token, Address, Env, String as SorobanString, Symbol, Vec as SorobanVec,
+    contract, contracterror, contractimpl, contracttype,
+    token, Address, Env, String, Symbol, Vec,
 };
 
 /// Emergency withdrawal errors with detailed error codes
@@ -71,7 +71,7 @@ pub struct EmergencyConfig {
     /// Primary emergency admin address
     pub primary_admin: Address,
     /// Secondary admin addresses (for multi-sig)
-    pub secondary_admins: SorobanVec<Address>,
+    pub secondary_admins: Vec<Address>,
     /// Number of admin signatures required for withdrawal
     pub required_signatures: u32,
     /// Maximum amount that can be withdrawn per transaction
@@ -87,7 +87,7 @@ pub struct EmergencyConfig {
     /// Timestamp when emergency mode was activated
     pub activated_at: u64,
     /// Reason for emergency activation
-    pub activation_reason: SorobanString,
+    pub activation_reason: String,
 }
 
 /// Emergency withdrawal request
@@ -109,11 +109,11 @@ pub struct WithdrawalRequest {
     /// Timestamp when request can be executed (after timelock)
     pub executable_at: u64,
     /// Admin signatures collected
-    pub signatures: SorobanVec<Address>,
+    pub signatures: Vec<Address>,
     /// Current status of the request
     pub status: WithdrawalRequestStatus,
     /// Reason for the withdrawal
-    pub reason: SorobanString,
+    pub reason: String,
 }
 
 /// Status of a withdrawal request
@@ -159,7 +159,7 @@ pub struct EmergencyAuditLog {
     /// Amount involved (if applicable)
     pub amount: Option<i128>,
     /// Additional context or reason
-    pub details: SorobanString,
+    pub details: String,
 }
 
 /// Types of emergency actions for audit logging
@@ -239,7 +239,7 @@ impl EmergencyWithdrawal {
         let config = EmergencyConfig {
             status: EmergencyStatus::Normal,
             primary_admin: primary_admin.clone(),
-            secondary_admins: SorobanVec::new(&env),
+            secondary_admins: Vec::new(&env),
             required_signatures: 1,
             max_withdrawal_amount,
             max_withdrawal_per_window: max_withdrawal_amount * 3,
@@ -247,7 +247,7 @@ impl EmergencyWithdrawal {
             cooldown_period_secs: 3600,    // 1 hour
             timelock_delay_secs: 7200,     // 2 hours
             activated_at: 0,
-            activation_reason: SorobanString::from_str(&env, ""),
+            activation_reason: String::from_str(&env, ""),
         };
 
         env.storage().instance().set(&EmergencyDataKey::Config, &config);
@@ -259,7 +259,7 @@ impl EmergencyWithdrawal {
             EmergencyAction::ConfigUpdated,
             primary_admin,
             None,
-            SorobanString::from_str(&env, "Emergency system initialized"),
+            String::from_str(&env, "Emergency system initialized"),
         );
 
         Ok(())
@@ -279,7 +279,7 @@ impl EmergencyWithdrawal {
     pub fn activate_emergency(
         env: Env,
         admin: Address,
-        reason: SorobanString,
+        reason: String,
     ) -> Result<(), EmergencyError> {
         admin.require_auth();
 
@@ -304,7 +304,7 @@ impl EmergencyWithdrawal {
         Self::log_action(
             &env,
             EmergencyAction::Activated,
-            admin,
+            admin.clone(),
             None,
             reason,
         );
@@ -326,7 +326,7 @@ impl EmergencyWithdrawal {
     pub fn deactivate_emergency(
         env: Env,
         admin: Address,
-        reason: SorobanString,
+        reason: String,
     ) -> Result<(), EmergencyError> {
         admin.require_auth();
 
@@ -348,7 +348,7 @@ impl EmergencyWithdrawal {
         Self::log_action(
             &env,
             EmergencyAction::Deactivated,
-            admin,
+            admin.clone(),
             None,
             reason,
         );
@@ -375,7 +375,7 @@ impl EmergencyWithdrawal {
         recipient: Address,
         amount: i128,
         token: Address,
-        reason: SorobanString,
+        reason: String,
     ) -> Result<u64, EmergencyError> {
         admin.require_auth();
 
@@ -410,7 +410,7 @@ impl EmergencyWithdrawal {
         let request_id = Self::get_next_withdrawal_id(&env);
 
         let now = env.ledger().timestamp();
-        let mut signatures = SorobanVec::new(&env);
+        let mut signatures = Vec::new(&env);
         signatures.push_back(admin.clone());
 
         let request = WithdrawalRequest {
@@ -496,7 +496,7 @@ impl EmergencyWithdrawal {
             EmergencyAction::WithdrawalApproved,
             admin.clone(),
             Some(request.amount),
-            SorobanString::from_str(&env, "Withdrawal approved"),
+            String::from_str(&env, "Withdrawal approved"),
         );
 
         env.events().publish(
@@ -575,7 +575,7 @@ impl EmergencyWithdrawal {
             EmergencyAction::WithdrawalExecuted,
             executor.clone(),
             Some(request.amount),
-            SorobanString::from_str(&env, "Withdrawal executed"),
+            String::from_str(&env, "Withdrawal executed"),
         );
 
         env.events().publish(
@@ -595,7 +595,7 @@ impl EmergencyWithdrawal {
         env: Env,
         admin: Address,
         request_id: u64,
-        reason: SorobanString,
+        reason: String,
     ) -> Result<(), EmergencyError> {
         admin.require_auth();
 
@@ -653,7 +653,7 @@ impl EmergencyWithdrawal {
                 EmergencyAction::AdminAdded,
                 primary_admin,
                 None,
-                SorobanString::from_str(&env, "Admin added"),
+                String::from_str(&env, "Admin added"),
             );
         }
 
@@ -695,7 +695,7 @@ impl EmergencyWithdrawal {
             EmergencyAction::ConfigUpdated,
             admin,
             None,
-            SorobanString::from_str(&env, "Configuration updated"),
+            String::from_str(&env, "Configuration updated"),
         );
 
         Ok(())
@@ -827,7 +827,7 @@ impl EmergencyWithdrawal {
         action: EmergencyAction,
         performer: Address,
         amount: Option<i128>,
-        details: SorobanString,
+        details: String,
     ) {
         let log_id: u64 = env
             .storage()
@@ -865,13 +865,12 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register_contract(None, EmergencyWithdrawal);
+        let contract_id = env.register(EmergencyWithdrawal, ());
         let client = EmergencyWithdrawalClient::new(&env, &contract_id);
 
-        let result = client.initialize(&admin, &1_000_000);
-        assert!(result.is_ok());
+        client.initialize(&admin, &1_000_000);
 
-        let config = client.get_config_view().unwrap();
+        let config = client.get_config_view();
         assert_eq!(config.primary_admin, admin);
         assert_eq!(config.status, EmergencyStatus::Normal);
     }
@@ -882,20 +881,20 @@ mod tests {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let contract_id = env.register_contract(None, EmergencyWithdrawal);
+        let contract_id = env.register(EmergencyWithdrawal, ());
         let client = EmergencyWithdrawalClient::new(&env, &contract_id);
 
-        client.initialize(&admin, &1_000_000).unwrap();
+        client.initialize(&admin, &1_000_000);
 
-        let reason = SorobanString::from_str(&env, "Test emergency");
-        client.activate_emergency(&admin, &reason).unwrap();
+        let reason = String::from_str(&env, "Test emergency");
+        client.activate_emergency(&admin, &reason);
 
-        let config = client.get_config_view().unwrap();
+        let config = client.get_config_view();
         assert_eq!(config.status, EmergencyStatus::Active);
 
-        client.deactivate_emergency(&admin, &reason).unwrap();
+        client.deactivate_emergency(&admin, &reason);
 
-        let config = client.get_config_view().unwrap();
+        let config = client.get_config_view();
         assert_eq!(config.status, EmergencyStatus::Normal);
     }
 
@@ -907,18 +906,17 @@ mod tests {
         let admin = Address::generate(&env);
         let recipient = Address::generate(&env);
         let token = Address::generate(&env);
-        
-        let contract_id = env.register_contract(None, EmergencyWithdrawal);
+
+        let contract_id = env.register(EmergencyWithdrawal, ());
         let client = EmergencyWithdrawalClient::new(&env, &contract_id);
 
-        client.initialize(&admin, &1_000_000).unwrap();
-        
-        let reason = SorobanString::from_str(&env, "Emergency test");
-        client.activate_emergency(&admin, &reason).unwrap();
+        client.initialize(&admin, &1_000_000);
+
+        let reason = String::from_str(&env, "Emergency test");
+        client.activate_emergency(&admin, &reason);
 
         let request_id = client
-            .request_withdrawal(&admin, &recipient, &500_000, &token, &reason)
-            .unwrap();
+            .request_withdrawal(&admin, &recipient, &500_000, &token, &reason);
 
         assert_eq!(request_id, 1);
 

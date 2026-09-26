@@ -8,7 +8,7 @@
 use crate::types::{
     InsuranceClaim, InsurancePolicy, InsurancePool, LendError, ReserveMetrics, RiskTier,
 };
-use soroban_sdk::{contracttype, Address, BytesN, Env, Map, Vec};
+use soroban_sdk::{Address, Env};
 
 /// Maximum percentage of available reserves that can be paid out in a single claim (25% = 2,500 bps).
 pub const MAX_SINGLE_PAYOUT_BPS: u32 = 2_500;
@@ -289,13 +289,13 @@ impl InsuranceMarketplace {
         Ok(InsuranceClaim {
             claim_id,
             policy_id: policy.policy_id,
-            claimant,
+            claimant: claimant.clone(),
             loss_amount,
             payout_amount,
             filing_time: current_time,
             is_approved: false,
             is_paid: false,
-            assessor: claimant.clone(), // Set during assessment
+            assessor: claimant, // Set during assessment
         })
     }
 

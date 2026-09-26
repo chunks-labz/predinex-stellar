@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Vec};
+use soroban_sdk::{contracterror, contracttype, Address};
 
 /// Error codes for institutional compliance operations.
 #[contracterror]

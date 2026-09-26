@@ -5,6 +5,8 @@
 
 pub mod analytics;
 pub mod interest_rate;
+pub mod mev_protection;
+pub mod oracle;
 pub mod reserve;
 pub mod types;
 pub mod withdraw;
@@ -12,7 +14,7 @@ pub mod withdraw;
 use analytics::PositionAnalytics;
 use reserve::InsuranceMarketplace;
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol, Vec,
 };
 use types::{
     BorrowAsset, CollateralAsset, InsuranceClaim, InsurancePolicy, InsurancePool, LendError,
@@ -490,7 +492,7 @@ mod tests {
             &admin,
             &user,
             &true,
-            &(200_000 * 10_000_000),
+            &(200_000 * 10_000_000i128),
             &false,
             &false,
             &now,

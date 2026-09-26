@@ -13,6 +13,8 @@
     "build": "vite build",
     "build:types": "tsc --emitDeclarationOnly --declaration --outDir dist",
     "dev": "vite build --watch",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "test": "vitest"
   },
   "peerDependencies": {

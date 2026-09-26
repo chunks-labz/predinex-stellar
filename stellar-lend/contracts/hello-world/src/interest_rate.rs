@@ -402,10 +402,13 @@ mod verification {
                 continue;
             }
 
+            // Anchor at zero rate so the delta equals the test rate directly.
+            let zero_anchor = observation(1, 0, 0, now);
+
             let at_allowance = observation(1, config.max_delta_bps, 0, now);
             assert_eq!(
                 InterestRateGuard::validate_update(
-                    anchor.clone(),
+                    zero_anchor.clone(),
                     at_allowance,
                     config.clone(),
                     now
@@ -416,7 +419,7 @@ mod verification {
 
             let past_allowance = observation(1, config.max_delta_bps + 1, 0, now);
             assert_eq!(
-                InterestRateGuard::validate_update(anchor, past_allowance, config.clone(), now),
+                InterestRateGuard::validate_update(zero_anchor, past_allowance, config.clone(), now),
                 Err(RateGuardError::RateDeltaExceeded),
                 "a rate move one step past the allowance was accepted (policy {config:?})"
             );

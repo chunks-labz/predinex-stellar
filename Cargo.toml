@@ -2,5 +2,8 @@
 members = [
     "contracts/predinex",
     "contracts/pool",
+    "stellar-lend/contracts/compliance",
+    "stellar-lend/contracts/hello-world",
+    "stellar-lend/contracts/referral",
 ]
 resolver = "2"

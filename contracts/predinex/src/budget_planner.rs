@@ -30,7 +30,7 @@
 extern crate std;
 
 use super::*;
-use soroban_sdk::{contracttype, Address, Env, Vec as SorobanVec};
+use soroban_sdk::{contracttype, Address, Env};
 
 // ============================================================================
 // Core Budget Planning Types
@@ -92,7 +92,7 @@ pub struct BudgetPlan {
     pub total_budget: i128,
     pub allocated_amount: i128,
     pub reserve_amount: i128,
-    pub allocations: SorobanVec<PoolAllocation>,
+    pub allocations: Vec<PoolAllocation>,
     pub strategy: AllocationStrategy,
     pub expected_total_return: i128,
     pub portfolio_risk_score: i128,
@@ -177,7 +177,7 @@ impl BudgetPlanner {
     ) -> Result<BudgetPlan, ContractError> {
         // Input validation
         if total_budget <= 0 {
-            return Err(ContractError::InvalidAmount);
+            return Err(ContractError::InvalidBetAmount);
         }
         if reserve_pct > 10_000 {
             return Err(ContractError::InvalidBetAmount);
@@ -225,12 +225,68 @@ impl BudgetPlanner {
     ) -> Result<PortfolioMetrics, ContractError> {
         let mut total_invested = 0i128;
         let mut current_value = 0i128;
-        let mut fee_revenue = 0i128;
+        let fee_revenue = 0i128;
         let mut active_pools = 0u32;
         let mut settled_pools = 0u32;
 
-        // TODO: Iterate through lender's positions across all pools
-        // This is a placeholder for the actual implementation
+        let pool_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolCounter)
+            .unwrap_or(0);
+
+        for pool_id in 1..=pool_count {
+            let bet_key = DataKey::UserBet(pool_id, lender.clone());
+            if let Some(bet) = env
+                .storage()
+                .persistent()
+                .get::<_, UserBet>(&bet_key)
+            {
+                total_invested += bet.total_bet;
+
+                if let Some(pool) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pool_id))
+                {
+                    match &pool.status {
+                        PoolStatus::Open => {
+                            active_pools += 1;
+                            current_value += bet.total_bet;
+                        }
+                        PoolStatus::Settled(winning_outcome) => {
+                            settled_pools += 1;
+                            let winning_bet = if *winning_outcome == 0 {
+                                bet.amount_a
+                            } else {
+                                bet.amount_b
+                            };
+                            if winning_bet > 0 {
+                                let total_pool = pool
+                                    .total_a
+                                    .checked_add(pool.total_b)
+                                    .unwrap_or(0);
+                                let outcome_total = if *winning_outcome == 0 {
+                                    pool.total_a
+                                } else {
+                                    pool.total_b
+                                };
+                                if outcome_total > 0 {
+                                    current_value += winning_bet
+                                        .checked_mul(total_pool)
+                                        .and_then(|v| v.checked_div(outcome_total))
+                                        .unwrap_or(0);
+                                }
+                            }
+                        }
+                        _ => {
+                            active_pools += 1;
+                            current_value += bet.total_bet;
+                        }
+                    }
+                }
+            }
+        }
 
         let total_return = current_value
             .checked_sub(total_invested)
@@ -268,7 +324,7 @@ impl BudgetPlanner {
     pub fn project_liquidity(
         env: &Env,
         lender: &Address,
-        horizon: PlanningHorizon,
+        _horizon: PlanningHorizon,
     ) -> Result<LiquidityProjection, ContractError> {
         let current_liquid = Self::get_liquid_balance(env, lender)?;
         let locked_until = Self::get_earliest_unlock_time(env, lender)?;
@@ -297,10 +353,10 @@ impl BudgetPlanner {
 
     /// Optimize fee structure for better returns
     pub fn optimize_fees(
-        env: &Env,
+        _env: &Env,
         current_fee_bps: u32,
         avg_pool_size: i128,
-        competitor_fees: SorobanVec<u32>,
+        competitor_fees: Vec<u32>,
     ) -> Result<FeeOptimization, ContractError> {
         // Calculate market average
         let market_avg = if competitor_fees.len() > 0 {
@@ -347,7 +403,7 @@ impl BudgetPlanner {
     /// Assess risk for a specific pool or portfolio
     pub fn assess_risk(
         env: &Env,
-        pool_ids: &SorobanVec<u32>,
+        pool_ids: &Vec<u32>,
     ) -> Result<RiskAssessment, ContractError> {
         let mut total_volatility = 0i128;
         let mut total_liquidity_risk = 0i128;
@@ -401,53 +457,168 @@ impl BudgetPlanner {
     fn get_eligible_pools(
         env: &Env,
         risk_tolerance: RiskTolerance,
-    ) -> Result<SorobanVec<u32>, ContractError> {
-        // Placeholder: Get pools matching risk criteria
-        let mut pools = SorobanVec::new(env);
-        // TODO: Filter pools based on risk_tolerance
+    ) -> Result<Vec<u32>, ContractError> {
+        let mut pools = Vec::new(env);
+
+        let pool_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolCounter)
+            .unwrap_or(0);
+
+        for pool_id in 1..=pool_count {
+            if let Some(pool) = env
+                .storage()
+                .persistent()
+                .get::<_, Pool>(&DataKey::Pool(pool_id))
+            {
+                // Only consider open pools
+                if pool.status != PoolStatus::Open {
+                    continue;
+                }
+
+                let total_pool = pool.total_a.checked_add(pool.total_b).unwrap_or(0);
+
+                let eligible = match risk_tolerance {
+                    RiskTolerance::Conservative => {
+                        // Only well-established pools with sufficient liquidity
+                        pool.participant_count >= 5 && total_pool >= 10_000_000
+                    }
+                    RiskTolerance::Moderate => {
+                        // Pools with some activity
+                        pool.participant_count >= 2 && total_pool >= 1_000_000
+                    }
+                    RiskTolerance::Aggressive => {
+                        // All open pools qualify
+                        true
+                    }
+                };
+
+                if eligible {
+                    pools.push_back(pool_id);
+                }
+            }
+        }
+
         Ok(pools)
     }
 
     fn calculate_allocations(
         env: &Env,
-        pool_ids: &SorobanVec<u32>,
+        pool_ids: &Vec<u32>,
         total_amount: i128,
         strategy: &AllocationStrategy,
-    ) -> Result<SorobanVec<PoolAllocation>, ContractError> {
-        let mut allocations = SorobanVec::new(env);
+    ) -> Result<Vec<PoolAllocation>, ContractError> {
+        let mut allocations = Vec::new(env);
 
         if pool_ids.is_empty() {
             return Ok(allocations);
         }
 
         match strategy {
-            AllocationStrategy::EqualWeight => {
-                let per_pool = total_amount / pool_ids.len() as i128;
-                let weight_pct = 10_000 / pool_ids.len() as i128;
-
+            AllocationStrategy::SizeWeighted => {
+                // Weight by pool size — larger pools get proportionally more
+                let mut total_size = 0i128;
+                let mut pool_sizes = Vec::<(u32, i128)>::new(env);
                 for pool_id in pool_ids.iter() {
+                    if let Some(pool) = env
+                        .storage()
+                        .persistent()
+                        .get::<_, Pool>(&DataKey::Pool(pool_id))
+                    {
+                        let size = pool.total_a.checked_add(pool.total_b).unwrap_or(0);
+                        total_size += size;
+                        pool_sizes.push_back((pool_id, size));
+                    }
+                }
+
+                if total_size == 0 {
+                    // Fall back to equal weight if all pools are empty
+                    return Self::calculate_allocations(
+                        env,
+                        pool_ids,
+                        total_amount,
+                        &AllocationStrategy::EqualWeight,
+                    );
+                }
+
+                for (pool_id, size) in pool_sizes.iter() {
+                    let weight_pct = size
+                        .checked_mul(10_000)
+                        .and_then(|v| v.checked_div(total_size))
+                        .unwrap_or(0);
+                    let allocated = total_amount
+                        .checked_mul(weight_pct)
+                        .and_then(|v| v.checked_div(10_000))
+                        .unwrap_or(0);
+                    let risk = Self::calculate_volatility(env, pool_id).unwrap_or(50);
+
                     allocations.push_back(PoolAllocation {
                         pool_id,
-                        allocated_amount: per_pool,
+                        allocated_amount: allocated,
                         weight_pct,
-                        expected_return: 0,
-                        risk_score: 50,
+                        expected_return: allocated
+                            .checked_mul(500)
+                            .and_then(|v| v.checked_div(10_000))
+                            .unwrap_or(0),
+                        risk_score: risk,
                     });
                 }
             }
+            AllocationStrategy::RiskAdjusted => {
+                // Allocate inversely proportional to risk (lower risk → more allocation)
+                let mut total_inv_risk = 0i128;
+                let mut pool_risks = Vec::<(u32, i128)>::new(env);
+                for pool_id in pool_ids.iter() {
+                    let risk = Self::calculate_volatility(env, pool_id).unwrap_or(50);
+                    let inv_risk = (101 - risk).max(1); // invert: low risk → high weight
+                    total_inv_risk += inv_risk;
+                    pool_risks.push_back((pool_id, inv_risk));
+                }
+
+                if total_inv_risk == 0 {
+                    total_inv_risk = 1;
+                }
+
+                for (pool_id, inv_risk) in pool_risks.iter() {
+                    let weight_pct = inv_risk
+                        .checked_mul(10_000)
+                        .and_then(|v| v.checked_div(total_inv_risk))
+                        .unwrap_or(0);
+                    let allocated = total_amount
+                        .checked_mul(weight_pct)
+                        .and_then(|v| v.checked_div(10_000))
+                        .unwrap_or(0);
+                    let risk = 101 - inv_risk;
+
+                    allocations.push_back(PoolAllocation {
+                        pool_id,
+                        allocated_amount: allocated,
+                        weight_pct,
+                        expected_return: allocated
+                            .checked_mul(500)
+                            .and_then(|v| v.checked_div(10_000))
+                            .unwrap_or(0),
+                        risk_score: risk,
+                    });
+                }
+            }
+            // EqualWeight, ReturnWeighted, and Custom all use equal weight
             _ => {
-                // Other strategies would be implemented here
-                // For now, fallback to equal weight
                 let per_pool = total_amount / pool_ids.len() as i128;
                 let weight_pct = 10_000 / pool_ids.len() as i128;
 
                 for pool_id in pool_ids.iter() {
+                    let risk = Self::calculate_volatility(env, pool_id).unwrap_or(50);
                     allocations.push_back(PoolAllocation {
                         pool_id,
                         allocated_amount: per_pool,
                         weight_pct,
-                        expected_return: 0,
-                        risk_score: 50,
+                        expected_return: per_pool
+                            .checked_mul(500)
+                            .and_then(|v| v.checked_div(10_000))
+                            .unwrap_or(0),
+                        risk_score: risk,
                     });
                 }
             }
@@ -457,7 +628,7 @@ impl BudgetPlanner {
     }
 
     fn calculate_expected_return(
-        allocations: &SorobanVec<PoolAllocation>,
+        allocations: &Vec<PoolAllocation>,
     ) -> Result<i128, ContractError> {
         let mut total = 0i128;
         for alloc in allocations.iter() {
@@ -469,7 +640,7 @@ impl BudgetPlanner {
     }
 
     fn calculate_portfolio_risk(
-        allocations: &SorobanVec<PoolAllocation>,
+        allocations: &Vec<PoolAllocation>,
     ) -> Result<i128, ContractError> {
         if allocations.is_empty() {
             return Ok(0);
@@ -492,7 +663,7 @@ impl BudgetPlanner {
     }
 
     fn calculate_diversification(
-        allocations: &SorobanVec<PoolAllocation>,
+        allocations: &Vec<PoolAllocation>,
     ) -> Result<i128, ContractError> {
         if allocations.is_empty() {
             return Ok(0);
@@ -516,13 +687,62 @@ impl BudgetPlanner {
     }
 
     fn get_liquid_balance(env: &Env, lender: &Address) -> Result<i128, ContractError> {
-        // TODO: Get actual liquid balance
-        Ok(0)
+        // Sum up bets in open pools that haven't expired yet (still liquid)
+        let mut liquid = 0i128;
+        let pool_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolCounter)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+
+        for pool_id in 1..=pool_count {
+            let bet_key = DataKey::UserBet(pool_id, lender.clone());
+            if let Some(bet) = env
+                .storage()
+                .persistent()
+                .get::<_, UserBet>(&bet_key)
+            {
+                if let Some(pool) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pool_id))
+                {
+                    // Position is liquid if pool is still open and not yet at deposit deadline
+                    if pool.status == PoolStatus::Open && now < pool.deposit_deadline {
+                        liquid += bet.total_bet;
+                    }
+                }
+            }
+        }
+
+        Ok(liquid)
     }
 
     fn get_earliest_unlock_time(env: &Env, lender: &Address) -> Result<u64, ContractError> {
-        // TODO: Get earliest unlock time from all positions
-        Ok(0)
+        let pool_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolCounter)
+            .unwrap_or(0);
+        let mut earliest: u64 = u64::MAX;
+
+        for pool_id in 1..=pool_count {
+            let bet_key = DataKey::UserBet(pool_id, lender.clone());
+            if env.storage().persistent().has(&bet_key) {
+                if let Some(pool) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pool_id))
+                {
+                    if pool.status == PoolStatus::Open && pool.expiry < earliest {
+                        earliest = pool.expiry;
+                    }
+                }
+            }
+        }
+
+        Ok(if earliest == u64::MAX { 0 } else { earliest })
     }
 
     fn project_returns(
@@ -530,19 +750,68 @@ impl BudgetPlanner {
         lender: &Address,
         days: u64,
     ) -> Result<i128, ContractError> {
-        // TODO: Project returns based on current positions
-        Ok(0)
+        // Project returns based on current positions in open pools
+        let mut projected = 0i128;
+        let pool_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PoolCounter)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        let horizon_secs = days * 86_400;
+
+        for pool_id in 1..=pool_count {
+            let bet_key = DataKey::UserBet(pool_id, lender.clone());
+            if let Some(bet) = env
+                .storage()
+                .persistent()
+                .get::<_, UserBet>(&bet_key)
+            {
+                if let Some(pool) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pool_id))
+                {
+                    if pool.status == PoolStatus::Open {
+                        let total_pool = pool.total_a.checked_add(pool.total_b).unwrap_or(0);
+                        if total_pool > 0 && pool.expiry > now {
+                            // Estimate return: assume fair odds, expected value is
+                            // proportional to how close to expiry the pool is
+                            let time_remaining = pool.expiry - now;
+                            if time_remaining <= horizon_secs {
+                                // Pool will settle within projection window
+                                // Expected value at fair odds is the bet amount
+                                // (breakeven), but pools typically have fee revenue
+                                let fee_return = bet
+                                    .total_bet
+                                    .checked_mul(200) // 2% expected fee return
+                                    .and_then(|v| v.checked_div(10_000))
+                                    .unwrap_or(0);
+                                projected += fee_return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(projected)
     }
 
     fn calculate_minimum_reserve(env: &Env, lender: &Address) -> Result<i128, ContractError> {
         // Minimum 10% of total portfolio value
-        Ok(0)
+        let metrics = Self::get_portfolio_metrics(env, lender)?;
+        Ok(metrics
+            .current_value
+            .checked_mul(1_000)
+            .and_then(|v| v.checked_div(10_000))
+            .unwrap_or(0))
     }
 
     fn calculate_optimal_fee(
         current: u32,
         market_avg: u32,
-        pool_size: i128,
+        _pool_size: i128,
     ) -> Result<u32, ContractError> {
         // Recommend slightly below market average for competitiveness
         let optimal = (market_avg * 95) / 100;
@@ -592,21 +861,75 @@ impl BudgetPlanner {
     }
 
     fn calculate_volatility(env: &Env, pool_id: u32) -> Result<i128, ContractError> {
-        // TODO: Calculate odds volatility for the pool
-        Ok(30) // Placeholder
+        if let Some(pool) = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+        {
+            let total = pool.total_a.checked_add(pool.total_b).unwrap_or(0);
+            if total == 0 {
+                return Ok(50); // Unknown volatility for empty pool
+            }
+            // Measure imbalance: 50/50 split → low volatility, 90/10 → high
+            let majority = pool.total_a.max(pool.total_b);
+            let ratio = majority
+                .checked_mul(100)
+                .and_then(|v| v.checked_div(total))
+                .unwrap_or(50);
+            // ratio is 50-100; convert to 0-100 volatility score
+            let volatility = ((ratio - 50) * 2).min(100);
+            Ok(volatility)
+        } else {
+            Err(ContractError::PoolNotFound)
+        }
     }
 
     fn calculate_liquidity_risk(env: &Env, pool_id: u32) -> Result<i128, ContractError> {
-        // TODO: Assess liquidity based on pool size and participation
-        Ok(25) // Placeholder
+        if let Some(pool) = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+        {
+            let total = pool.total_a.checked_add(pool.total_b).unwrap_or(0);
+            // Higher pool size and more participants = lower risk
+            let size_factor = (total / 1_000_000).min(50);
+            let participant_factor =
+                (pool.participant_count as i128 * 5).min(50);
+            let risk = (100 - size_factor - participant_factor).max(0);
+            Ok(risk)
+        } else {
+            Err(ContractError::PoolNotFound)
+        }
     }
 
     fn calculate_time_risk(env: &Env, pool_id: u32) -> Result<i128, ContractError> {
-        // TODO: Risk based on time to expiry
-        Ok(20) // Placeholder
+        if let Some(pool) = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+        {
+            let now = env.ledger().timestamp();
+            if pool.expiry <= now {
+                return Ok(100); // Expired = max risk
+            }
+            let time_remaining = pool.expiry - now;
+            // Shorter remaining time = higher risk
+            let risk = if time_remaining < 86_400 {
+                90 // < 1 day
+            } else if time_remaining < 604_800 {
+                50 // < 1 week
+            } else if time_remaining < 2_592_000 {
+                30 // < 1 month
+            } else {
+                10 // > 1 month
+            };
+            Ok(risk)
+        } else {
+            Err(ContractError::PoolNotFound)
+        }
     }
 
-    fn calculate_concentration_risk(pool_ids: &SorobanVec<u32>) -> Result<i128, ContractError> {
+    fn calculate_concentration_risk(pool_ids: &Vec<u32>) -> Result<i128, ContractError> {
         // Lower score for more concentrated portfolios
         let count = pool_ids.len() as i128;
         if count == 0 {
@@ -617,4 +940,250 @@ impl BudgetPlanner {
         let score = (100 * count / (count + 10)).min(100);
         Ok(100 - score)
     }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+use soroban_sdk::testutils::{Address as _, Ledger};
+
+/// Helper to create a pool directly in storage for testing.
+/// Must be called inside `env.as_contract(contract_id, || { ... })`.
+fn setup_test_pool(
+    env: &Env,
+    pool_id: u32,
+    total_a: i128,
+    total_b: i128,
+    participant_count: u32,
+    expiry: u64,
+) {
+    let pool = Pool {
+        creator: Address::generate(env),
+        title: String::from_str(env, "Test Pool"),
+        description: String::from_str(env, "Test"),
+        outcome_a_name: String::from_str(env, "Yes"),
+        outcome_b_name: String::from_str(env, "No"),
+        total_a,
+        total_b,
+        participant_count,
+        settled: false,
+        winning_outcome: None,
+        created_at: 1_000_000,
+        expiry,
+        deposit_deadline: expiry,
+        status: PoolStatus::Open,
+        cumulative_volume: total_a + total_b,
+        template_id: None,
+    };
+    env.storage()
+        .persistent()
+        .set(&DataKey::Pool(pool_id), &pool);
+
+    // Update pool counter
+    let current: u32 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::PoolCounter)
+        .unwrap_or(0);
+    if pool_id > current {
+        env.storage()
+            .persistent()
+            .set(&DataKey::PoolCounter, &pool_id);
+    }
+}
+
+fn setup_user_bet(env: &Env, pool_id: u32, user: &Address, amount_a: i128, amount_b: i128) {
+    let bet = UserBet {
+        amount_a,
+        amount_b,
+        total_bet: amount_a + amount_b,
+    };
+    env.storage()
+        .persistent()
+        .set(&DataKey::UserBet(pool_id, user.clone()), &bet);
+}
+
+/// Register a dummy contract and return its address for use with `as_contract`.
+fn test_contract(env: &Env) -> Address {
+    env.register(PredinexContract, ())
+}
+
+#[test]
+fn test_risk_tolerance_changes_allocation() {
+    let env = Env::default();
+    let lender = Address::generate(&env);
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Pool 1: well-established, high liquidity (eligible for all tolerances)
+        setup_test_pool(&env, 1, 50_000_000, 50_000_000, 10, now + 2_592_000);
+        // Pool 2: moderate activity (eligible for moderate + aggressive only)
+        setup_test_pool(&env, 2, 5_000_000, 5_000_000, 3, now + 604_800);
+        // Pool 3: small/new pool (eligible for aggressive only)
+        setup_test_pool(&env, 3, 100_000, 100_000, 1, now + 86_400);
+
+        let conservative = BudgetPlanner::create_plan(
+            &env,
+            &lender,
+            1_000_000,
+            AllocationStrategy::EqualWeight,
+            RiskTolerance::Conservative,
+            1_000,
+        )
+        .unwrap();
+
+        let moderate = BudgetPlanner::create_plan(
+            &env,
+            &lender,
+            1_000_000,
+            AllocationStrategy::EqualWeight,
+            RiskTolerance::Moderate,
+            1_000,
+        )
+        .unwrap();
+
+        let aggressive = BudgetPlanner::create_plan(
+            &env,
+            &lender,
+            1_000_000,
+            AllocationStrategy::EqualWeight,
+            RiskTolerance::Aggressive,
+            1_000,
+        )
+        .unwrap();
+
+        // Conservative should have fewer pools than moderate, which has fewer than aggressive
+        assert_eq!(conservative.allocations.len(), 1);
+        assert_eq!(moderate.allocations.len(), 2);
+        assert_eq!(aggressive.allocations.len(), 3);
+
+        // Different pool counts → different per-pool allocations
+        assert_ne!(
+            conservative.allocations.first().unwrap().allocated_amount,
+            aggressive.allocations.first().unwrap().allocated_amount,
+        );
+    });
+}
+
+#[test]
+fn test_volatility_reads_pool_state() {
+    let env = Env::default();
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Balanced pool: 50/50 → low volatility
+        setup_test_pool(&env, 1, 50_000_000, 50_000_000, 10, now + 2_592_000);
+        // Imbalanced pool: 90/10 → high volatility
+        setup_test_pool(&env, 2, 90_000_000, 10_000_000, 10, now + 2_592_000);
+
+        let balanced_vol = BudgetPlanner::calculate_volatility(&env, 1).unwrap();
+        let imbalanced_vol = BudgetPlanner::calculate_volatility(&env, 2).unwrap();
+
+        assert_eq!(balanced_vol, 0); // 50% majority → 0 volatility
+        assert_eq!(imbalanced_vol, 80); // 90% majority → 80 volatility
+        assert!(imbalanced_vol > balanced_vol);
+    });
+}
+
+#[test]
+fn test_liquidity_risk_reads_pool_state() {
+    let env = Env::default();
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Large pool: low liquidity risk
+        setup_test_pool(&env, 1, 50_000_000, 50_000_000, 20, now + 2_592_000);
+        // Small pool: high liquidity risk
+        setup_test_pool(&env, 2, 500, 500, 2, now + 2_592_000);
+
+        let large_risk = BudgetPlanner::calculate_liquidity_risk(&env, 1).unwrap();
+        let small_risk = BudgetPlanner::calculate_liquidity_risk(&env, 2).unwrap();
+
+        assert!(large_risk < small_risk);
+    });
+}
+
+#[test]
+fn test_time_risk_reads_pool_state() {
+    let env = Env::default();
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Pool expiring in > 1 month
+        setup_test_pool(&env, 1, 10_000_000, 10_000_000, 5, now + 5_000_000);
+        // Pool expiring in < 1 day
+        setup_test_pool(&env, 2, 10_000_000, 10_000_000, 5, now + 3_600);
+
+        let far_risk = BudgetPlanner::calculate_time_risk(&env, 1).unwrap();
+        let near_risk = BudgetPlanner::calculate_time_risk(&env, 2).unwrap();
+
+        assert_eq!(far_risk, 10);
+        assert_eq!(near_risk, 90);
+        assert!(near_risk > far_risk);
+    });
+}
+
+#[test]
+fn test_portfolio_metrics_iterates_positions() {
+    let env = Env::default();
+    let lender = Address::generate(&env);
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Create pools and place bets
+        setup_test_pool(&env, 1, 50_000_000, 50_000_000, 10, now + 2_592_000);
+        setup_test_pool(&env, 2, 20_000_000, 30_000_000, 5, now + 604_800);
+
+        setup_user_bet(&env, 1, &lender, 1_000_000, 0);
+        setup_user_bet(&env, 2, &lender, 0, 500_000);
+
+        let metrics = BudgetPlanner::get_portfolio_metrics(&env, &lender).unwrap();
+
+        assert_eq!(metrics.total_invested, 1_500_000);
+        assert_eq!(metrics.current_value, 1_500_000); // Both pools are open
+        assert_eq!(metrics.active_pools, 2);
+        assert_eq!(metrics.settled_pools, 0);
+    });
+}
+
+#[test]
+fn test_assess_risk_uses_real_pool_data() {
+    let env = Env::default();
+    let contract_id = test_contract(&env);
+    let now = 2_000_000u64;
+    env.ledger().set_timestamp(now);
+
+    env.as_contract(&contract_id, || {
+        // Create a balanced, large pool expiring far away (low risk)
+        setup_test_pool(&env, 1, 50_000_000, 50_000_000, 20, now + 5_000_000);
+        // Create an imbalanced, small pool expiring soon (high risk)
+        setup_test_pool(&env, 2, 900, 100, 2, now + 3_600);
+
+        let mut low_risk_ids = Vec::new(&env);
+        low_risk_ids.push_back(1u32);
+
+        let mut high_risk_ids = Vec::new(&env);
+        high_risk_ids.push_back(2u32);
+
+        let low_assessment = BudgetPlanner::assess_risk(&env, &low_risk_ids).unwrap();
+        let high_assessment = BudgetPlanner::assess_risk(&env, &high_risk_ids).unwrap();
+
+        assert!(
+            low_assessment.overall_risk_score < high_assessment.overall_risk_score,
+            "Low-risk pool scored {} but high-risk pool scored {}",
+            low_assessment.overall_risk_score,
+            high_assessment.overall_risk_score,
+        );
+    });
 }
