@@ -7,7 +7,7 @@
 
 use crate::types::{
     BorrowAsset, CollateralAsset, LendError, PositionHealth, RiskTier, SimulationParams,
-    SimulationResult,
+    SimulationResult, PriceShock,
 };
 use soroban_sdk::{Address, Env, Vec};
 
@@ -237,11 +237,11 @@ impl PositionAnalytics {
 
             // Check price shock for this asset
             for j in 0..params.price_shocks_bps.len() {
-                let (shock_asset, shock_bps) = params.price_shocks_bps.get(j).unwrap();
-                if shock_asset == col.asset {
+                let shock = params.price_shocks_bps.get(j).unwrap();
+                if shock.asset == col.asset {
                     // price = price * (10000 + shock_bps) / 10000
                     let multiplier = (BPS_SCALING as i64)
-                        .checked_add(shock_bps as i64)
+                        .checked_add(shock.shock_bps as i64)
                         .ok_or(LendError::MathOverflow)?;
                     if multiplier <= 0 {
                         col.price_usd = 1; // Floor price at 1 micro-cent
@@ -256,11 +256,11 @@ impl PositionAnalytics {
 
             // Check collateral delta
             for j in 0..params.collateral_delta.len() {
-                let (delta_asset, delta_amount) = params.collateral_delta.get(j).unwrap();
-                if delta_asset == col.asset {
+                let d = params.collateral_delta.get(j).unwrap();
+                if d.asset == col.asset {
                     let new_amount = col
                         .amount
-                        .checked_add(delta_amount)
+                        .checked_add(d.delta)
                         .ok_or(LendError::MathOverflow)?;
                     col.amount = new_amount.max(0);
                 }
@@ -275,10 +275,10 @@ impl PositionAnalytics {
 
             // Check price shock for borrowed asset
             for j in 0..params.price_shocks_bps.len() {
-                let (shock_asset, shock_bps) = params.price_shocks_bps.get(j).unwrap();
-                if shock_asset == borrow.asset {
+                let shock = params.price_shocks_bps.get(j).unwrap();
+                if shock.asset == borrow.asset {
                     let multiplier = (BPS_SCALING as i64)
-                        .checked_add(shock_bps as i64)
+                        .checked_add(shock.shock_bps as i64)
                         .ok_or(LendError::MathOverflow)?;
                     if multiplier > 0 {
                         borrow.price_usd = ((borrow.price_usd as i64)
@@ -291,11 +291,11 @@ impl PositionAnalytics {
 
             // Check debt delta
             for j in 0..params.debt_delta.len() {
-                let (delta_asset, delta_amount) = params.debt_delta.get(j).unwrap();
-                if delta_asset == borrow.asset {
+                let d = params.debt_delta.get(j).unwrap();
+                if d.asset == borrow.asset {
                     let new_amount = borrow
                         .borrowed_amount
-                        .checked_add(delta_amount)
+                        .checked_add(d.delta)
                         .ok_or(LendError::MathOverflow)?;
                     borrow.borrowed_amount = new_amount.max(0);
                 }
@@ -345,14 +345,14 @@ impl PositionAnalytics {
             simulated_health_factor_bps: sim_health.health_factor_bps,
             simulated_collateral_usd: sim_health.total_collateral_usd,
             simulated_debt_usd: sim_health.total_borrowed_usd,
-            simulated_liquidation_threshold_usd: sim_health.liquidation_threshold_usd,
+            sim_liq_threshold_usd: sim_health.liquidation_threshold_usd,
             simulated_risk_tier: sim_health.risk_tier,
             is_liquidatable: sim_health.is_liquidatable,
             shortfall_usd,
             max_withdrawable_usd: sim_health.max_withdrawable_usd,
             max_borrowable_usd: sim_health.max_borrowable_usd,
             stress_scenario_mild_hf_bps: mild_hf,
-            stress_scenario_moderate_hf_bps: moderate_hf,
+            stress_moderate_hf_bps: moderate_hf,
             stress_scenario_severe_hf_bps: severe_hf,
         })
     }

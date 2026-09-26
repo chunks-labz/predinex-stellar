@@ -236,6 +236,36 @@ jobs:
       - name: Build
         run: npm run build
 
+  widget-checks:
+    name: Widget Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./packages/widget
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: packages/widget/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test -- --run
+
+      - name: Build
+        run: npm run build
+
   contract-checks:
     name: Contract Checks
     runs-on: ubuntu-latest
@@ -273,16 +303,19 @@ jobs:
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: contracts/predinex
+          workspaces: .
 
-      - name: Format check
-        run: cargo fmt --check
+      - name: Format check (workspace)
+        working-directory: .
+        run: cargo fmt --all --check
 
-      - name: Clippy
-        run: cargo clippy -- -D warnings
+      - name: Clippy (workspace)
+        working-directory: .
+        run: cargo clippy --workspace -- -D warnings
 
-      - name: Run tests
-        run: cargo test
+      - name: Run tests (workspace)
+        working-directory: .
+        run: cargo test --workspace
 
       - name: Cache stellar-cli
         id: stellar-cli-cache

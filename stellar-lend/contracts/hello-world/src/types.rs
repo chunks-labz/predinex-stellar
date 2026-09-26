@@ -2,7 +2,7 @@
 
 #![no_std]
 
-use soroban_sdk::{contracterror, contracttype, Address, BytesN, Map, String, Vec};
+use soroban_sdk::{contracterror, contracttype, Address, Vec};
 
 /// Error codes returned by the lending and analytics contract functions.
 #[contracterror]
@@ -119,13 +119,29 @@ pub struct PositionHealth {
     pub max_borrowable_usd: i128,
 }
 
+/// A price shock to apply to a specific asset during simulation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PriceShock {
+    pub asset: Address,
+    pub shock_bps: i32,
+}
+
+/// A change in asset amount during simulation.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AssetDelta {
+    pub asset: Address,
+    pub delta: i128,
+}
+
 /// Parameters for running an off-chain or on-chain position health simulation.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SimulationParams {
-    pub price_shocks_bps: Vec<(Address, i32)>,
-    pub collateral_delta: Vec<(Address, i128)>,
-    pub debt_delta: Vec<(Address, i128)>,
+    pub price_shocks_bps: Vec<PriceShock>,
+    pub collateral_delta: Vec<AssetDelta>,
+    pub debt_delta: Vec<AssetDelta>,
     pub time_delta_seconds: u64,
 }
 
@@ -137,14 +153,14 @@ pub struct SimulationResult {
     pub simulated_health_factor_bps: u64,
     pub simulated_collateral_usd: i128,
     pub simulated_debt_usd: i128,
-    pub simulated_liquidation_threshold_usd: i128,
+    pub sim_liq_threshold_usd: i128,
     pub simulated_risk_tier: RiskTier,
     pub is_liquidatable: bool,
     pub shortfall_usd: i128,
     pub max_withdrawable_usd: i128,
     pub max_borrowable_usd: i128,
     pub stress_scenario_mild_hf_bps: u64,
-    pub stress_scenario_moderate_hf_bps: u64,
+    pub stress_moderate_hf_bps: u64,
     pub stress_scenario_severe_hf_bps: u64,
 }
 
