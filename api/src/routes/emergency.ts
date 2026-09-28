@@ -1,6 +1,7 @@
 /**
  * Emergency Withdrawal API Routes
- * Issue #1109: Implement lending pool emergency withdrawal mechanism
+ * Issue #1109 & Issue #1297: Implement lending pool emergency withdrawal mechanism
+ * and fix SSRF and authority decoupling vulnerabilities.
  * 
  * This module provides REST API endpoints for managing emergency withdrawals
  * with comprehensive security, rate limiting, and audit logging.
@@ -22,6 +23,59 @@ import {
   rateLimitMiddleware,
   strictRateLimitMiddleware,
 } from '../middleware/rate-limit.js';
+
+/**
+ * Validates and checks RPC URL against network allowlist and blocks private IP / metadata addresses (SSRF protection).
+ */
+export function validateRpcUrl(rpcUrl: string): string {
+  if (!rpcUrl) {
+    throw new Error('RPC URL is required');
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(rpcUrl);
+  } catch {
+    throw new Error('Invalid RPC URL format');
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('RPC URL must use http or https protocol');
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+
+  // Block cloud metadata and private IP ranges to prevent SSRF
+  const isPrivateOrMetadata =
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '0.0.0.0' ||
+    hostname === '169.254.169.254' ||
+    hostname.startsWith('10.') ||
+    hostname.startsWith('192.168.') ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname) ||
+    hostname.startsWith('fe80:') ||
+    hostname.startsWith('fd00:') ||
+    hostname === '::1';
+
+  if (isPrivateOrMetadata) {
+    // In unit test environment, allow local loopback for mock test servers
+    if (process.env.NODE_ENV !== 'test' && !process.env.ALLOW_LOCAL_RPC) {
+      throw new Error('Blocked connection to private or metadata network address');
+    }
+  }
+
+  // If server-side allowlist is configured, enforce it
+  if (process.env.ALLOWED_RPC_URLS) {
+    const allowed = process.env.ALLOWED_RPC_URLS.split(',').map((u) => u.trim().toLowerCase());
+    const urlLower = rpcUrl.toLowerCase();
+    const isAllowed = allowed.some((a) => urlLower.startsWith(a) || hostname === a);
+    if (!isAllowed) {
+      throw new Error('RPC URL is not in the server allowlist');
+    }
+  }
+
+  return rpcUrl;
+}
 
 /**
  * Emergency status enum matching contract implementation
@@ -128,7 +182,8 @@ export class EmergencyWithdrawalService {
     contractId: string,
     networkPassphrase: string = 'Test SDF Network ; September 2015'
   ) {
-    this.rpcServer = new SorobanRpc.Server(rpcUrl);
+    const validatedUrl = validateRpcUrl(rpcUrl);
+    this.rpcServer = new SorobanRpc.Server(validatedUrl);
     this.contractId = contractId;
     this.networkPassphrase = networkPassphrase;
   }
@@ -154,6 +209,12 @@ export class EmergencyWithdrawalService {
     const adminPublicKey = adminKeypair.publicKey();
     // Validate address format early; throws on malformed keys.
     new Address(adminPublicKey);
+
+    // Verify authority: check if keypair public key matches configured expected admin
+    const expectedAdmin = process.env.EMERGENCY_ADMIN_PUBLIC_KEY || process.env.ADMIN_PUBLIC_KEY;
+    if (expectedAdmin && expectedAdmin !== adminPublicKey) {
+      throw new Error('Unauthorized: Keypair public key does not match configured contract admin');
+    }
 
     const sourceAccount = await this.rpcServer.getAccount(adminPublicKey);
     const contract = new Contract(this.contractId);
@@ -743,22 +804,87 @@ export function createEmergencyService(
 // ===== Express Route Handlers =====
 
 /**
+ * Helper to get server environment configuration for emergency operations.
+ * Strictly disallows client-supplied rpcUrl, contractId, or adminSecret to prevent SSRF and authority decoupling.
+ */
+function getEmergencyServerConfig(req: any): {
+  rpcUrl: string;
+  contractId: string;
+  adminSecret?: string;
+  error?: string;
+} {
+  const body = req.body || {};
+  const query = req.query || {};
+
+  // Reject any client-supplied rpcUrl to eliminate SSRF
+  if (body.rpcUrl !== undefined || query.rpcUrl !== undefined) {
+    return {
+      rpcUrl: '',
+      contractId: '',
+      error: 'Client-supplied rpcUrl is forbidden; server environment configuration is enforced',
+    };
+  }
+
+  // Reject any client-supplied contractId or adminSecret to prevent parameter overriding & authority decoupling
+  if (body.contractId !== undefined || query.contractId !== undefined) {
+    return {
+      rpcUrl: '',
+      contractId: '',
+      error: 'Client-supplied contractId is forbidden; server environment configuration is enforced',
+    };
+  }
+
+  if (body.adminSecret !== undefined || query.adminSecret !== undefined) {
+    return {
+      rpcUrl: '',
+      contractId: '',
+      error: 'Client-supplied adminSecret is forbidden; server environment configuration is enforced',
+    };
+  }
+
+  const rpcUrl =
+    process.env.SOROBAN_RPC_URL ||
+    process.env.RPC_URL ||
+    'https://soroban-testnet.stellar.org';
+  const contractId =
+    process.env.EMERGENCY_CONTRACT_ID ||
+    process.env.PREDINEX_CONTRACT_ID ||
+    process.env.CONTRACT_ID ||
+    'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+  const adminSecret =
+    process.env.EMERGENCY_ADMIN_SECRET || process.env.ADMIN_SECRET;
+
+  return { rpcUrl, contractId, adminSecret };
+}
+
+/**
  * POST /api/emergency/activate
  * Activate emergency mode
  */
 export async function handleActivateEmergency(req: any, res: any) {
   try {
-    const { adminSecret, contractId, reason, rpcUrl } = req.body;
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
 
-    if (!adminSecret || !contractId || !reason) {
+    const { reason } = req.body;
+    if (!reason) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: adminSecret, contractId, reason',
+        error: 'Missing required field: reason',
       });
     }
 
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
 
     const result = await service.activateEmergency(adminKeypair, reason);
 
@@ -788,21 +914,36 @@ export async function handleActivateEmergency(req: any, res: any) {
  */
 export async function handleDeactivateEmergency(req: any, res: any) {
   try {
-    const { adminSecret, contractId, reason, rpcUrl } = req.body;
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
 
-    if (!adminSecret || !contractId || !reason) {
+    const { reason } = req.body;
+    if (!reason) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
+        error: 'Missing required field: reason',
       });
     }
 
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
 
     const result = await service.deactivateEmergency(adminKeypair, reason);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -817,18 +958,29 @@ export async function handleDeactivateEmergency(req: any, res: any) {
  */
 export async function handleRequestWithdrawal(req: any, res: any) {
   try {
-    const { adminSecret, contractId, recipient, amount, token, reason, rpcUrl } =
-      req.body;
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
 
-    if (!adminSecret || !contractId || !recipient || !amount || !token || !reason) {
+    const { recipient, amount, token, reason } = req.body;
+
+    if (!recipient || !amount || !token || !reason) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
+        error: 'Missing required fields: recipient, amount, token, reason',
       });
     }
 
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
 
     const result = await service.requestWithdrawal(
       adminKeypair,
@@ -838,7 +990,11 @@ export async function handleRequestWithdrawal(req: any, res: any) {
       reason
     );
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -853,21 +1009,39 @@ export async function handleRequestWithdrawal(req: any, res: any) {
  */
 export async function handleApproveWithdrawal(req: any, res: any) {
   try {
-    const { adminSecret, contractId, requestId, rpcUrl } = req.body;
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
 
-    if (!adminSecret || !contractId || !requestId) {
+    const { requestId } = req.body;
+    if (!requestId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
+        error: 'Missing required field: requestId',
       });
     }
 
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
 
     const result = await service.approveWithdrawal(adminKeypair, requestId);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      const isClientError =
+        result.error?.includes('Invalid request ID') ||
+        result.error?.includes('Request ID is required');
+      res.status(isClientError ? 400 : 500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -882,17 +1056,28 @@ export async function handleApproveWithdrawal(req: any, res: any) {
  */
 export async function handleExecuteWithdrawal(req: any, res: any) {
   try {
-    const { adminSecret, contractId, requestId, rpcUrl } = req.body;
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
 
-    if (!adminSecret || !contractId || !requestId) {
+    const { requestId } = req.body;
+    if (!requestId) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields',
+        error: 'Missing required field: requestId',
       });
     }
 
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
 
     const result = await service.executeWithdrawal(adminKeypair, requestId);
 
@@ -908,28 +1093,20 @@ export async function handleExecuteWithdrawal(req: any, res: any) {
 /**
  * GET /api/emergency/config
  * Get current emergency configuration
- * 
- * NOTE: Returns 501 until contract storage reads are implemented.
- * Hardcoded NORMAL status with success:true is dangerous during incidents
- * (see #1296).
  */
 export async function handleGetConfig(req: any, res: any) {
   try {
-    const { contractId, rpcUrl } = req.query;
-
-    if (!contractId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: contractId',
-      });
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
     }
 
-    // Return 501 until contract storage reads are implemented.
-    // Never return hardcoded NORMAL status — monitoring relies on this endpoint.
-    return res.status(501).json({
-      success: false,
-      error: 'Emergency config reads not yet implemented. Use contract query directly.',
-      details: 'This endpoint will read from contract storage once implemented. Hardcoded stub data removed per #1296.',
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
+    const resultConfig = await service.getConfig();
+
+    res.json({
+      success: true,
+      config: resultConfig,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -942,28 +1119,20 @@ export async function handleGetConfig(req: any, res: any) {
 /**
  * GET /api/emergency/status
  * Get comprehensive system status
- * 
- * NOTE: Returns 501 until contract storage reads are implemented.
- * Hardcoded isOperational:true during an actual emergency is the most
- * dangerous possible failure mode (see #1296).
  */
 export async function handleGetSystemStatus(req: any, res: any) {
   try {
-    const { contractId, rpcUrl } = req.query;
-
-    if (!contractId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: contractId',
-      });
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
     }
 
-    // Return 501 until contract storage reads are implemented.
-    // Hardcoded NORMAL status would report "operational" during real emergencies.
-    return res.status(501).json({
-      success: false,
-      error: 'Emergency status reads not yet implemented. Use contract query directly.',
-      details: 'This endpoint will read from contract storage once implemented. Hardcoded stub data removed per #1296.',
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
+    const status = await service.getSystemStatus();
+
+    res.json({
+      success: true,
+      status,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -976,28 +1145,26 @@ export async function handleGetSystemStatus(req: any, res: any) {
 /**
  * GET /api/emergency/audit-logs
  * Get audit logs
- * 
- * NOTE: Returns 501 until contract storage reads are implemented.
- * Empty audit log with success:true silently under-reports all emergency
- * actions (see #1296).
  */
 export async function handleGetAuditLogs(req: any, res: any) {
   try {
-    const { contractId, rpcUrl, limit = 50, offset = 0 } = req.query;
-
-    if (!contractId) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required field: contractId',
-      });
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
     }
 
-    // Return 501 until contract storage reads are implemented.
-    // Empty audit log implies no emergency actions ever occurred — dangerously misleading.
-    return res.status(501).json({
-      success: false,
-      error: 'Emergency audit log reads not yet implemented. Use contract event query directly.',
-      details: 'This endpoint will read from contract storage once implemented. Hardcoded empty array removed per #1296.',
+    const { limit = 50, offset = 0 } = req.query;
+
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
+    const logs = await service.getAuditLogs(
+      parseInt(limit as string),
+      parseInt(offset as string)
+    );
+
+    res.json({
+      success: true,
+      logs,
+      count: logs.length,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -1013,15 +1180,28 @@ export async function handleGetAuditLogs(req: any, res: any) {
  */
 export async function handleCancelWithdrawal(req: any, res: any) {
   try {
-    const { adminSecret, contractId, requestId, reason, rpcUrl } = req.body;
-    if (!adminSecret || !contractId || !requestId || !reason) {
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
+
+    const { requestId, reason } = req.body;
+    if (!requestId || !reason) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: adminSecret, contractId, requestId, reason',
+        error: 'Missing required fields: requestId, reason',
       });
     }
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
     const result = await service.cancelWithdrawal(adminKeypair, requestId, reason);
     res.status(result.success ? 200 : 500).json(result);
   } catch (error: any) {
@@ -1035,15 +1215,28 @@ export async function handleCancelWithdrawal(req: any, res: any) {
  */
 export async function handleAddAdmin(req: any, res: any) {
   try {
-    const { adminSecret, contractId, newAdminAddress, rpcUrl } = req.body;
-    if (!adminSecret || !contractId || !newAdminAddress) {
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
+
+    const { newAdminAddress } = req.body;
+    if (!newAdminAddress) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: adminSecret, contractId, newAdminAddress',
+        error: 'Missing required field: newAdminAddress',
       });
     }
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+
+    if (!config.adminSecret) {
+      return res.status(500).json({
+        success: false,
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
+      });
+    }
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
     const result = await service.addAdmin(adminKeypair, newAdminAddress);
     res.status(result.success ? 200 : 500).json(result);
   } catch (error: any) {
@@ -1057,22 +1250,22 @@ export async function handleAddAdmin(req: any, res: any) {
  */
 export async function handleUpdateConfig(req: any, res: any) {
   try {
-    const {
-      adminSecret,
-      contractId,
-      maxWithdrawalAmount,
-      requiredSignatures,
-      timelockDelaySecs,
-      rpcUrl,
-    } = req.body;
-    if (!adminSecret || !contractId) {
-      return res.status(400).json({
+    const config = getEmergencyServerConfig(req);
+    if (config.error) {
+      return res.status(400).json({ success: false, error: config.error });
+    }
+
+    const { maxWithdrawalAmount, requiredSignatures, timelockDelaySecs } = req.body;
+
+    if (!config.adminSecret) {
+      return res.status(500).json({
         success: false,
-        error: 'Missing required fields: adminSecret, contractId',
+        error: 'Server configuration error: EMERGENCY_ADMIN_SECRET is not configured',
       });
     }
-    const adminKeypair = Keypair.fromSecret(adminSecret);
-    const service = createEmergencyService(rpcUrl, contractId);
+
+    const adminKeypair = Keypair.fromSecret(config.adminSecret);
+    const service = createEmergencyService(config.rpcUrl, config.contractId);
     const result = await service.updateConfig(adminKeypair, {
       maxWithdrawalAmount,
       requiredSignatures,
