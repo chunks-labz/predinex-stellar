@@ -10278,10 +10278,13 @@ impl PredinexContract {
             } else if is_main_token {
                 if let Some(pool) = env.storage().persistent().get::<_, Pool>(&DataKey::Pool(pid)) {
                     if pool.status != PoolStatus::Cancelled {
-                        let total_bets = pool
-                            .total_a
-                            .checked_add(pool.total_b)
-                            .ok_or(ContractError::PoolTotalOverflow)?;
+                        // #1272 — pool.total_a / pool.total_b only mirror
+                        // outcomes 0 and 1; stakes on outcomes 2+ live solely
+                        // in PoolOutcomeTotals. Use read_outcome_totals so
+                        // every outcome's stake is counted as bettor liability.
+                        let outcome_totals = Self::read_outcome_totals(&env, pid, &pool);
+                        let total_bets = Self::sum_totals(&outcome_totals)
+                            .map_err(|_| ContractError::PoolTotalOverflow)?;
                         let payout_state: PoolPayoutState = env
                             .storage()
                             .persistent()
