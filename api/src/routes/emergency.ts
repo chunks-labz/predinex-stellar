@@ -802,7 +802,11 @@ export async function handleDeactivateEmergency(req: any, res: any) {
 
     const result = await service.deactivateEmergency(adminKeypair, reason);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -838,7 +842,11 @@ export async function handleRequestWithdrawal(req: any, res: any) {
       reason
     );
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -867,7 +875,14 @@ export async function handleApproveWithdrawal(req: any, res: any) {
 
     const result = await service.approveWithdrawal(adminKeypair, requestId);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      // Client errors (invalid requestId) should return 400, not 500
+      const isClientError = result.error?.includes('Invalid request ID') || 
+                            result.error?.includes('Request ID is required');
+      res.status(isClientError ? 400 : 500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -896,7 +911,14 @@ export async function handleExecuteWithdrawal(req: any, res: any) {
 
     const result = await service.executeWithdrawal(adminKeypair, requestId);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      // Client errors (invalid requestId) should return 400, not 500
+      const isClientError = result.error?.includes('Invalid request ID') || 
+                            result.error?.includes('Request ID is required');
+      res.status(isClientError ? 400 : 500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
