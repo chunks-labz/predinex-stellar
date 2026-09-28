@@ -102,15 +102,17 @@ for (const key of loadKeysFromEnv(process.env.ASSESSOR_API_KEYS)) {
 /**
  * Attach `req.auth` for every request. Never blocks — use `requireRole`
  * after it to enforce authorization on sensitive routes.
+ * 
+ * Security: Only accepts API keys from the x-api-key header. Query-string
+ * keys are rejected to prevent leakage via logs, browser history, and
+ * Referer headers (see #1293).
  */
 export function authMiddleware(
   req: Request,
   _res: Response,
   next: NextFunction
 ): void {
-  const apiKey =
-    (req.headers['x-api-key'] as string | undefined) ||
-    (req.query.apiKey as string | undefined);
+  const apiKey = req.headers['x-api-key'] as string | undefined;
   const ctx = sharedAuthValidator.authenticate(
     apiKey ? { 'x-api-key': apiKey } : {}
   );
@@ -121,16 +123,20 @@ export function authMiddleware(
 /**
  * Enforce that the caller holds one of the allowed roles.
  * Returns 401 when the role check fails.
+ * 
+ * Security: Always re-derives the auth context from the header rather than
+ * trusting a pre-attached context. This prevents privilege escalation if
+ * an earlier middleware attached a context with an elevated role (see #1293).
  */
 export function requireRole(roles: UserRole[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
-    const existing = (req as any).auth as AuthContext | undefined;
-    const ctx =
-      existing ||
-      sharedAuthValidator.authenticate({
-        'x-api-key': req.headers['x-api-key'] as string | undefined,
-      });
+    // Always re-authenticate from the header; never trust pre-attached context
+    const apiKey = req.headers['x-api-key'] as string | undefined;
+    const ctx = sharedAuthValidator.authenticate(
+      apiKey ? { 'x-api-key': apiKey } : {}
+    );
     (req as any).auth = ctx;
+    
     if (!roles.includes(ctx.role)) {
       res.status(401).json({
         success: false,
