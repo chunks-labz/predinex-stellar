@@ -6476,9 +6476,112 @@ impl PredinexContract {
         // the transaction reverts — but because state was mutated first the bet
         // record is already gone, preventing any retry that could double-claim.
 
-        // Credit the treasury ledger (fee on first claim, dust on final claim).
+        // #1274 — Split the settlement fee between the LP reward pool and the
+        // treasury according to LpFeeAllocationBps.  Only the fee itself is
+        // subject to the split; payout dust is always swept to the treasury
+        // because it is a tiny floor-division residual, not a protocol fee.
+        //
+        // The LP share is only diverted when the pool actually has LP shares;
+        // if nobody has deposited liquidity the full fee falls back to the
+        // treasury so it is never stranded.
+        let lp_fee_share: i128 = if is_first_claim && fee > 0 {
+            let alloc_bps: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpFeeAllocationBps)
+                .unwrap_or(0);
+            let total_shares: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpTotalShares(pool_id))
+                .unwrap_or(0);
+            if alloc_bps > 0 && total_shares > 0 {
+                // lp_fee_share = floor(fee * alloc_bps / 10_000)
+                fee.checked_mul(alloc_bps as i128)
+                    .and_then(|v| v.checked_div(10_000))
+                    .ok_or(ContractError::PoolTotalOverflow)?
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Divert the LP share into the fee-per-share accumulator for this pool,
+        // matching the arithmetic used by distribute_lp_rewards.
+        if lp_fee_share > 0 {
+            let total_shares: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpTotalShares(pool_id))
+                .unwrap_or(0);
+            // total_shares > 0 is guaranteed by the guard above, but re-check
+            // to keep the arithmetic sound if state somehow diverged.
+            if total_shares > 0 {
+                let scaled = lp_fee_share
+                    .checked_mul(LP_PRECISION)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let prior_dust: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpRewardDust(pool_id))
+                    .unwrap_or(0);
+                let total_scaled = scaled
+                    .checked_add(prior_dust)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let fps_delta = total_scaled / total_shares;
+                let new_lp_dust = total_scaled % total_shares;
+                let current_fps: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpFeePerShare(pool_id))
+                    .unwrap_or(0);
+                let new_fps = current_fps
+                    .checked_add(fps_delta)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let reward_pool: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpRewardPool(pool_id))
+                    .unwrap_or(0);
+                let new_reward_pool = reward_pool
+                    .checked_add(lp_fee_share)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpFeePerShare(pool_id), &new_fps);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpRewardPool(pool_id), &new_reward_pool);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpRewardDust(pool_id), &new_lp_dust);
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpFeePerShare(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpRewardPool(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpRewardDust(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+            }
+        }
+
+        // Credit the treasury ledger: (fee - lp_fee_share) on the first claim,
+        // plus payout dust on the final claim.
+        let treasury_fee_portion = fee
+            .checked_sub(lp_fee_share)
+            .ok_or(ContractError::TreasuryOverflow)?;
         let treasury_delta = if is_first_claim {
-            fee.checked_add(payout_dust)
+            treasury_fee_portion
+                .checked_add(payout_dust)
                 .ok_or(ContractError::TreasuryOverflow)?
         } else {
             payout_dust
