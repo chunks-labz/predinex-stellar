@@ -6,6 +6,7 @@
 # Regenerated snapshots and benchmarks are published as CI artifacts instead.
 contracts/predinex/benchmark-results.json
 contracts/predinex/test_snapshots/
+stellar-lend/contracts/*/test_snapshots/
 
 # Node.js
 **/node_modules/

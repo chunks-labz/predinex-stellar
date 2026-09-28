@@ -1,0 +1,22 @@
+{
+  "name": "@predinex/oracle",
+  "version": "0.1.0",
+  "description": "Price aggregation and manipulation-detection helpers for the Predinex oracle",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
