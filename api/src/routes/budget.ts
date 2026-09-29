@@ -22,6 +22,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
+import { authMiddleware } from '../middleware/auth.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 
 // ============================================================================
 // Types & Interfaces
@@ -179,26 +181,42 @@ const handleValidationErrors = (
 };
 
 /**
- * Type for balance provider function
- * Issue #1295: Track whether provider is configured
+ * Error thrown when an on-chain contract query/operation is not yet implemented.
  */
-export type BalanceProvider = (address: string) => Promise<bigint>;
+export class NotImplementedError extends Error {
+  constructor(message: string = 'On-chain contract interaction is not implemented') {
+    super(message);
+    this.name = 'NotImplementedError';
+  }
+}
 
 /**
- * Mock contract interaction - replace with actual Stellar SDK calls
- * Issue #1295: Added balance provider tracking and proper error handling
+ * Contract interaction service for lending budget planner.
+ * Queries on-chain balance and pool states via Soroban / Stellar SDK.
  */
-class ContractService {
-  private balanceProvider?: BalanceProvider;
+export class ContractService {
+  private balanceProvider?: (address: string) => Promise<bigint>;
+  private poolProvider?: () => Promise<PoolAllocation[] | null>;
 
-  /**
-   * Set the on-chain balance provider
-   * Issue #1295: Must be called to wire balance checking
-   */
-  public setBalanceProvider(provider: BalanceProvider): void {
+  constructor(options?: {
+    balanceProvider?: (address: string) => Promise<bigint>;
+    poolProvider?: () => Promise<PoolAllocation[] | null>;
+  }) {
+    this.balanceProvider = options?.balanceProvider;
+    this.poolProvider = options?.poolProvider;
+  }
+
+  public setBalanceProvider(provider: (address: string) => Promise<bigint>): void {
     this.balanceProvider = provider;
   }
 
+  public setPoolProvider(provider: () => Promise<PoolAllocation[] | null>): void {
+    this.poolProvider = provider;
+  }
+
+  /**
+   * Retrieves the lender's current on-chain balance.
+   */
   /**
    * Get lender's on-chain balance
    * Issue #1295: Throws when no provider configured instead of returning 0n
@@ -218,85 +236,46 @@ class ContractService {
     return this.balanceProvider !== undefined;
   }
 
-  async createBudgetPlan(request: CreatePlanRequest): Promise<BudgetPlan> {
-    // TODO: Interact with Stellar contract
-    // This is a placeholder implementation
+  /**
+   * Derives budget plan from live on-chain pool state, or raises NotImplementedError.
+   */
+  public async createBudgetPlan(request: CreatePlanRequest): Promise<BudgetPlan> {
+    const onChainPools = this.poolProvider ? await this.poolProvider() : null;
+    if (!onChainPools || onChainPools.length === 0) {
+      throw new NotImplementedError('On-chain pool state derivation requires an active Stellar contract connection');
+    }
 
     const reserveAmount =
       (BigInt(request.totalBudget) * BigInt(request.reservePct)) /
       BigInt(100);
     const allocatedAmount = BigInt(request.totalBudget) - reserveAmount;
 
-    // Mock allocations
-    const allocations: PoolAllocation[] = [
-      {
-        poolId: 1,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.33,
-        expectedReturn: '5000000',
-        riskScore: 30,
-      },
-      {
-        poolId: 2,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.33,
-        expectedReturn: '7000000',
-        riskScore: 45,
-      },
-      {
-        poolId: 3,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.34,
-        expectedReturn: '6000000',
-        riskScore: 38,
-      },
-    ];
-
     return {
       lender: request.lenderAddress,
       totalBudget: request.totalBudget,
       allocatedAmount: allocatedAmount.toString(),
       reserveAmount: reserveAmount.toString(),
-      allocations,
+      allocations: onChainPools,
       strategy: request.strategy,
-      expectedTotalReturn: '18000000',
-      portfolioRiskScore: 38,
-      diversificationScore: 75,
+      expectedTotalReturn: '0',
+      portfolioRiskScore: 0,
+      diversificationScore: 100,
       createdAt: new Date().toISOString(),
     };
   }
 
-  async getPortfolioMetrics(lenderAddress: string): Promise<PortfolioMetrics> {
-    // TODO: Query contract for actual metrics
-    return {
-      totalInvested: '100000000000',
-      currentValue: '108000000000',
-      totalReturn: '8000000000',
-      returnPct: 8.0,
-      feeRevenue: '2000000000',
-      activePools: 5,
-      settledPools: 12,
-      sharpeRatio: 1.25,
-      lastUpdated: new Date().toISOString(),
-    };
+  public async getPortfolioMetrics(_lenderAddress: string): Promise<PortfolioMetrics> {
+    throw new NotImplementedError('On-chain portfolio metrics query is not yet implemented');
   }
 
-  async projectLiquidity(
-    lenderAddress: string,
-    horizon: PlanningHorizon
+  public async projectLiquidity(
+    _lenderAddress: string,
+    _horizon: PlanningHorizon
   ): Promise<LiquidityProjection> {
-    // TODO: Calculate projections from contract state
-    return {
-      currentLiquid: '25000000000',
-      lockedUntilTimestamp: Date.now() / 1000 + 86400 * 7,
-      expectedReturns7d: '1500000000',
-      expectedReturns30d: '6000000000',
-      minimumReserveNeeded: '10000000000',
-      excessCapacity: '15000000000',
-    };
+    throw new NotImplementedError('On-chain liquidity projection query is not yet implemented');
   }
 
-  async optimizeFees(request: OptimizeFeesRequest): Promise<FeeOptimization> {
+  public async optimizeFees(request: OptimizeFeesRequest): Promise<FeeOptimization> {
     // Calculate market average
     const marketAvg =
       request.competitorFees.length > 0
@@ -341,28 +320,8 @@ class ContractService {
     };
   }
 
-  async assessRisk(poolIds: number[]): Promise<RiskAssessment> {
-    // TODO: Calculate from contract data
-    // This is a simplified mock implementation
-
-    const volatilityScore = 35;
-    const liquidityRisk = 25;
-    const concentrationRisk = poolIds.length < 3 ? 60 : 30;
-    const timeRisk = 20;
-
-    const overallRiskScore =
-      volatilityScore * 0.3 +
-      liquidityRisk * 0.25 +
-      concentrationRisk * 0.25 +
-      timeRisk * 0.2;
-
-    return {
-      volatilityScore,
-      liquidityRisk,
-      concentrationRisk,
-      timeRisk,
-      overallRiskScore: Math.floor(overallRiskScore),
-    };
+  public async assessRisk(_poolIds: number[]): Promise<RiskAssessment> {
+    throw new NotImplementedError('On-chain pool risk assessment is not yet implemented');
   }
 }
 
@@ -371,19 +330,17 @@ class ContractService {
 // ============================================================================
 
 export const contractService = new ContractService();
-const router = Router();
 
-/**
- * Factory function to create budget router
- * Issue #1295: Allows app.ts to wire balance provider
- */
-export function createBudgetRouter(service?: ContractService): Router {
-  const budgetService = service || contractService;
+export function createBudgetRouter(service: ContractService = contractService): Router {
+  const router = Router();
+
+  // Shared auth context + rate limiting on every budget route (see #1196).
+  router.use(authMiddleware);
+  router.use(rateLimitMiddleware);
 
   /**
    * POST /api/budget/plan
    * Create a new budget plan
-   * Issue #1295: Now checks balance provider configuration
    */
   router.post(
     '/plan',
@@ -398,7 +355,7 @@ export function createBudgetRouter(service?: ContractService): Router {
     async (req: Request, res: Response) => {
       try {
         // Issue #1295: Return 501 when balance provider not wired
-        if (!budgetService.hasBalanceProvider()) {
+        if (!service.hasBalanceProvider()) {
           return res.status(501).json({
             success: false,
             error: 'On-chain balance provider not configured',
@@ -418,10 +375,7 @@ export function createBudgetRouter(service?: ContractService): Router {
         }
 
         // Issue #1295: Check actual on-chain balance
-        const availableBalance = await budgetService.getLenderBalance(
-          request.lenderAddress
-        );
-
+        const availableBalance = await service.getLenderBalance(request.lenderAddress);
         if (budgetBigInt > availableBalance) {
           return res.status(400).json({
             success: false,
@@ -431,13 +385,19 @@ export function createBudgetRouter(service?: ContractService): Router {
           });
         }
 
-        const plan = await budgetService.createBudgetPlan(request);
+        const plan = await service.createBudgetPlan(request);
 
         res.json({
           success: true,
           data: plan,
         });
-      } catch (error) {
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'On-chain pool allocation service is not implemented',
+          });
+        }
         console.error('Error creating budget plan:', error);
         res.status(500).json({
           success: false,
@@ -463,13 +423,19 @@ export function createBudgetRouter(service?: ContractService): Router {
       try {
         const { lenderAddress } = req.params;
 
-        const metrics = await budgetService.getPortfolioMetrics(lenderAddress);
+        const metrics = await service.getPortfolioMetrics(lenderAddress);
 
         res.json({
           success: true,
           data: metrics,
         });
-      } catch (error) {
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
         console.error('Error fetching portfolio metrics:', error);
         res.status(500).json({
           success: false,
@@ -498,7 +464,7 @@ export function createBudgetRouter(service?: ContractService): Router {
         const horizon =
           (req.query.horizon as PlanningHorizon) || PlanningHorizon.MEDIUM_TERM;
 
-        const projection = await budgetService.projectLiquidity(
+        const projection = await service.projectLiquidity(
           lenderAddress,
           horizon
         );
@@ -507,7 +473,13 @@ export function createBudgetRouter(service?: ContractService): Router {
           success: true,
           data: projection,
         });
-      } catch (error) {
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
         console.error('Error projecting liquidity:', error);
         res.status(500).json({
           success: false,
@@ -543,7 +515,7 @@ export function createBudgetRouter(service?: ContractService): Router {
       try {
         const request: OptimizeFeesRequest = req.body;
 
-        const optimization = await budgetService.optimizeFees(request);
+        const optimization = await service.optimizeFees(request);
 
         res.json({
           success: true,
@@ -578,13 +550,19 @@ export function createBudgetRouter(service?: ContractService): Router {
       try {
         const { poolIds } = req.body;
 
-        const assessment = await budgetService.assessRisk(poolIds);
+        const assessment = await service.assessRisk(poolIds);
 
         res.json({
           success: true,
           data: assessment,
         });
-      } catch (error) {
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
         console.error('Error assessing risk:', error);
         res.status(500).json({
           success: false,
@@ -598,7 +576,7 @@ export function createBudgetRouter(service?: ContractService): Router {
    * GET /api/budget/health
    * Health check endpoint
    */
-  router.get('/health', (req: Request, res: Response) => {
+  router.get('/health', (_req: Request, res: Response) => {
     res.json({
       success: true,
       service: 'Budget Planner API',
@@ -610,5 +588,7 @@ export function createBudgetRouter(service?: ContractService): Router {
   return router;
 }
 
-// Default export for backward compatibility
-export default createBudgetRouter();
+const defaultRouter = createBudgetRouter();
+export const budgetRouter = defaultRouter;
+export default defaultRouter;
+

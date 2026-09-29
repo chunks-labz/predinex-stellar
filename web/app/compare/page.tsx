@@ -8,7 +8,6 @@ import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { useMarketDiscovery } from '../lib/hooks/useMarketDiscovery';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '../lib/hooks/usePoolComparison';
 import { formatSTXAmount } from '../lib/market-utils';
-import { blocksToSeconds } from '../lib/countdown-utils';
 import { formatDisplayAddress } from '../lib/address-display';
 import CountdownTimer from '@/components/CountdownTimer';
 import type { ProcessedMarket } from '../lib/market-types';
@@ -74,7 +73,7 @@ const COMPARISON_ROWS: Array<{
     label: 'End time',
     render: (m) => (
       <CountdownTimer
-        secondsRemaining={m.status === 'expired' ? null : blocksToSeconds(m.timeRemaining)}
+        secondsRemaining={m.status === 'expired' ? null : m.timeRemaining}
         settled={m.status === 'settled'}
         showIcon
       />

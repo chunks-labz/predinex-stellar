@@ -142,6 +142,14 @@ Predinex Stellar ships in phases, growing from core on-chain mechanics to a full
 - ✅ Admin, analytics, disputes, oracle management, and comparison tooling.
 - ✅ Embeddable pool widget.
 
+### Phase 3: Lending Security (IN PROGRESS)
+- ✅ Emergency withdrawal controls for lending pools.
+- ✅ TWAP oracle price manipulation guard modules.
+- ✅ Interest-rate manipulation detection and prevention modules.
+- ✅ MEV/sandwich attack protection modules.
+- 🔄 Production wiring for lending pool deployment and signed API submission.
+- 🔜 Multi-source oracle quorum weighting and asset-specific volatility limits.
+
 ## 🤝 Contributing & Releases
 
 We welcome contributions! Please read the [Contributing Guide](./CONTRIBUTING.md) first — it covers local setup, running checks, documentation standards, and the issue/PR workflow.

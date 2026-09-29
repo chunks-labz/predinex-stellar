@@ -236,6 +236,35 @@ describe('BettingSection', () => {
     });
   });
 
+  it('renders the shared network mismatch warning and blocks betting', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    const switchNetwork = vi.fn().mockResolvedValue(undefined);
+    vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue({
+      isMismatch: true,
+      expectedNetworkType: 'mainnet',
+      expectedNetworkName: 'Stellar Mainnet',
+      currentNetworkName: 'Stellar Testnet',
+      switchNetwork,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    // The shared component supplies both the message and the switch action.
+    expect(screen.getByText(/Please switch to Stellar Mainnet to place bets\./i)).toBeInTheDocument();
+    const switchBtn = screen.getByRole('button', { name: /switch to stellar mainnet/i });
+    expect(switchBtn).toBeInTheDocument();
+
+    expect(screen.getByLabelText(/Enter bet amount/i)).toBeDisabled();
+    for (const button of screen.getAllByText(/Wrong Network/i)) {
+      expect(button).toBeDisabled();
+    }
+
+    await user.click(switchBtn);
+    expect(switchNetwork).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
+  });
+
   it('renders without provider errors when wrapped in ToastProvider', () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(disconnectedWallet);
 

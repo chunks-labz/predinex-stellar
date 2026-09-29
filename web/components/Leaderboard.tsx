@@ -4,6 +4,7 @@ import { memo, useState } from 'react';
 import { Trophy, RefreshCw, AlertCircle, Users, Layers } from 'lucide-react';
 import { useLeaderboard, type LeaderboardTab } from '../app/lib/hooks/useLeaderboard';
 import { formatDisplayAddress } from '../app/lib/address-display';
+import { stroopsToUnits, TOKEN_SYMBOL } from '../app/lib/formatting';
 
 interface LeaderboardProps {
   currentUserAddress?: string | null;
@@ -33,8 +34,11 @@ function SkeletonRows() {
 }
 
 function formatVolume(stroops: number): string {
-  if (stroops >= 1_000_000) return `${(stroops / 1_000_000).toFixed(2)} XLM`;
-  return `${stroops.toLocaleString()} μXLM`;
+  // #1285 — 1 XLM = 10_000_000 stroops; the old 1e6 divisor showed 10x the
+  // real volume while still labelling the result in XLM.
+  const units = stroopsToUnits(stroops);
+  if (units >= 1) return `${units.toFixed(2)} ${TOKEN_SYMBOL}`;
+  return `${stroops.toLocaleString()} μ${TOKEN_SYMBOL}`;
 }
 
 const Leaderboard = memo(function Leaderboard({ currentUserAddress }: LeaderboardProps) {

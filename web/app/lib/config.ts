@@ -17,8 +17,8 @@ export const TOKEN_CONFIG = {
   NAME: process.env.NEXT_PUBLIC_TOKEN_NAME ?? 'Stellar Lumens',
   /** Decimal places for display formatting */
   DECIMALS: 2,
-  /** Stroops/micro units per token (for conversion) */
-  STROOPS_PER_UNIT: 1_000_000,
+  /** Stroops per token unit, for conversion. 1 XLM = 10_000_000 stroops. */
+  STROOPS_PER_UNIT: 10_000_000,
 } as const;
 
 /**

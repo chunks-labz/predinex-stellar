@@ -16,9 +16,11 @@ import {
   getLpPositionFromSoroban,
   getPendingLpRewardsFromSoroban,
   getLpStakeFromSoroban,
+  getUserPortfolioFromSoroban,
   type Pool,
   type UserBetData,
   type LpPositionData,
+  type UserPoolSnapshot,
 } from "../soroban-read-api";
 import { getPublicTemplatesFromSoroban } from '../soroban-template-api';
 import { getUserActivityFromSoroban } from "../soroban-event-service";
@@ -29,6 +31,9 @@ import type { ActivityItem } from "./types";
 
 /** #721 — Re-export for convenience. */
 export type { PoolExtendedMetadata } from '../soroban-read-api';
+
+/** #1056 — Re-export batched portfolio types for consumers. */
+export type { UserPoolSnapshot } from '../soroban-read-api';
 
 /**
  * Get the base URL of the configured Stacks Core API.
@@ -168,6 +173,8 @@ export const predinexReadApi = {
   getPendingLpRewards: getPendingLpRewardsFromSoroban,
   /** Canonical Soroban read: get LP stake info for a user */
   getLpStake: getLpStakeFromSoroban,
+  /** #1056 — Canonical Soroban read: batched portfolio snapshot (replaces N fan-out reads) */
+  getUserPortfolio: getUserPortfolioFromSoroban,
   /** Legacy delegates retained for compatibility while callers migrate */
   getMarkets,
   getTotalVolume,

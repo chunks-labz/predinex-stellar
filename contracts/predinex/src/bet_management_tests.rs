@@ -74,6 +74,7 @@ fn mint(env: &Env, token: &Address, user: &Address, amount: i128) {
 /// Create a 1-hour pool with a known creator and return `(pool_id, creator)`.
 fn make_pool_bm(t: &BmEnv) -> (u32, Address) {
     let creator = Address::generate(&t.env);
+    mint(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     let pool_id = t.client.create_pool(
         &creator,
         &String::from_str(&t.env, "Bet Management Pool"),

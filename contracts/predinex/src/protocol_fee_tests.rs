@@ -81,6 +81,7 @@ fn test_claim_winnings_uses_configured_fee() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -105,8 +106,9 @@ fn test_claim_winnings_uses_configured_fee() {
 
 #[test]
 fn test_create_pool_event_includes_metadata() {
-    let (_env, client, _admin, _) = setup_contract();
+    let (_env, client, _admin, token) = setup_contract();
     let creator = Address::generate(&_env);
+    token::StellarAssetClient::new(&_env, &token).mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     let pool_id = client.create_pool(
         &creator,

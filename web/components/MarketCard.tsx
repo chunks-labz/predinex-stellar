@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
 import { formatTokenAmount } from '@/app/lib/formatting';
-import { blocksToSeconds } from '@/app/lib/countdown-utils';
 import { formatDisplayAddress } from '@/app/lib/address-display';
 import { usePoolFavorites } from '@/app/lib/hooks/usePoolFavorites';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '@/app/lib/hooks/usePoolComparison';
@@ -207,9 +206,7 @@ export default function MarketCard({ market }: MarketCardProps) {
             </div>
             <div className="flex items-center gap-1 text-muted-foreground shrink-0">
               <CountdownTimer
-                secondsRemaining={
-                  market.status === 'expired' ? 0 : blocksToSeconds(market.timeRemaining)
-                }
+                secondsRemaining={market.status === 'expired' ? 0 : market.timeRemaining}
                 settled={market.status === 'settled'}
                 showIcon
               />

@@ -8,11 +8,11 @@ interface DisputeCenterProps {
   poolId?: number;
   userId?: string;
   /** Voter's STX balance. Used to calculate voting power and validate eligibility.
-   *  Defaults to 100 STX until wallet integration supplies the real value. */
+   *  Must be provided by wallet integration. */
   voterBalance?: number;
 }
 
-export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: DisputeCenterProps) {
+export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeCenterProps) {
   const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted, addVote } = useDisputes();
   const [selectedTab, setSelectedTab] = useState<'active' | 'resolved'>('active');
   const [selectedDispute, setSelectedDispute] = useState<string | null>(null);

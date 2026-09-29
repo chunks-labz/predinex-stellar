@@ -5,7 +5,7 @@
 
 import { UserBet, BetHistory, UserPortfolio, MarketStatistics, PlatformMetrics } from './market-types';
 import { PoolData } from './market-types';
-import { getCurrentBlockHeight } from './market-utils';
+import { currentTimestampSeconds } from './market-utils';
 import { formatNumberCompact, formatPercentage, TOKEN_SYMBOL } from '@/app/lib/formatting';
 export { formatPercentage };
 
@@ -137,7 +137,7 @@ export function calculateBetProfitLoss(bet: BetHistory): number {
  * @returns Enriched market statistics including odds and computed status
  */
 export function processMarketStatistics(pools: PoolData[]): MarketStatistics[] {
-  const currentBlockHeight = getCurrentBlockHeight();
+  const nowSeconds = currentTimestampSeconds();
 
   return pools.map(pool => {
     const totalVolume = Number(pool.totalA + pool.totalB);
@@ -147,7 +147,7 @@ export function processMarketStatistics(pools: PoolData[]): MarketStatistics[] {
     let status: 'active' | 'settled' | 'expired' = 'active';
     if (pool.settled) {
       status = 'settled';
-    } else if (currentBlockHeight > pool.expiry) {
+    } else if (nowSeconds >= pool.expiry) {
       status = 'expired';
     }
 
@@ -181,11 +181,11 @@ export function calculatePlatformMetrics(
   pools: PoolData[],
   allBets: UserBet[]
 ): PlatformMetrics {
-  const currentBlockHeight = getCurrentBlockHeight();
+  const nowSeconds = currentTimestampSeconds();
 
-  const activePools = pools.filter(pool => !pool.settled && currentBlockHeight <= pool.expiry).length;
+  const activePools = pools.filter(pool => !pool.settled && nowSeconds < pool.expiry).length;
   const settledPools = pools.filter(pool => pool.settled).length;
-  const expiredPools = pools.filter(pool => !pool.settled && currentBlockHeight > pool.expiry).length;
+  const expiredPools = pools.filter(pool => !pool.settled && nowSeconds >= pool.expiry).length;
 
   const totalVolume = pools.reduce((sum, pool) => sum + Number(pool.totalA + pool.totalB), 0);
   const averageMarketSize = pools.length > 0 ? totalVolume / pools.length : 0;
