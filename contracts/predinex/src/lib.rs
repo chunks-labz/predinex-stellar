@@ -7982,7 +7982,7 @@ impl PredinexContract {
 
     /// #721 — Write extended metadata for a pool. Only the pool creator may
     /// call this function. The record is immutable once the first bet has been
-    /// placed (i.e. `pool.total_a + pool.total_b > 0`).
+    /// placed on any outcome (per `read_outcome_totals`).
     pub fn set_pool_ext_metadata(
         env: Env,
         creator: Address,
@@ -7998,8 +7998,11 @@ impl PredinexContract {
         if creator != pool.creator {
             return Err(ContractError::Unauthorized);
         }
-        // Lock metadata once any bet has been placed.
-        if pool.total_a > 0 || pool.total_b > 0 {
+        // Lock metadata once any bet has been placed on any outcome. The
+        // legacy total_a/total_b mirrors only cover outcomes 0 and 1, so read
+        // the authoritative per-outcome totals instead.
+        let totals = Self::read_outcome_totals(&env, pool_id, &pool);
+        if totals.iter().any(|t| t > 0) {
             return Err(ContractError::PoolAlreadySettled);
         }
         if let Some(ref rc) = metadata.resolution_criteria {
