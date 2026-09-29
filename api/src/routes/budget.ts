@@ -274,32 +274,50 @@ class ContractService {
       Math.min(1000, Math.floor(marketAvg * 0.95))
     );
 
-    // Estimate impact
+    // Estimate impact - guard against divide-by-zero
+    // When currentFeeBps is 0 (new protocol), treat as 100% increase
     const feeChangePct =
-      ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100;
+      request.currentFeeBps > 0
+        ? ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) *
+          100
+        : 100; // 100% when moving from 0 to any fee
+
     const volumeImpactPct = feeChangePct * -2; // -2% volume per 1% fee increase
+
+    // Clamp volumeImpactPct to prevent BigInt(-Infinity) errors
+    const clampedVolumeImpact = Math.max(-99, Math.min(1000, volumeImpactPct));
 
     const currentRevenue =
       (BigInt(request.avgPoolSize) * BigInt(request.currentFeeBps)) /
       BigInt(10000);
     const newVolume =
-      (BigInt(request.avgPoolSize) * BigInt(100 + Math.floor(volumeImpactPct))) /
+      (BigInt(request.avgPoolSize) *
+        BigInt(100 + Math.floor(clampedVolumeImpact))) /
       BigInt(100);
-    const newRevenue =
-      (newVolume * BigInt(recommendedFee)) / BigInt(10000);
+    const newRevenue = (newVolume * BigInt(recommendedFee)) / BigInt(10000);
 
     const revenueImpact = newRevenue - currentRevenue;
 
-    // Competitiveness score
-    const competitiveness =
-      recommendedFee <= marketAvg
-        ? 50 + Math.min(50, ((marketAvg - recommendedFee) / marketAvg) * 100)
-        : Math.max(0, 50 - ((recommendedFee - marketAvg) / marketAvg) * 100);
+    // Competitiveness score - guard against divide-by-zero
+    let competitiveness: number;
+    if (marketAvg === 0) {
+      // No market data, score based on absolute fee level
+      // Lower fees get higher scores
+      competitiveness = Math.max(0, 100 - recommendedFee / 10);
+    } else if (recommendedFee <= marketAvg) {
+      competitiveness =
+        50 + Math.min(50, ((marketAvg - recommendedFee) / marketAvg) * 100);
+    } else {
+      competitiveness = Math.max(
+        0,
+        50 - ((recommendedFee - marketAvg) / marketAvg) * 100
+      );
+    }
 
     return {
       currentFeeBps: request.currentFeeBps,
       recommendedFeeBps: recommendedFee,
-      expectedVolumeImpactPct: volumeImpactPct,
+      expectedVolumeImpactPct: clampedVolumeImpact,
       expectedRevenueImpact: revenueImpact.toString(),
       competitivenessScore: Math.floor(competitiveness),
     };
