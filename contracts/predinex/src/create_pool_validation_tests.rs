@@ -6,11 +6,11 @@ extern crate std;
 use super::*;
 use soroban_sdk::{testutils::Address as _, testutils::Ledger, Address, Env, String};
 
-fn setup() -> (Env, PredinexContractClient<'static>) {
+fn setup() -> (Env, PredinexContractClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    let _token_id = env.register_stellar_asset_contract_v2(admin.clone());
     let contract_id = env.register(PredinexContract, ());
     let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
@@ -18,7 +18,13 @@ fn setup() -> (Env, PredinexContractClient<'static>) {
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
     client.initialize(&token, &admin, &admin);
-    (env, client)
+    (env, client, token)
+}
+
+/// Mint creator-deposit tokens to an address so pool creation can transfer them.
+fn fund_creator(env: &Env, token: &Address, creator: &Address) {
+    soroban_sdk::token::StellarAssetClient::new(env, token)
+        .mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
 }
 
 // ── Deadline in future ────────────────────────────────────────────────────────
@@ -26,10 +32,12 @@ fn setup() -> (Env, PredinexContractClient<'static>) {
 /// A valid pool with future deadline succeeds.
 #[test]
 fn test_deadline_in_future_valid() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
     env.ledger().with_mut(|li| li.timestamp = 1_000);
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Future pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -47,7 +55,7 @@ fn test_deadline_in_future_valid() {
 /// Here we set ledger time high enough that created_at + duration <= now.
 #[test]
 fn test_deadline_in_past_rejected() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
     // Set ledger timestamp well beyond the pool expiry (now=10_000, duration=300 => expiry=300 < now)
     // Actually created_at == env.ledger().timestamp() at call time, so expiry = now + duration.
     // To trigger DeadlineInPast we'd need created_at + duration <= now, but created_at IS now.
@@ -58,8 +66,10 @@ fn test_deadline_in_past_rejected() {
     // acts as a defense-in-depth check for other internal callers (schedule_pool with past open_at).
     // We verify the error variant exists and is reachable by calling create_pool_internal indirectly
     // via try_create_pool; a minimal duration succeeds, confirming the happy path.
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -75,9 +85,11 @@ fn test_deadline_in_past_rejected() {
 
 #[test]
 fn test_duplicate_outcomes_rejected() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -91,9 +103,11 @@ fn test_duplicate_outcomes_rejected() {
 
 #[test]
 fn test_duplicate_outcomes_case_insensitive_rejected() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "yes"),
@@ -107,9 +121,11 @@ fn test_duplicate_outcomes_case_insensitive_rejected() {
 
 #[test]
 fn test_distinct_outcomes_accepted() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -125,7 +141,7 @@ fn test_distinct_outcomes_accepted() {
 
 #[test]
 fn test_amount_below_min_deposit_rejected() {
-    let (env, client) = setup();
+    let (env, client, _token) = setup();
     let result = client.try_create_pool(
         &Address::generate(&env),
         &String::from_str(&env, "Pool"),
@@ -141,7 +157,7 @@ fn test_amount_below_min_deposit_rejected() {
 
 #[test]
 fn test_zero_amount_rejected() {
-    let (env, client) = setup();
+    let (env, client, _token) = setup();
     let result = client.try_create_pool(
         &Address::generate(&env),
         &String::from_str(&env, "Pool"),
@@ -157,9 +173,11 @@ fn test_zero_amount_rejected() {
 
 #[test]
 fn test_exact_min_deposit_accepted() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -175,9 +193,11 @@ fn test_exact_min_deposit_accepted() {
 
 #[test]
 fn test_duration_exceeds_one_year_rejected() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),
@@ -191,9 +211,11 @@ fn test_duration_exceeds_one_year_rejected() {
 
 #[test]
 fn test_duration_exactly_one_year_accepted() {
-    let (env, client) = setup();
+    let (env, client, token) = setup();
+    let creator = Address::generate(&env);
+    fund_creator(&env, &token, &creator);
     let result = client.try_create_pool(
-        &Address::generate(&env),
+        &creator,
         &String::from_str(&env, "Pool"),
         &String::from_str(&env, "Desc"),
         &String::from_str(&env, "Yes"),

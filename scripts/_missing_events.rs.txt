@@ -1,0 +1,572 @@
+﻿Found 37 missing emit helpers.
+
+/* --- Missing structs in #[contractevent] mod --- */
+    #[event(name = "AdminSet")]
+    pub struct AdminSet;
+
+    #[event(name = "PoolPaused")]
+    pub struct PoolPaused;
+
+    #[event(name = "PoolUnpaused")]
+    pub struct PoolUnpaused;
+
+    #[event(name = "admin_set")]
+    pub struct AdminSet;
+
+    #[event(name = "bridge_timeout_set")]
+    pub struct BridgeTimeoutSet;
+
+    #[event(name = "contract_paused")]
+    pub struct ContractPaused;
+
+    #[event(name = "contract_unpaused")]
+    pub struct ContractUnpaused;
+
+    #[event(name = "cross_chain_dispute_window_set")]
+    pub struct CrossChainDisputeWindowSet;
+
+    #[event(name = "cross_chain_settled")]
+    pub struct CrossChainSettled;
+
+    #[event(name = "dispute_window_set")]
+    pub struct DisputeWindowSet;
+
+    #[event(name = "lp_deposit")]
+    pub struct LpDeposit;
+
+    #[event(name = "lp_fee_allocation_set")]
+    pub struct LpFeeAllocationSet;
+
+    #[event(name = "lp_reward_claimed")]
+    pub struct LpRewardClaimed;
+
+    #[event(name = "lp_rewards_distributed")]
+    pub struct LpRewardsDistributed;
+
+    #[event(name = "lp_stake_boost_set")]
+    pub struct LpStakeBoostSet;
+
+    #[event(name = "lp_staked")]
+    pub struct LpStaked;
+
+    #[event(name = "lp_unstaked")]
+    pub struct LpUnstaked;
+
+    #[event(name = "lp_withdraw")]
+    pub struct LpWithdraw;
+
+    #[event(name = "mirror_created")]
+    pub struct MirrorCreated;
+
+    #[event(name = "pool_cooling_overridden")]
+    pub struct PoolCoolingOverridden;
+
+    #[event(name = "pool_created_from_template")]
+    pub struct PoolCreatedFromTemplate;
+
+    #[event(name = "pool_disputed")]
+    pub struct PoolDisputed;
+
+    #[event(name = "pool_ext_metadata_set")]
+    pub struct PoolExtMetadataSet;
+
+    #[event(name = "pool_frozen")]
+    pub struct PoolFrozen;
+
+    #[event(name = "pool_metadata_cleared")]
+    pub struct PoolMetadataCleared;
+
+    #[event(name = "pool_metadata_set")]
+    pub struct PoolMetadataSet;
+
+    #[event(name = "pool_template_created")]
+    pub struct PoolTemplateCreated;
+
+    #[event(name = "pool_template_deleted")]
+    pub struct PoolTemplateDeleted;
+
+    #[event(name = "pool_template_updated")]
+    pub struct PoolTemplateUpdated;
+
+    #[event(name = "pool_token_bet_limits_set")]
+    pub struct PoolTokenBetLimitsSet;
+
+    #[event(name = "pool_unfrozen")]
+    pub struct PoolUnfrozen;
+
+    #[event(name = "referral_bps_set")]
+    pub struct ReferralBpsSet;
+
+    #[event(name = "referral_reward_claimed")]
+    pub struct ReferralRewardClaimed;
+
+    #[event(name = "token_rate_set")]
+    pub struct TokenRateSet;
+
+    #[event(name = "tokens_rescued")]
+    pub struct TokensRescued;
+
+    #[event(name = "webhook_registered")]
+    pub struct WebhookRegistered;
+
+    #[event(name = "webhook_unregistered")]
+    pub struct WebhookUnregistered;
+
+/* --- Missing emit helpers --- */
+#[allow(deprecated)]
+fn emit_admin_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "AdminSet"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_paused(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "PoolPaused"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_unpaused(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "PoolUnpaused"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_admin_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "admin_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_bridge_timeout_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "bridge_timeout_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_contract_paused(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "contract_paused"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_contract_unpaused(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "contract_unpaused"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_cross_chain_dispute_window_set(
+    env: &Env,
+    i0: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "cross_chain_dispute_window_set"), event_version(env), i0),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_cross_chain_settled(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "cross_chain_settled"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_dispute_window_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "dispute_window_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_deposit(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_deposit"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_fee_allocation_set(
+    env: &Env,
+    i0: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_fee_allocation_set"), event_version(env), i0),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_reward_claimed(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_reward_claimed"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_rewards_distributed(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_rewards_distributed"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_stake_boost_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_stake_boost_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_staked(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_staked"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_unstaked(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_unstaked"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_lp_withdraw(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "lp_withdraw"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_mirror_created(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "mirror_created"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_cooling_overridden(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_cooling_overridden"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_created_from_template(
+    env: &Env,
+    i0: _,
+    i1: _,
+    i2: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_created_from_template"), event_version(env), i0, i1, i2),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_disputed(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_disputed"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_ext_metadata_set(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_ext_metadata_set"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_frozen(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_frozen"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_metadata_cleared(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_metadata_cleared"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_metadata_set(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_metadata_set"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_template_created(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_template_created"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_template_deleted(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_template_deleted"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_template_updated(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_template_updated"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_token_bet_limits_set(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_token_bet_limits_set"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_pool_unfrozen(
+    env: &Env,
+    i0: _,
+    i1: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "pool_unfrozen"), event_version(env), i0, i1),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_referral_bps_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "referral_bps_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_referral_reward_claimed(
+    env: &Env,
+    i0: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "referral_reward_claimed"), event_version(env), i0),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_token_rate_set(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "token_rate_set"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_tokens_rescued(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "tokens_rescued"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_webhook_registered(
+    env: &Env,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "webhook_registered"), event_version(env)),
+        payload,
+    );
+}
+
+#[allow(deprecated)]
+fn emit_webhook_unregistered(
+    env: &Env,
+    i0: _,
+    payload: _,
+) {
+    env.events().publish(
+        (Symbol::new(env, "webhook_unregistered"), event_version(env), i0),
+        payload,
+    );
+}
+

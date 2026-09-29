@@ -1,0 +1,18 @@
+branches:
+  - name: main
+    protection:
+      required_pull_request_reviews:
+        required_approving_review_count: 1
+        dismiss_stale_reviews: true
+        require_code_owner_reviews: false
+      required_status_checks:
+        strict: true
+        contexts:
+          - "Web Checks"
+          - "Bot Checks"
+          - "Contract Checks"
+      enforce_admins: true
+      required_signatures: false
+      # Note: We do not require signed commits as a hard gate until the deploy story supports it.
+      # Exceptions for hotfixes: Admins can bypass protection if needed for a critical hotfix.
+      required_conversation_resolution: true

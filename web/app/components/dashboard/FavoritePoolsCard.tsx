@@ -8,7 +8,7 @@ import { usePoolFavorites } from '../../lib/hooks/usePoolFavorites';
 import type { ProcessedMarket } from '../../lib/market-types';
 import { readMarketListCache } from '../../lib/market-list-cache';
 import { getEnhancedPool } from '../../lib/enhanced-stacks-api';
-import { fetchCurrentBlockHeightLive, processMarketData } from '../../lib/market-utils';
+import { processMarketData } from '../../lib/market-utils';
 import { useToast } from '../../../providers/ToastProvider';
 
 const FAVORITE_SNAPSHOT_KEY = 'predinex_favorite_snapshot_v1';
@@ -69,9 +69,6 @@ export default function FavoritePoolsCard() {
 
     setIsUpdating(true);
     try {
-      const heightResult = await fetchCurrentBlockHeightLive({ timeoutMs: 5000 });
-      const currentBlockHeight = heightResult.height;
-
       const poolDatas = await Promise.all(
         favoritePoolIds.map(async (poolId) => {
           try {
@@ -84,7 +81,7 @@ export default function FavoritePoolsCard() {
 
       const processed: ProcessedMarket[] = poolDatas
         .filter((p): p is NonNullable<typeof p> => p !== null)
-        .map((poolData) => processMarketData(poolData, currentBlockHeight));
+        .map((poolData) => processMarketData(poolData));
 
       // Ensure stable ordering for diffing & rendering.
       processed.sort((a, b) => a.poolId - b.poolId);

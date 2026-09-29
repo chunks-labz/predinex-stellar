@@ -1,6 +1,42 @@
 name: Security Audit
 
+# Dependency vulnerability auditing.
+#
+# The audits below were originally scheduled only, which meant a vulnerable
+# dependency could merge and sit on `main` for up to a week before anyone
+# noticed. They now also run on every pull request and on pushes to `main`, so
+# a vulnerable lockfile is blocked at the point it is introduced.
+#
+# A `paths` filter keeps that affordable: a PR that touches no manifest or
+# lockfile cannot have changed the audited dependency set, so the last run
+# still stands. The weekly schedule is unaffected by `paths` (it only applies
+# to `push` and `pull_request`) and re-audits the full tree, which is what
+# catches advisories published against dependencies nobody has touched.
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'bot/package.json'
+      - 'bot/package-lock.json'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'bot/package.json'
+      - 'bot/package-lock.json'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
   schedule:
     # Every Monday at 08:00 UTC
     - cron: '0 8 * * 1'
@@ -8,6 +44,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: security-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   npm-audit:
@@ -103,3 +143,22 @@ jobs:
           name: cargo-audit-report
           path: contracts/predinex/cargo-audit-report.json
           retention-days: 30
+
+  # A single required status check, so branch protection needs one entry rather
+  # than three, and so a skipped audit can never read as a passing one.
+  audit-summary:
+    name: Dependency Audit
+    needs: [npm-audit, bot-npm-audit, cargo-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every audit to pass
+        run: |
+          results="${{ needs.npm-audit.result }} ${{ needs.bot-npm-audit.result }} ${{ needs.cargo-audit.result }}"
+          echo "npm audit:      ${{ needs.npm-audit.result }}"
+          echo "bot npm audit:  ${{ needs.bot-npm-audit.result }}"
+          echo "cargo audit:    ${{ needs.cargo-audit.result }}"
+          if [ "$results" != "success success success" ]; then
+            echo "::error::One or more dependency audits did not pass ($results)."
+            exit 1
+          fi

@@ -4,12 +4,16 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OracleManagementPage from '../../app/oracle-management/page';
 import { ORACLE_MANAGEMENT_PLACEHOLDER_FLAG } from '../../app/lib/feature-flags';
+import { __resetRuntimeConfigForTests } from '../../app/lib/runtime-config';
 
 describe('OracleManagement route', () => {
   const originalFlagValue = process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG];
+  const originalOracleAddress = process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
 
   beforeEach(() => {
     delete process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG];
+    delete process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
+    __resetRuntimeConfigForTests();
   });
 
   afterEach(() => {
@@ -18,6 +22,12 @@ describe('OracleManagement route', () => {
     } else {
       process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = originalFlagValue;
     }
+    if (originalOracleAddress === undefined) {
+      delete process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
+    } else {
+      process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS = originalOracleAddress;
+    }
+    __resetRuntimeConfigForTests();
   });
 
   it('hides mock oracle actions when the placeholder flag is disabled', () => {
@@ -48,5 +58,33 @@ describe('OracleManagement route', () => {
       .toBeDisabled();
     expect(screen.getByRole('button', { name: /registration preview only/i }))
       .toBeDisabled();
+  });
+
+  it('uses the generic Stellar placeholder when NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS is not set', async () => {
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    // NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS intentionally unset
+
+    const user = userEvent.setup();
+    render(<OracleManagementPage />);
+
+    await user.click(screen.getByRole('button', { name: /register preview/i }));
+
+    const input = screen.getByRole('textbox', { hidden: true });
+    expect(input).toHaveAttribute('placeholder', 'G... (Stellar account address)');
+  });
+
+  it('pre-fills the oracle address placeholder from runtime-config when NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS is set', async () => {
+    const testAddress = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN';
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS = testAddress;
+    __resetRuntimeConfigForTests();
+
+    const user = userEvent.setup();
+    render(<OracleManagementPage />);
+
+    await user.click(screen.getByRole('button', { name: /register preview/i }));
+
+    const input = screen.getByRole('textbox', { hidden: true });
+    expect(input).toHaveAttribute('placeholder', testAddress);
   });
 });

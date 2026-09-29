@@ -9,9 +9,13 @@ contracts/predinex/test_snapshots/
 
 # Node.js
 **/node_modules/
+dist/
+**/dist/
 .next/
 out/
 build/
+coverage/
+data/
 .env*
 npm-debug.log*
 yarn-debug.log*

@@ -2,6 +2,7 @@ import { ImageResponse } from 'next/og';
 import { NextRequest, NextResponse } from 'next/server';
 import { getPoolFromSoroban } from '../../../../lib/soroban-read-api';
 import { checkRateLimit, rateLimitHeaders } from '@/app/lib/rate-limit';
+import { stroopsToUnits } from '@/app/lib/formatting';
 
 export const runtime = 'nodejs';
 
@@ -55,7 +56,8 @@ export async function GET(
         outcomeA = pool.outcomeA;
         outcomeB = pool.outcomeB;
         status = pool.settled ? 'Settled' : pool.status === 'expired' ? 'Expired' : 'Active';
-        const vol = (pool.totalA + pool.totalB) / 1_000_000;
+        // #1285 — 1 XLM = 10_000_000 stroops.
+        const vol = stroopsToUnits(pool.totalA + pool.totalB);
         totalVolume = vol.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' XLM';
       }
     } catch {

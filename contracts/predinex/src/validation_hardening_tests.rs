@@ -23,6 +23,7 @@ fn setup() -> TestCtx<'static> {
     let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
     client.initialize(&token_id.address(), &admin, &admin);
     let token_admin = token::StellarAssetClient::new(&env, &token_id.address());
+    token_admin.mint(&admin, &(MIN_CREATOR_DEPOSIT * 200));
     token_admin.mint(&user, &10_000);
     token_admin.mint(&user_b, &10_000);
     TestCtx {
@@ -68,6 +69,7 @@ fn scheduled_pool_activates_at_open_time() {
         &String::from_str(&ctx.env, "Yes"),
         &String::from_str(&ctx.env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &200,
     );
     assert_eq!(ctx.client.get_scheduled_pools(&1, &10).len(), 1);
@@ -95,6 +97,7 @@ fn scheduled_pool_cancel_and_horizon_validation() {
         &String::from_str(&ctx.env, "Yes"),
         &String::from_str(&ctx.env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &too_far,
     );
     assert_eq!(result, Err(Ok(ContractError::DurationTooLong)));
@@ -106,6 +109,7 @@ fn scheduled_pool_cancel_and_horizon_validation() {
         &String::from_str(&ctx.env, "Yes"),
         &String::from_str(&ctx.env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &(1_000 + MAX_SCHEDULE_POOL_HORIZON_SECS),
     );
     ctx.client.cancel_scheduled_pool(&ctx.admin, &pool_id);

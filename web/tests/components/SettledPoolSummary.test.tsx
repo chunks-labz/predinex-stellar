@@ -27,8 +27,8 @@ function makePool(overrides: Partial<Pool> = {}): Pool {
     creator: 'ST123',
     outcomeA: 'Yes',
     outcomeB: 'No',
-    totalA: 5_000_000, // 5 STX
-    totalB: 3_000_000, // 3 STX
+    totalA: 50_000_000, // 5 XLM (1 XLM = 10_000_000 stroops)
+    totalB: 30_000_000, // 3 XLM
     settled: true,
     winningOutcome: 0,
     expiry: 1000,
@@ -62,34 +62,34 @@ describe('SettledPoolSummary', () => {
   });
 
   it('shows correct total pool size', () => {
-    const pool = makePool(); // 5 + 3 = 8 STX total
+    const pool = makePool(); // 5 + 3 = 8 XLM total
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('Total Pool')).toBeInTheDocument();
-    expect(screen.getByText('8 STX')).toBeInTheDocument();
+    expect(screen.getByText('8 XLM')).toBeInTheDocument();
   });
 
   it('shows winning and losing side totals', () => {
-    const pool = makePool({ winningOutcome: 0 }); // A wins: 5 STX, B loses: 3 STX
+    const pool = makePool({ winningOutcome: 0 }); // A wins: 5 XLM, B loses: 3 XLM
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('Winning Side')).toBeInTheDocument();
-    expect(screen.getByText('5 STX')).toBeInTheDocument();
+    expect(screen.getByText('5 XLM')).toBeInTheDocument();
 
     expect(screen.getByText('Losing Side')).toBeInTheDocument();
-    expect(screen.getByText('3 STX')).toBeInTheDocument();
+    expect(screen.getByText('3 XLM')).toBeInTheDocument();
   });
 
   it('shows protocol fee and net payout', () => {
-    // Total: 8 STX = 8_000_000 micro. Fee: 2% = 160_000 micro = 0.16 STX
+    // Total: 8 XLM = 80_000_000 stroops. Fee: 2% = 1_600_000 stroops = 0.16 XLM
     const pool = makePool();
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('Protocol fee (2%)')).toBeInTheDocument();
-    expect(screen.getByText('0.16 STX')).toBeInTheDocument();
+    expect(screen.getByText('0.16 XLM')).toBeInTheDocument();
 
     expect(screen.getByText('Net payout pool')).toBeInTheDocument();
-    expect(screen.getByText('7.84 STX')).toBeInTheDocument();
+    expect(screen.getByText('7.84 XLM')).toBeInTheDocument();
   });
 
   it('shows correct payout multiplier', () => {
@@ -102,7 +102,7 @@ describe('SettledPoolSummary', () => {
   });
 
   it('handles zero winning side without crashing', () => {
-    const pool = makePool({ totalA: 0, totalB: 5_000_000, winningOutcome: 0 });
+    const pool = makePool({ totalA: 0, totalB: 50_000_000, winningOutcome: 0 });
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('0.00x')).toBeInTheDocument();

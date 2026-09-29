@@ -32,32 +32,9 @@ export interface UseLeaderboardReturn {
   refresh: () => void;
 }
 
-// Mock data — replace with on-chain event queries when indexer is available.
-const MOCK_BETTORS: Omit<BettorEntry, 'rank'>[] = [
-  { address: 'GBETTOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 12_500_000, wins: 32, totalPredictions: 47, winPercentage: 68.1 },
-  { address: 'GBETTOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 9_800_000, wins: 23, totalPredictions: 32, winPercentage: 71.9 },
-  { address: 'GBETTOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 7_200_000, wins: 18, totalPredictions: 28, winPercentage: 64.3 },
-  { address: 'GBETTOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_500_000, wins: 32, totalPredictions: 55, winPercentage: 58.2 },
-  { address: 'GBETTOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 6_100_000, wins: 15, totalPredictions: 19, winPercentage: 78.9 },
-  { address: 'GBETTOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 5_800_000, wins: 25, totalPredictions: 41, winPercentage: 61.0 },
-  { address: 'GBETTOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 4_500_000, wins: 16, totalPredictions: 23, winPercentage: 69.6 },
-  { address: 'GBETTOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 3_200_000, wins: 20, totalPredictions: 36, winPercentage: 55.6 },
-  { address: 'GBETTOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 2_800_000, wins: 11, totalPredictions: 15, winPercentage: 73.3 },
-  { address: 'GBETTOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalVolume: 1_500_000, wins: 15, totalPredictions: 29, winPercentage: 51.7 },
-];
-
-const MOCK_CREATORS: Omit<CreatorEntry, 'rank'>[] = [
-  { address: 'GCREATOR1AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 24, totalVolume: 45_000_000 },
-  { address: 'GCREATOR2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 18, totalVolume: 32_000_000 },
-  { address: 'GCREATOR3AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 15, totalVolume: 28_000_000 },
-  { address: 'GCREATOR4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 12, totalVolume: 21_000_000 },
-  { address: 'GCREATOR5AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 10, totalVolume: 18_500_000 },
-  { address: 'GCREATOR6AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 9, totalVolume: 15_000_000 },
-  { address: 'GCREATOR7AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 7, totalVolume: 11_000_000 },
-  { address: 'GCREATOR8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 6, totalVolume: 8_500_000 },
-  { address: 'GCREATOR9AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 4, totalVolume: 5_200_000 },
-  { address: 'GCREATOR10AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', totalPools: 3, totalVolume: 2_800_000 },
-];
+// Empty leaderboards until on-chain event queries are available via indexer.
+const MOCK_BETTORS: Omit<BettorEntry, 'rank'>[] = [];
+const MOCK_CREATORS: Omit<CreatorEntry, 'rank'>[] = [];
 
 export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboardReturn {
   const [bettors, setBettors] = useState<BettorEntry[]>([]);

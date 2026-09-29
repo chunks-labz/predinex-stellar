@@ -27,7 +27,6 @@ const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'created-30d',
 ]);
 
-const BLOCKS_PER_DAY = 144;
 const SECONDS_PER_DAY = 86_400;
 
 export function normalizeAssetType(asset?: string): string {
@@ -117,11 +116,11 @@ function matchesTimeRange(market: ProcessedMarket, timeRange: TimeRangeFilter, n
   if (timeRange === 'all') return true;
 
   if (timeRange === 'ending-24h') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY;
   }
 
   if (timeRange === 'ending-7d') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY * 7;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY * 7;
   }
 
   if (market.createdAt < 1_000_000_000) return true;

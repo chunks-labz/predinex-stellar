@@ -46,10 +46,11 @@ import { generateMockPoolActivityEvents } from '../lib/pool-activity-mock';
 
 const fetchPoolActivity = useCallback(
   async (id: number, limit: number): Promise<PoolActivityEvent[]> => {
-    // TODO: Replace with real API call
-    // Temporary: Use mock data for development
-    const mockEvents = generateMockPoolActivityEvents(id, 15);
-    return mockEvents;
+    // Real Soroban RPC path via adapters/activity.ts.
+    // Set NEXT_PUBLIC_ACTIVITY_FIXTURES=true to use deterministic seeded fixtures.
+    const { fetchPoolActivity } = await import('../lib/adapters/activity');
+    const res = await fetchPoolActivity(id, { limit });
+    return res.items;
   },
   []
 );

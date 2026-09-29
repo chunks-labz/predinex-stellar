@@ -13,6 +13,11 @@
 
 import { getRuntimeConfig } from './runtime-config';
 import { createScopedLogger } from './logger';
+import {
+  encodeEd25519PublicKey,
+  encodeScContractAddress,
+  STRKEY_PAYLOAD_BYTES,
+} from './strkey';
 
 const log = createScopedLogger('soroban-read-api');
 import type { Pool, UserBetData } from './market-types';
@@ -280,58 +285,114 @@ async function simulateContractRead(
 }
 
 /**
- * Parse an SCVal XDR string into a JS value.
- * This handles common Soroban return types.
+ * XDR `ScVal` union discriminant values (protocol 20+ / 22).
+ *
+ * Every union discriminant in XDR is a 4-byte big-endian integer, so these
+ * constants are compared against `readInt32BE(0)`, never against a single byte.
+ * @see https://developers.stellar.org/docs/data/encoding/xdr
  */
-function parseScVal(xdr: string): unknown {
+const SCV = {
+  BOOL: 0,
+  VOID: 1,
+  ERROR: 2,
+  U32: 3,
+  I32: 4,
+  U64: 5,
+  I64: 6,
+  TIMEPOINT: 7,
+  DURATION: 8,
+  U128: 9,
+  I128: 10,
+  U256: 11,
+  I256: 12,
+  BYTES: 13,
+  STRING: 14,
+  SYMBOL: 15,
+  VEC: 16,
+  MAP: 17,
+  ADDRESS: 18,
+  CONTRACT_INSTANCE: 19,
+} as const;
+
+/**
+ * Legacy `ScObject` discriminant, used only by the pre-protocol-22
+ * `SCV_OBJECT` wrapper. Distinct numbering from {@link SCV}.
+ */
+const SCO = {
+  BOX: 0,
+  VEC: 1,
+  MAP: 2,
+  U64: 3,
+  I64: 4,
+  U128: 5,
+  I128: 6,
+  U256: 7,
+  I256: 8,
+  BYTES: 9,
+  CONTRACT_CODE: 10,
+  ADDRESS: 11,
+  NONCE_KEY: 12,
+} as const;
+
+/** `ScAddress` discriminant values. */
+const SC_ADDRESS_TYPE = { ACCOUNT: 0, CONTRACT: 1 } as const;
+
+/** Byte width of an XDR enum discriminant. */
+const XDR_DISCRIMINANT_BYTES = 4;
+
+/** Byte offset of the payload following a 4-byte XDR discriminant. */
+const XDR_PAYLOAD_OFFSET = XDR_DISCRIMINANT_BYTES;
+
+/**
+ * Parse an SCVal XDR string into a JS value.
+ *
+ * @param xdr - Base64-encoded ScVal as returned by `soroban-rpc`.
+ * @returns The decoded value; the raw base64 string for types with no JS mapping.
+ */
+export function parseScVal(xdr: string): unknown {
   if (!xdr || typeof xdr !== 'string') return null;
 
   try {
-    // For now, we handle the common XDR formats manually
-    // In production, use @stellar/stellar-sdk's xdr.ScVal.fromXDR
-
-    // Check if it's base64 encoded
     const decoded = Buffer.from(xdr, 'base64');
+    if (decoded.length < XDR_DISCRIMINANT_BYTES) return null;
 
-    // The first byte indicates the SCVal type
-    const typeByte = decoded[0];
+    // The ScVal union discriminant is a 4-byte big-endian enum.
+    const typeTag = decoded.readInt32BE(0);
 
-    // SCVal types:
-    // 0 = SCV_BOOL
-    // 1 = SCV_VOID
-    // 2 = SCV_ERROR
-    // 3 = SCV_U32
-    // 4 = SCV_I32
-    // ... etc
-    // 12 = SCV_OBJECT (for Option, Vec, Map, etc.)
-    // 13 = SCV_SYMBOL
-    // 16 = SCV_STRING
-    // 17 = SCV_I128
-    // 18 = SCV_U128
-    // 20 = SCV_VEC
-    // 21 = SCV_MAP
-
-    switch (typeByte) {
-      case 0: // SCV_BOOL
-        return decoded[1] !== 0;
-      case 1: // SCV_VOID
+    switch (typeTag) {
+      case SCV.BOOL:
+        return decoded.readUInt32BE(XDR_PAYLOAD_OFFSET) !== 0;
+      case SCV.VOID:
         return null;
-      case 3: // SCV_U32
-        return decoded.readUInt32BE(4);
-      case 4: // SCV_I32
-        return decoded.readInt32BE(4);
-      case 12: // SCV_OBJECT - could be Option, Box, etc.
-        return parseScObject(decoded);
-      case 16: // SCV_STRING
+      case SCV.U32:
+        return decoded.readUInt32BE(XDR_PAYLOAD_OFFSET);
+      case SCV.I32:
+        return decoded.readInt32BE(XDR_PAYLOAD_OFFSET);
+      case SCV.U64:
+        return decoded.readBigUInt64BE(XDR_PAYLOAD_OFFSET);
+      case SCV.I64:
+        return decoded.readBigInt64BE(XDR_PAYLOAD_OFFSET);
+      case SCV.TIMEPOINT:
+      case SCV.DURATION:
+        return decoded.readBigUInt64BE(XDR_PAYLOAD_OFFSET);
+      case SCV.STRING:
         return parseScString(decoded);
-      case 17: // SCV_I128
+      case SCV.SYMBOL:
+        return parseScString(decoded);
+      case SCV.BYTES:
+        return parseScBytes(decoded);
+      case SCV.I128:
         return parseScI128(decoded);
-      case 18: // SCV_U128
+      case SCV.U128:
         return parseScU128(decoded);
-      case 20: // SCV_VEC
+      case SCV.VEC:
         return parseScVec(decoded);
-      case 21: // SCV_MAP
+      case SCV.MAP:
         return parseScMap(decoded);
+      case SCV.ADDRESS:
+        return parseScAddress(decoded);
+      case 12: // Legacy SCV_OBJECT wrapper (pre-protocol-22 encodes some types nested).
+        return parseScObject(decoded);
       default:
         // Return raw for unknown types
         return xdr;
@@ -342,41 +403,26 @@ function parseScVal(xdr: string): unknown {
   }
 }
 
+/**
+ * Parse a legacy `ScObject` wrapper (pre-protocol-22 `SCV_OBJECT`).
+ *
+ * Only the variants the read layer can meaningfully surface are handled; the
+ * rest return `null` as before.
+ */
 function parseScObject(decoded: Buffer): unknown {
-  // SCObject discriminant is at byte 1
-  const objType = decoded[1];
-
-  // SCObject types:
-  // 0 = SCO_BOX
-  // 1 = SCO_VEC
-  // 2 = SCO_MAP
-  // 3 = SCO_U64
-  // 4 = SCO_I64
-  // 5 = SCO_U128
-  // 6 = SCO_I128
-  // 7 = SCO_U256
-  // 8 = SCO_I256
-  // 9 = SCO_BYTES
-  // 10 = SCO_CONTRACT_CODE
-  // 11 = SCO_ADDRESS
-  // 12 = SCO_NONCE_KEY
+  if (decoded.length < XDR_PAYLOAD_OFFSET * 2) return null;
+  const objType = decoded.readInt32BE(XDR_PAYLOAD_OFFSET);
 
   switch (objType) {
-    case 0: // SCO_BOX (Option-like)
-      // Box either contains a value or is empty
-      const hasValue = decoded[2] !== 0;
-      if (!hasValue) return null;
-      // Parse the boxed value starting at offset 3
-      return parseScVal(decoded.slice(3).toString('base64'));
-    case 1: // SCO_VEC
-      return parseScVec(decoded);
-    case 2: // SCO_MAP
-      return parseScMap(decoded);
-    case 5: // SCO_U128
+    case SCO.VEC:
+      return parseScVec(decoded.subarray(XDR_PAYLOAD_OFFSET));
+    case SCO.MAP:
+      return parseScMap(decoded.subarray(XDR_PAYLOAD_OFFSET));
+    case SCO.U128:
       return parseScU128(decoded);
-    case 6: // SCO_I128
+    case SCO.I128:
       return parseScI128(decoded);
-    case 11: // SCO_ADDRESS
+    case SCO.ADDRESS:
       return parseScAddress(decoded);
     default:
       return null;
@@ -384,15 +430,23 @@ function parseScObject(decoded: Buffer): unknown {
 }
 
 function parseScString(decoded: Buffer): string {
-  // String: 4-byte length + bytes
-  const len = decoded.readUInt32BE(4);
-  return decoded.slice(8, 8 + len).toString('utf8');
+  // XDR length-prefixed opaque: 4-byte length, then the UTF-8 payload, 4-byte padded.
+  const len = decoded.readUInt32BE(XDR_PAYLOAD_OFFSET);
+  return decoded.slice(XDR_PAYLOAD_OFFSET * 2, XDR_PAYLOAD_OFFSET * 2 + len).toString('utf8');
+}
+
+/**
+ * Parse a length-prefixed opaque `ScBytes` value into a lowercase hex string.
+ */
+function parseScBytes(decoded: Buffer): string {
+  const len = decoded.readUInt32BE(XDR_PAYLOAD_OFFSET);
+  return decoded.slice(XDR_PAYLOAD_OFFSET * 2, XDR_PAYLOAD_OFFSET * 2 + len).toString('hex');
 }
 
 function parseScI128(decoded: Buffer): bigint {
   // I128: 16 bytes two's complement
-  const hex = decoded.slice(-16).toString('hex');
-  const unsigned = BigInt('0x' + hex);
+  const hex = decoded.subarray(XDR_PAYLOAD_OFFSET, XDR_PAYLOAD_OFFSET + 16).toString('hex');
+  const unsigned = BigInt(`0x${hex}`);
   // Check if negative (MSB set)
   if (unsigned >> BigInt(127)) {
     return unsigned - (BigInt(1) << BigInt(128));
@@ -402,73 +456,203 @@ function parseScI128(decoded: Buffer): bigint {
 
 function parseScU128(decoded: Buffer): bigint {
   // U128: 16 bytes
-  const hex = decoded.slice(-16).toString('hex');
-  return BigInt('0x' + hex);
+  return BigInt(`0x${decoded.subarray(XDR_PAYLOAD_OFFSET, XDR_PAYLOAD_OFFSET + 16).toString('hex')}`);
+}
+
+/**
+ * Length-prefixed `VecO`/`MapO` presence discriminant.
+ *
+ * `ScVec` is `VecO<ScVal>` and `ScMap` is `MapO<ScMapEntry>`, so each carries a
+ * 4-byte enum discriminant before its contents. `0` means the value is absent
+ * (an `Option::None`), which surfaces as `null`/`{}` rather than an empty list.
+ */
+function isPresentO(decoded: Buffer): boolean {
+  if (decoded.length < XDR_PAYLOAD_OFFSET * 2) return false;
+  return decoded.readInt32BE(XDR_PAYLOAD_OFFSET) !== 0;
+}
+
+/**
+ * Byte length of the XDR encoding of an ScVal whose payload starts at `offset`.
+ *
+ * Needed because `vec<ScVal>` / `Map<ScVal, ScVal>` concatenate their elements
+ * with no per-element length prefix — each element is simply zero-padded to the
+ * next 4-byte boundary, so the parser has to know where one element ends.
+ */
+function scValEncodedLength(decoded: Buffer, offset: number): number {
+  if (offset + XDR_DISCRIMINANT_BYTES > decoded.length) return 0;
+
+  const typeTag = decoded.readInt32BE(offset);
+  const payload = offset + XDR_PAYLOAD_OFFSET;
+  const align4 = (n: number) => Math.ceil(n / 4) * 4;
+
+  switch (typeTag) {
+    case SCV.BOOL:
+    case SCV.U32:
+    case SCV.I32:
+    case SCV.U64:
+    case SCV.I64:
+    case SCV.TIMEPOINT:
+    case SCV.DURATION:
+    case SCV.U128:
+    case SCV.I128:
+    case SCV.U256:
+    case SCV.I256:
+      return XDR_DISCRIMINANT_BYTES + fixedPayloadWidth(typeTag);
+    case SCV.BYTES:
+    case SCV.STRING:
+    case SCV.SYMBOL:
+      return XDR_DISCRIMINANT_BYTES + align4(XDR_DISCRIMINANT_BYTES + decoded.readUInt32BE(payload));
+    case SCV.ADDRESS:
+      // Account addresses nest an extra PublicKey union discriminant.
+      return (
+        XDR_DISCRIMINANT_BYTES * 2 +
+        (decoded.readInt32BE(payload) === SC_ADDRESS_TYPE.ACCOUNT ? XDR_DISCRIMINANT_BYTES : 0) +
+        STRKEY_PAYLOAD_BYTES
+      );
+    case SCV.VEC: {
+      if (!isPresentO(decoded.subarray(offset))) return XDR_DISCRIMINANT_BYTES + XDR_DISCRIMINANT_BYTES;
+      const { length } = scanVec(decoded, offset);
+      return length;
+    }
+    case SCV.MAP: {
+      if (!isPresentO(decoded.subarray(offset))) return XDR_DISCRIMINANT_BYTES * 2;
+      const { length } = scanMap(decoded, offset);
+      return length;
+    }
+    default:
+      // Unknown or self-describing type: consume the rest of the buffer.
+      return decoded.length - offset;
+  }
+}
+
+function fixedPayloadWidth(typeTag: number): number {
+  switch (typeTag) {
+    case SCV.BOOL:
+    case SCV.U32:
+    case SCV.I32:
+      return 4;
+    case SCV.U64:
+    case SCV.I64:
+    case SCV.TIMEPOINT:
+    case SCV.DURATION:
+      return 8;
+    case SCV.U128:
+    case SCV.I128:
+      return 16;
+    case SCV.U256:
+    case SCV.I256:
+      return 32;
+    default:
+      return 0;
+  }
+}
+
+/**
+ * Byte offset of the element-count field of a `ScVec`/`ScMap` payload.
+ *
+ * `ScVec` is `VecO<ScVal>` and `ScMap` is `MapO<ScMapEntry>`, so the layout is
+ * ScVal tag, then a presence discriminant, then the count.
+ */
+const XDR_O_CONTAINER_COUNT_OFFSET = XDR_DISCRIMINANT_BYTES * 3;
+
+/**
+ * Walk a `ScVec` and report the total encoded length plus the element offsets.
+ */
+function scanVec(
+  decoded: Buffer,
+  base: number
+): { length: number; offsets: number[] } {
+  const start = base + XDR_O_CONTAINER_COUNT_OFFSET;
+  const count = decoded.readUInt32BE(base + XDR_PAYLOAD_OFFSET * 2);
+  const offsets: number[] = [];
+
+  let offset = start;
+  for (let i = 0; i < count; i++) {
+    if (offset >= decoded.length) break;
+    offsets.push(offset);
+    offset += scValEncodedLength(decoded, offset);
+  }
+
+  return { length: offset - base, offsets };
+}
+
+/**
+ * Walk a `ScMap` and report the total encoded length plus the key/value offsets.
+ */
+function scanMap(
+  decoded: Buffer,
+  base: number
+): { length: number; entries: { key: number; value: number }[] } {
+  const start = base + XDR_O_CONTAINER_COUNT_OFFSET;
+  const count = decoded.readUInt32BE(base + XDR_PAYLOAD_OFFSET * 2);
+  const entries: { key: number; value: number }[] = [];
+
+  let offset = start;
+  for (let i = 0; i < count; i++) {
+    if (offset >= decoded.length) break;
+    const key = offset;
+    offset += scValEncodedLength(decoded, key);
+    if (offset >= decoded.length) break;
+    const value = offset;
+    offset += scValEncodedLength(decoded, value);
+    entries.push({ key, value });
+  }
+
+  return { length: offset - base, entries };
 }
 
 function parseScVec(decoded: Buffer): unknown[] {
-  // Vec: 4-byte count + elements
-  const count = decoded.readUInt32BE(4);
-  const result: unknown[] = [];
-  let offset = 8;
-  for (let i = 0; i < count; i++) {
-    const elemLen = decoded.readUInt32BE(offset);
-    offset += 4;
-    const elemXdr = decoded.slice(offset, offset + elemLen).toString('base64');
-    result.push(parseScVal(elemXdr));
-    offset += elemLen;
-  }
-  return result;
+  if (!isPresentO(decoded)) return [];
+  const { offsets } = scanVec(decoded, 0);
+  return offsets.map((offset) => parseScVal(decoded.subarray(offset).toString('base64')));
 }
 
 function parseScMap(decoded: Buffer): Record<string, unknown> {
-  // Map: 4-byte count + key-value pairs
-  const count = decoded.readUInt32BE(4);
   const result: Record<string, unknown> = {};
-  let offset = 8;
-  for (let i = 0; i < count; i++) {
-    // Key
-    const keyLen = decoded.readUInt32BE(offset);
-    offset += 4;
-    const keyXdr = decoded.slice(offset, offset + keyLen).toString('base64');
-    const key = parseScVal(keyXdr) as string;
-    offset += keyLen;
+  if (!isPresentO(decoded)) return result;
 
-    // Value
-    const valLen = decoded.readUInt32BE(offset);
-    offset += 4;
-    const valXdr = decoded.slice(offset, offset + valLen).toString('base64');
-    result[key] = parseScVal(valXdr);
-    offset += valLen;
+  const { entries } = scanMap(decoded, 0);
+  for (const { key, value } of entries) {
+    const keyName = parseScVal(decoded.subarray(key).toString('base64')) as string;
+    if (typeof keyName !== 'string') continue;
+    result[keyName] = parseScVal(decoded.subarray(value).toString('base64'));
   }
   return result;
 }
 
+/**
+ * Parse a `ScAddress` out of an ScVal buffer and return its Stellar strkey.
+ *
+ * XDR layout (every enum discriminant is 4 bytes, big-endian):
+ *   [0..4)   ScVal discriminant         — SCV_ADDRESS (18)
+ *   [4..8)   ScAddressType discriminant — 0 = account, 1 = contract
+ *   [8..12)  PublicKey discriminant     — accounts only; an ed25519 `AccountID`
+ *            is itself a `PublicKey` union, so account addresses carry one extra
+ *            discriminant that contract addresses (a bare `Hash`) do not.
+ *   [12..)   32-byte ed25519 key (accounts) or 32-byte contract hash
+ *
+ * @param decoded - Buffer positioned at the ScVal discriminant.
+ * @returns `G...` for account addresses, `C...` for contract addresses.
+ */
 function parseScAddress(decoded: Buffer): string {
-  // Address: type byte + data
-  // Type 0 = Account, Type 1 = Contract
-  const addrType = decoded[2];
-  if (addrType === 0) {
-    // Account: 32-byte ed25519 public key -> G... address
-    const keyBytes = decoded.slice(3, 35);
-    // Convert to strkey format (base32 with checksum)
-    return encodeEd25519PublicKey(keyBytes);
-  } else {
-    // Contract: 32-byte hash -> C... address
-    const hashBytes = decoded.slice(3, 35);
-    return encodeContractHash(hashBytes);
+  const typeOffset = XDR_PAYLOAD_OFFSET;
+  if (decoded.length < typeOffset + XDR_DISCRIMINANT_BYTES) return '';
+
+  const addressType = decoded.readInt32BE(typeOffset);
+  const payloadOffset =
+    typeOffset +
+    XDR_DISCRIMINANT_BYTES +
+    (addressType === SC_ADDRESS_TYPE.ACCOUNT ? XDR_DISCRIMINANT_BYTES : 0);
+
+  if (decoded.length < payloadOffset + STRKEY_PAYLOAD_BYTES) return '';
+
+  const payload = decoded.subarray(payloadOffset, payloadOffset + STRKEY_PAYLOAD_BYTES);
+
+  if (addressType === SC_ADDRESS_TYPE.CONTRACT) {
+    return encodeScContractAddress(payload);
   }
-}
 
-function encodeEd25519PublicKey(bytes: Buffer): string {
-  // Simplified - would need proper base32 encoding with CRC16
-  // For now, return a placeholder
-  return 'G' + bytes.toString('base64').slice(0, 54);
-}
-
-function encodeContractHash(bytes: Buffer): string {
-  // Simplified - would need proper base32 encoding with CRC16
-  return 'C' + bytes.toString('base64').slice(0, 54);
+  return encodeEd25519PublicKey(payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -1053,6 +1237,113 @@ export async function getLpStakeFromSoroban(
 // ---------------------------------------------------------------------------
 
 /**
+ * Claim-state enum mirrored from the contract's `ClaimStatus`.
+ */
+export type ClaimStatus =
+  | 'NeverBet'
+  | 'Claimable'
+  | 'RefundClaimable'
+  | 'NotEligible'
+  | 'AlreadyClaimed';
+
+/**
+ * #1056 — Per-pool snapshot returned by `getUserPortfolioFromSoroban`.
+ * Combines bet position, LP stake, pending rewards, and claim status so
+ * dashboard screens need only a single batched call.
+ */
+export interface UserPoolSnapshot {
+  /** Pool identifier. */
+  poolId: number;
+  /** User's stake on outcome A (raw stroops). */
+  amountA: number;
+  /** User's stake on outcome B (raw stroops). */
+  amountB: number;
+  /** Total stake (amountA + amountB). */
+  totalBet: number;
+  /** LP shares held by the user; 0 if none. */
+  lpShares: number;
+  /** Accrued but unclaimed LP rewards in raw token units. */
+  pendingRewards: number;
+  /** Whether the user can claim winnings or a refund. */
+  claimStatus: ClaimStatus;
+}
+
+/**
+ * #1056 — Batched portfolio query.
+ *
+ * Calls the contract's `get_user_portfolio` function which returns one
+ * `UserPoolSnapshot` per pool where the user has a bet position or LP stake.
+ * Falls back to an empty result when the contract ID is not configured.
+ *
+ * @param userAddress - Stellar account address (`G...` strkey).
+ * @param startId - First pool ID to scan (inclusive, defaults to 1).
+ * @param count - Maximum pools to scan (capped server-side at 50).
+ * @param config - Optional RPC/contract override.
+ * @returns Array of snapshots for pools where the user has activity.
+ */
+export async function getUserPortfolioFromSoroban(
+  userAddress: string,
+  startId = 1,
+  count = 50,
+  config?: SorobanReadConfig,
+): Promise<UserPoolSnapshot[]> {
+  const toNum = (v: unknown): number => {
+    if (typeof v === 'bigint') return Number(v);
+    if (typeof v === 'string') return Number(v) || 0;
+    if (typeof v === 'number') return v;
+    return 0;
+  };
+
+  const normalizeClaimStatus = (raw: unknown): ClaimStatus => {
+    // Contract returns an enum tag, e.g. { tag: 'Claimable' } or the string itself.
+    if (typeof raw === 'string') {
+      const valid: ClaimStatus[] = [
+        'NeverBet', 'Claimable', 'RefundClaimable', 'NotEligible', 'AlreadyClaimed',
+      ];
+      if (valid.includes(raw as ClaimStatus)) return raw as ClaimStatus;
+    }
+    if (typeof raw === 'object' && raw !== null) {
+      const tag = (raw as Record<string, unknown>).tag;
+      if (typeof tag === 'string') return normalizeClaimStatus(tag);
+    }
+    return 'NeverBet';
+  };
+
+  try {
+    const cfg = config ?? getSorobanConfig();
+
+    if (!cfg.contractId) {
+      // Contract not configured — return empty rather than fanning out.
+      return [];
+    }
+
+    const rawResult = await simulateContractRead(
+      cfg.rpcUrl,
+      cfg.contractId,
+      'get_user_portfolio',
+      [startId, count, userAddress],
+    );
+
+    if (!rawResult || !Array.isArray(rawResult)) {
+      return [];
+    }
+
+    return (rawResult as Record<string, unknown>[]).map((item) => ({
+      poolId: toNum(item.pool_id),
+      amountA: toNum(item.amount_a),
+      amountB: toNum(item.amount_b),
+      totalBet: toNum(item.total_bet),
+      lpShares: toNum(item.lp_shares),
+      pendingRewards: toNum(item.pending_rewards),
+      claimStatus: normalizeClaimStatus(item.claim_status),
+    }));
+  } catch (e) {
+    log.error('Failed to fetch user portfolio from Soroban:', e);
+    return [];
+  }
+}
+
+/**
  * Canonical Soroban read API object for pool and user-bet data.
  *
  * Prefer this namespace (or the named exports) over deprecated Stacks reads in `stacks-api.ts`.
@@ -1072,6 +1363,8 @@ export const sorobanReadApi = {
   getLpPosition: getLpPositionFromSoroban,
   getPendingLpRewards: getPendingLpRewardsFromSoroban,
   getLpStake: getLpStakeFromSoroban,
+  /** #1056 — Batched portfolio query (replaces N fan-out reads). */
+  getUserPortfolio: getUserPortfolioFromSoroban,
 };
 
 /** Shared pool and bet types used by both legacy Stacks and Soroban read layers. */

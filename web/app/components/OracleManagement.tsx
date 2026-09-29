@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { formatDisplayAddress } from '../lib/address-display';
 import {
   mockProviders,
@@ -12,6 +12,7 @@ import {
   isOracleManagementPlaceholderEnabled,
   ORACLE_MANAGEMENT_PLACEHOLDER_FLAG,
 } from '../lib/feature-flags';
+import { getRuntimeConfig } from '../lib/runtime-config';
 
 type OracleManagementTab = 'providers' | 'submissions' | 'register';
 
@@ -50,19 +51,12 @@ export default function OracleManagement() {
 }
 
 function OracleManagementPreview() {
-  const [oracleProviders, setOracleProviders] = useState<OracleProvider[]>([]);
-  const [oracleSubmissions, setOracleSubmissions] = useState<OracleSubmission[]>([]);
+  // Fixture data is static and synchronous — it is not a live fetch, so it
+  // is read directly into state rather than staged behind a setTimeout that
+  // would make it appear to resolve like a real network request.
+  const [oracleProviders] = useState<OracleProvider[]>(mockProviders);
+  const [oracleSubmissions] = useState<OracleSubmission[]>(mockSubmissions);
   const [selectedTab, setSelectedTab] = useState<OracleManagementTab>('providers');
-
-  // Load mock data from fixtures
-  useEffect(() => {
-    // Delay setting to avoid synchronous render warning
-    const timer = setTimeout(() => {
-      setOracleProviders(mockProviders);
-      setOracleSubmissions(mockSubmissions);
-    }, 0);
-    return () => clearTimeout(timer);
-  }, []);
 
   const formatTimestamp = (timestamp: number) => {
     return new Date(timestamp).toLocaleString();
@@ -207,7 +201,7 @@ function OracleManagementPreview() {
               </label>
               <input
                 type="text"
-                placeholder="SP1HTBVD3JG9C05J7HBJTHGR0GGW7KX975CN0QKA"
+                placeholder={getRuntimeConfig().defaultOracleAddress || 'G... (Stellar account address)'}
                 className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-muted-foreground cursor-not-allowed"
               />
             </div>
