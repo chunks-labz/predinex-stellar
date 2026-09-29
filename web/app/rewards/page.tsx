@@ -1,7 +1,7 @@
 'use client';
 
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../../components/ui/accordion";
 import { Info, Trophy } from "lucide-react";
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
@@ -25,7 +25,7 @@ export default function RewardsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
       <RouteErrorBoundary routeName="Rewards">
-      <AuthGuard>
+      <WalletConnectGate>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="glass-panel p-8 rounded-2xl mb-8">
             <h1 className="text-4xl font-extrabold mb-2 bg-linear-to-r from-primary to-purple-400 bg-clip-text text-transparent">
@@ -88,7 +88,7 @@ export default function RewardsPage() {
             </Accordion>
           </div>
         </div>
-      </AuthGuard>
+      </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

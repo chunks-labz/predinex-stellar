@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Navbar from "@/components/Navbar";
-import AuthGuard from "@/components/AuthGuard";
+import AdminGuard from '@/components/AdminGuard';
 import { useWallet } from "@/components/WalletAdapterProvider";
 import { useToast } from "@/app/providers/ToastProvider";
 import { useTransactionToast } from "@/lib/hooks/useTransactionToast";
@@ -235,7 +235,7 @@ export default function AdminDisputes() {
     <main className="min-h-screen bg-background">
       <Navbar />
       <RouteErrorBoundary routeName="AdminDisputes">
-        <AuthGuard>
+        <AdminGuard>
           <div className="container mx-auto px-4 py-8">
             <h1 className="text-3xl font-bold mb-8">
               Admin Disputes Dashboard
@@ -437,7 +437,7 @@ export default function AdminDisputes() {
               }
             />
           </div>
-        </AuthGuard>
+        </AdminGuard>
       </RouteErrorBoundary>
     </main>
   );

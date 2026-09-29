@@ -11,7 +11,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import RouteErrorBoundary from '@/components/RouteErrorBoundary';
 import { CreatePoolForm } from '@/components/pools/CreatePoolForm';
 import { predinexReadApi } from '@/lib/contract';
@@ -72,7 +72,7 @@ export default function NewPoolPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
       <RouteErrorBoundary routeName="CreatePool">
-        <AuthGuard>
+        <WalletConnectGate>
           <div className="container mx-auto px-4 py-12 max-w-2xl">
             <div className="mb-6">
               <Link
@@ -106,7 +106,7 @@ export default function NewPoolPage() {
               )}
             </section>
           </div>
-        </AuthGuard>
+        </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import ActivityFeed from '../components/ActivityFeed';
 import ActivityExportButton from '../components/ActivityExportButton';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
@@ -65,7 +65,7 @@ export default function ActivityPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
       <RouteErrorBoundary routeName="Activity">
-      <AuthGuard>
+      <WalletConnectGate>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <div className="glass-panel p-8 rounded-2xl mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
@@ -142,7 +142,7 @@ export default function ActivityPage() {
             </nav>
           )}
         </div>
-      </AuthGuard>
+      </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

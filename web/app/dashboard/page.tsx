@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import { useUserActivity } from '../hooks/useUserActivity';
 import { useActiveBets } from '../lib/hooks/useActiveBets';
 import { useWallet } from '@/components/WalletAdapterProvider';
@@ -71,7 +71,7 @@ function DashboardContent() {
   return (
     <main className="min-h-screen bg-background">
       <Navbar />
-      <AuthGuard>
+      <WalletConnectGate>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
           <TransactionFeeModal
             isOpen={!!feePrompt}
@@ -149,7 +149,7 @@ function DashboardContent() {
             </div>
           </div>
         </div>
-      </AuthGuard>
+      </WalletConnectGate>
     </main>
   );
 }

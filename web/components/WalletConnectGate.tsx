@@ -6,7 +6,15 @@ import { useWallet } from '@/components/WalletAdapterProvider';
 import { Wallet, AlertCircle } from 'lucide-react';
 import { useI18n } from '@/app/lib/i18n';
 
-interface AuthGuardProps {
+/**
+ * Renders children only once a wallet is connected, otherwise a connect
+ * prompt (or redirect).
+ *
+ * This is a UX gate, NOT an authorization check: it runs in the browser and
+ * any wallet satisfies it. Privileged pages must use `AdminGuard`, and every
+ * privileged data read/write must be authorized server-side.
+ */
+export interface WalletConnectGateProps {
   children: React.ReactNode;
   /** Optional custom fallback shown when the user is not connected. */
   fallback?: React.ReactNode;
@@ -14,12 +22,12 @@ interface AuthGuardProps {
   showConnectPrompt?: boolean;
 }
 
-export default function AuthGuard({ 
+export default function WalletConnectGate({ 
   children, 
   fallback,
   redirectTo = '/', 
   showConnectPrompt = true 
-}: AuthGuardProps) {
+}: WalletConnectGateProps) {
   const router = useRouter();
   const { isConnected, connect, isLoading } = useWallet();
   const { t } = useI18n();
