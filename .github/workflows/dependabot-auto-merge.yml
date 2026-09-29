@@ -17,6 +17,7 @@ jobs:
     name: Auto-merge Dependabot PRs
     runs-on: ubuntu-latest
     if: github.actor == 'dependabot[bot]'
+    timeout-minutes: 40
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
@@ -26,45 +27,77 @@ jobs:
 
       # Policy: Dependabot PRs are explicitly governed to ensure stability.
       # For low-risk groups (patch and minor versions), we enforce a strict gate:
-      # 1. Require review approval (provided by this workflow).
-      # 2. Require the repo's core status checks (web, bot, contract) and the
-      #    dependency vulnerability audit to be green.
+      # the repo's core status checks (web, bot, contract) and every dependency
+      # vulnerability audit reported on the PR must be green before merging.
+      #
+      # Check names are the `name:` of the jobs in ci.yml and security-audit.yml.
+      # A required check that never appears aborts the gate instead of waiting
+      # forever, and the loop is bounded so it can never spin to the 6h limit.
+      # No machine approval is given here: review requirements stay with branch
+      # protection.
       - name: Enforce Gate and Auto-Merge Low-Risk Updates
         if: ${{ contains(fromJSON('["version-update:semver-patch", "version-update:semver-minor"]'), steps.metadata.outputs.update-type) }}
         run: |
           echo "Policy: explicitly govern Dependabot PRs."
-          
-          # 1. Provide the required review approval
-          gh pr review --approve "$PR_URL"
-          
-          # 2. Enforce green CI gate for web, bot, contract, and the dependency
-          #    audit. A Dependabot PR that lands a vulnerable release must not be
-          #    auto-merged, which is exactly what the audit gate is for.
+
+          # Core CI jobs from .github/workflows/ci.yml.
+          REQUIRED_CHECKS=("Web Checks" "Bot Checks" "Contract Checks")
+          # Audit jobs from .github/workflows/security-audit.yml, matched by
+          # suffix ("npm dependency audit", "Cargo dependency audit", ...).
+          AUDIT_PATTERN='dependency audit$'
+
+          POLL_INTERVAL=20
+          MAX_ATTEMPTS=90        # 30 minutes total
+          MISSING_GRACE=15       # 5 minutes for checks to be registered
+
           echo "Waiting for required status checks (web/bot/contract/audit) to pass..."
-          while true; do
-            JSON=$(gh pr checks "$PR_URL" --json name,bucket)
-            
-            WEB=$(echo "$JSON" | jq -r '.[] | select(.name == "Web Checks") | .bucket')
-            BOT=$(echo "$JSON" | jq -r '.[] | select(.name == "Bot Checks") | .bucket')
-            CONTRACT=$(echo "$JSON" | jq -r '.[] | select(.name == "Contract Checks") | .bucket')
-            AUDIT=$(echo "$JSON" | jq -r '.[] | select(.name == "Dependency Audit") | .bucket')
-            
-            if [[ "$WEB" == "fail" || "$BOT" == "fail" || "$CONTRACT" == "fail" || "$AUDIT" == "fail" ]]; then
-              echo "One or more required CI checks failed. Aborting auto-merge."
+          for ((attempt = 1; attempt <= MAX_ATTEMPTS; attempt++)); do
+            JSON=$(gh pr checks "$PR_URL" --json name,bucket || echo '[]')
+
+            missing=()
+            pending=0
+            for check in "${REQUIRED_CHECKS[@]}"; do
+              bucket=$(echo "$JSON" | jq -r --arg n "$check" '[.[] | select(.name == $n) | .bucket] | first // ""')
+              case "$bucket" in
+                pass|skipping) ;;
+                fail|cancel)
+                  echo "Required check '$check' did not pass ($bucket). Aborting auto-merge."
+                  exit 1 ;;
+                "") missing+=("$check") ;;
+                *) pending=1 ;;
+              esac
+            done
+
+            AUDIT_BUCKETS=$(echo "$JSON" | jq -r --arg p "$AUDIT_PATTERN" '[.[] | select(.name | test($p; "i")) | .bucket] | .[]')
+            if [[ -z "$AUDIT_BUCKETS" ]]; then
+              missing+=("Dependency audit")
+            elif echo "$AUDIT_BUCKETS" | grep -qE '^(fail|cancel)$'; then
+              echo "A dependency audit check failed. Aborting auto-merge."
               exit 1
+            elif echo "$AUDIT_BUCKETS" | grep -qvE '^(pass|skipping)$'; then
+              pending=1
             fi
-            
-            if [[ "$WEB" == "pass" && "$BOT" == "pass" && "$CONTRACT" == "pass" && "$AUDIT" == "pass" ]]; then
+
+            if (( ${#missing[@]} > 0 )); then
+              if (( attempt >= MISSING_GRACE )); then
+                printf "Required check not found on the PR: %s. Aborting.\n" "${missing[@]}"
+                exit 1
+              fi
+              pending=1
+            fi
+
+            if (( pending == 0 )); then
               echo "All required CI checks are green."
-              break
+              gh pr merge --merge "$PR_URL"
+              exit 0
             fi
-            
-            echo "Checks are still pending. Sleeping for 15s..."
-            sleep 15
+
+            echo "Checks are still pending (attempt $attempt/$MAX_ATTEMPTS). Sleeping for ${POLL_INTERVAL}s..."
+            sleep "$POLL_INTERVAL"
           done
-          
-          # 3. Execute auto-merge
-          gh pr merge --merge "$PR_URL"
+
+          echo "Timed out waiting for required checks. Aborting auto-merge."
+          exit 1
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
