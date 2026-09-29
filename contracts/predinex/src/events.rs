@@ -486,6 +486,7 @@ pub enum SettlementSource {
 pub struct SettleResult {
     pub pool_id: u32,
     pub success: bool,
+    pub error_code: u32,
 }
 
 /// Settlement request for a single pool in batch settlement.

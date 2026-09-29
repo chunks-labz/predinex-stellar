@@ -22,6 +22,8 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
+import { authMiddleware } from '../middleware/auth.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 
 // ============================================================================
 // Types & Interfaces
@@ -179,88 +181,90 @@ const handleValidationErrors = (
 };
 
 /**
- * Mock contract interaction - replace with actual Stellar SDK calls
+ * Error thrown when an on-chain contract query/operation is not yet implemented.
  */
-class ContractService {
-  async createBudgetPlan(request: CreatePlanRequest): Promise<BudgetPlan> {
-    // TODO: Interact with Stellar contract
-    // This is a placeholder implementation
+export class NotImplementedError extends Error {
+  constructor(message: string = 'On-chain contract interaction is not implemented') {
+    super(message);
+    this.name = 'NotImplementedError';
+  }
+}
+
+/**
+ * Contract interaction service for lending budget planner.
+ * Queries on-chain balance and pool states via Soroban / Stellar SDK.
+ */
+export class ContractService {
+  private balanceProvider?: (address: string) => Promise<bigint>;
+  private poolProvider?: () => Promise<PoolAllocation[] | null>;
+
+  constructor(options?: {
+    balanceProvider?: (address: string) => Promise<bigint>;
+    poolProvider?: () => Promise<PoolAllocation[] | null>;
+  }) {
+    this.balanceProvider = options?.balanceProvider;
+    this.poolProvider = options?.poolProvider;
+  }
+
+  public setBalanceProvider(provider: (address: string) => Promise<bigint>): void {
+    this.balanceProvider = provider;
+  }
+
+  public setPoolProvider(provider: () => Promise<PoolAllocation[] | null>): void {
+    this.poolProvider = provider;
+  }
+
+  /**
+   * Retrieves the lender's current on-chain balance.
+   */
+  public async getLenderBalance(lenderAddress: string): Promise<bigint> {
+    if (this.balanceProvider) {
+      return this.balanceProvider(lenderAddress);
+    }
+    // Default to 0n when no on-chain balance provider is wired
+    return 0n;
+  }
+
+  /**
+   * Derives budget plan from live on-chain pool state, or raises NotImplementedError.
+   */
+  public async createBudgetPlan(request: CreatePlanRequest): Promise<BudgetPlan> {
+    const onChainPools = this.poolProvider ? await this.poolProvider() : null;
+    if (!onChainPools || onChainPools.length === 0) {
+      throw new NotImplementedError('On-chain pool state derivation requires an active Stellar contract connection');
+    }
 
     const reserveAmount =
       (BigInt(request.totalBudget) * BigInt(request.reservePct)) /
       BigInt(100);
     const allocatedAmount = BigInt(request.totalBudget) - reserveAmount;
 
-    // Mock allocations
-    const allocations: PoolAllocation[] = [
-      {
-        poolId: 1,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.33,
-        expectedReturn: '5000000',
-        riskScore: 30,
-      },
-      {
-        poolId: 2,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.33,
-        expectedReturn: '7000000',
-        riskScore: 45,
-      },
-      {
-        poolId: 3,
-        allocatedAmount: (allocatedAmount / BigInt(3)).toString(),
-        weightPct: 33.34,
-        expectedReturn: '6000000',
-        riskScore: 38,
-      },
-    ];
-
     return {
       lender: request.lenderAddress,
       totalBudget: request.totalBudget,
       allocatedAmount: allocatedAmount.toString(),
       reserveAmount: reserveAmount.toString(),
-      allocations,
+      allocations: onChainPools,
       strategy: request.strategy,
-      expectedTotalReturn: '18000000',
-      portfolioRiskScore: 38,
-      diversificationScore: 75,
+      expectedTotalReturn: '0',
+      portfolioRiskScore: 0,
+      diversificationScore: 100,
       createdAt: new Date().toISOString(),
     };
   }
 
-  async getPortfolioMetrics(lenderAddress: string): Promise<PortfolioMetrics> {
-    // TODO: Query contract for actual metrics
-    return {
-      totalInvested: '100000000000',
-      currentValue: '108000000000',
-      totalReturn: '8000000000',
-      returnPct: 8.0,
-      feeRevenue: '2000000000',
-      activePools: 5,
-      settledPools: 12,
-      sharpeRatio: 1.25,
-      lastUpdated: new Date().toISOString(),
-    };
+  public async getPortfolioMetrics(_lenderAddress: string): Promise<PortfolioMetrics> {
+    throw new NotImplementedError('On-chain portfolio metrics query is not yet implemented');
   }
 
-  async projectLiquidity(
-    lenderAddress: string,
-    horizon: PlanningHorizon
+  public async projectLiquidity(
+    _lenderAddress: string,
+    _horizon: PlanningHorizon
   ): Promise<LiquidityProjection> {
-    // TODO: Calculate projections from contract state
-    return {
-      currentLiquid: '25000000000',
-      lockedUntilTimestamp: Date.now() / 1000 + 86400 * 7,
-      expectedReturns7d: '1500000000',
-      expectedReturns30d: '6000000000',
-      minimumReserveNeeded: '10000000000',
-      excessCapacity: '15000000000',
-    };
+    throw new NotImplementedError('On-chain liquidity projection query is not yet implemented');
   }
 
-  async optimizeFees(request: OptimizeFeesRequest): Promise<FeeOptimization> {
+  public async optimizeFees(request: OptimizeFeesRequest): Promise<FeeOptimization> {
     // Calculate market average
     const marketAvg =
       request.competitorFees.length > 0
@@ -274,77 +278,39 @@ class ContractService {
       Math.min(1000, Math.floor(marketAvg * 0.95))
     );
 
-    // Estimate impact - guard against divide-by-zero
-    // When currentFeeBps is 0 (new protocol), treat as 100% increase
+    // Estimate impact
     const feeChangePct =
-      request.currentFeeBps > 0
-        ? ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) *
-          100
-        : 100; // 100% when moving from 0 to any fee
-
+      ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100;
     const volumeImpactPct = feeChangePct * -2; // -2% volume per 1% fee increase
-
-    // Clamp volumeImpactPct to prevent BigInt(-Infinity) errors
-    const clampedVolumeImpact = Math.max(-99, Math.min(1000, volumeImpactPct));
 
     const currentRevenue =
       (BigInt(request.avgPoolSize) * BigInt(request.currentFeeBps)) /
       BigInt(10000);
     const newVolume =
-      (BigInt(request.avgPoolSize) *
-        BigInt(100 + Math.floor(clampedVolumeImpact))) /
+      (BigInt(request.avgPoolSize) * BigInt(100 + Math.floor(volumeImpactPct))) /
       BigInt(100);
-    const newRevenue = (newVolume * BigInt(recommendedFee)) / BigInt(10000);
+    const newRevenue =
+      (newVolume * BigInt(recommendedFee)) / BigInt(10000);
 
     const revenueImpact = newRevenue - currentRevenue;
 
-    // Competitiveness score - guard against divide-by-zero
-    let competitiveness: number;
-    if (marketAvg === 0) {
-      // No market data, score based on absolute fee level
-      // Lower fees get higher scores
-      competitiveness = Math.max(0, 100 - recommendedFee / 10);
-    } else if (recommendedFee <= marketAvg) {
-      competitiveness =
-        50 + Math.min(50, ((marketAvg - recommendedFee) / marketAvg) * 100);
-    } else {
-      competitiveness = Math.max(
-        0,
-        50 - ((recommendedFee - marketAvg) / marketAvg) * 100
-      );
-    }
+    // Competitiveness score
+    const competitiveness =
+      recommendedFee <= marketAvg
+        ? 50 + Math.min(50, ((marketAvg - recommendedFee) / marketAvg) * 100)
+        : Math.max(0, 50 - ((recommendedFee - marketAvg) / marketAvg) * 100);
 
     return {
       currentFeeBps: request.currentFeeBps,
       recommendedFeeBps: recommendedFee,
-      expectedVolumeImpactPct: clampedVolumeImpact,
+      expectedVolumeImpactPct: volumeImpactPct,
       expectedRevenueImpact: revenueImpact.toString(),
       competitivenessScore: Math.floor(competitiveness),
     };
   }
 
-  async assessRisk(poolIds: number[]): Promise<RiskAssessment> {
-    // TODO: Calculate from contract data
-    // This is a simplified mock implementation
-
-    const volatilityScore = 35;
-    const liquidityRisk = 25;
-    const concentrationRisk = poolIds.length < 3 ? 60 : 30;
-    const timeRisk = 20;
-
-    const overallRiskScore =
-      volatilityScore * 0.3 +
-      liquidityRisk * 0.25 +
-      concentrationRisk * 0.25 +
-      timeRisk * 0.2;
-
-    return {
-      volatilityScore,
-      liquidityRisk,
-      concentrationRisk,
-      timeRisk,
-      overallRiskScore: Math.floor(overallRiskScore),
-    };
+  public async assessRisk(_poolIds: number[]): Promise<RiskAssessment> {
+    throw new NotImplementedError('On-chain pool risk assessment is not yet implemented');
   }
 }
 
@@ -352,210 +318,255 @@ class ContractService {
 // Route Handlers
 // ============================================================================
 
-const router = Router();
-const contractService = new ContractService();
+export const contractService = new ContractService();
 
-/**
- * POST /api/budget/plan
- * Create a new budget plan
- */
-router.post(
-  '/plan',
-  [
-    validateAddress(),
-    validateAmount('totalBudget'),
-    validateStrategy(),
-    validateRiskTolerance(),
-    validateReservePct(),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      const request: CreatePlanRequest = req.body;
+export function createBudgetRouter(service: ContractService = contractService): Router {
+  const router = Router();
 
-      // Additional business logic validation
-      const budgetBigInt = BigInt(request.totalBudget);
-      if (budgetBigInt <= 0) {
-        return res.status(400).json({
+  // Shared auth context + rate limiting on every budget route (see #1196).
+  router.use(authMiddleware);
+  router.use(rateLimitMiddleware);
+
+  /**
+   * POST /api/budget/plan
+   * Create a new budget plan
+   */
+  router.post(
+    '/plan',
+    [
+      validateAddress(),
+      validateAmount('totalBudget'),
+      validateStrategy(),
+      validateRiskTolerance(),
+      validateReservePct(),
+      handleValidationErrors,
+    ],
+    async (req: Request, res: Response) => {
+      try {
+        const request: CreatePlanRequest = req.body;
+
+        // Additional business logic validation
+        const budgetBigInt = BigInt(request.totalBudget);
+        if (budgetBigInt <= 0) {
+          return res.status(400).json({
+            success: false,
+            error: 'Total budget must be positive',
+          });
+        }
+
+        // Validate that budget does not exceed on-chain balance
+        const availableBalance = await service.getLenderBalance(request.lenderAddress);
+        if (budgetBigInt > availableBalance) {
+          return res.status(400).json({
+            success: false,
+            error: 'Budget exceeds available on-chain balance',
+          });
+        }
+
+        const plan = await service.createBudgetPlan(request);
+
+        res.json({
+          success: true,
+          data: plan,
+        });
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'On-chain pool allocation service is not implemented',
+          });
+        }
+        console.error('Error creating budget plan:', error);
+        res.status(500).json({
           success: false,
-          error: 'Total budget must be positive',
+          error: 'Failed to create budget plan',
         });
       }
-
-      const plan = await contractService.createBudgetPlan(request);
-
-      res.json({
-        success: true,
-        data: plan,
-      });
-    } catch (error) {
-      console.error('Error creating budget plan:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to create budget plan',
-      });
     }
-  }
-);
+  );
 
-/**
- * GET /api/budget/portfolio/:lenderAddress
- * Get portfolio metrics for a lender
- */
-router.get(
-  '/portfolio/:lenderAddress',
-  [
-    param('lenderAddress')
-      .matches(/^G[A-Z0-9]{55}$/)
-      .withMessage('Invalid Stellar address'),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      const { lenderAddress } = req.params;
+  /**
+   * GET /api/budget/portfolio/:lenderAddress
+   * Get portfolio metrics for a lender
+   */
+  router.get(
+    '/portfolio/:lenderAddress',
+    [
+      param('lenderAddress')
+        .matches(/^G[A-Z0-9]{55}$/)
+        .withMessage('Invalid Stellar address'),
+      handleValidationErrors,
+    ],
+    async (req: Request, res: Response) => {
+      try {
+        const { lenderAddress } = req.params;
 
-      const metrics = await contractService.getPortfolioMetrics(lenderAddress);
+        const metrics = await service.getPortfolioMetrics(lenderAddress);
 
-      res.json({
-        success: true,
-        data: metrics,
-      });
-    } catch (error) {
-      console.error('Error fetching portfolio metrics:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to fetch portfolio metrics',
-      });
+        res.json({
+          success: true,
+          data: metrics,
+        });
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
+        console.error('Error fetching portfolio metrics:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to fetch portfolio metrics',
+        });
+      }
     }
-  }
-);
+  );
 
-/**
- * GET /api/budget/liquidity/:lenderAddress
- * Project liquidity for a lender
- */
-router.get(
-  '/liquidity/:lenderAddress',
-  [
-    param('lenderAddress')
-      .matches(/^G[A-Z0-9]{55}$/)
-      .withMessage('Invalid Stellar address'),
-    validateHorizon(),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      const { lenderAddress } = req.params;
-      const horizon =
-        (req.query.horizon as PlanningHorizon) || PlanningHorizon.MEDIUM_TERM;
+  /**
+   * GET /api/budget/liquidity/:lenderAddress
+   * Project liquidity for a lender
+   */
+  router.get(
+    '/liquidity/:lenderAddress',
+    [
+      param('lenderAddress')
+        .matches(/^G[A-Z0-9]{55}$/)
+        .withMessage('Invalid Stellar address'),
+      validateHorizon(),
+      handleValidationErrors,
+    ],
+    async (req: Request, res: Response) => {
+      try {
+        const { lenderAddress } = req.params;
+        const horizon =
+          (req.query.horizon as PlanningHorizon) || PlanningHorizon.MEDIUM_TERM;
 
-      const projection = await contractService.projectLiquidity(
-        lenderAddress,
-        horizon
-      );
+        const projection = await service.projectLiquidity(
+          lenderAddress,
+          horizon
+        );
 
-      res.json({
-        success: true,
-        data: projection,
-      });
-    } catch (error) {
-      console.error('Error projecting liquidity:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to project liquidity',
-      });
+        res.json({
+          success: true,
+          data: projection,
+        });
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
+        console.error('Error projecting liquidity:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to project liquidity',
+        });
+      }
     }
-  }
-);
+  );
 
-/**
- * POST /api/budget/optimize-fees
- * Get fee optimization recommendations
- */
-router.post(
-  '/optimize-fees',
-  [
-    body('currentFeeBps')
-      .isInt({ min: 0, max: 10000 })
-      .withMessage('Current fee must be 0-10000 bps'),
-    body('avgPoolSize')
-      .isString()
-      .matches(/^\d+$/)
-      .withMessage('Average pool size must be a positive integer string'),
-    body('competitorFees')
-      .isArray()
-      .withMessage('Competitor fees must be an array'),
-    body('competitorFees.*')
-      .isInt({ min: 0, max: 10000 })
-      .withMessage('Each competitor fee must be 0-10000 bps'),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      const request: OptimizeFeesRequest = req.body;
+  /**
+   * POST /api/budget/optimize-fees
+   * Get fee optimization recommendations
+   */
+  router.post(
+    '/optimize-fees',
+    [
+      body('currentFeeBps')
+        .isInt({ min: 0, max: 10000 })
+        .withMessage('Current fee must be 0-10000 bps'),
+      body('avgPoolSize')
+        .isString()
+        .matches(/^\d+$/)
+        .withMessage('Average pool size must be a positive integer string'),
+      body('competitorFees')
+        .isArray()
+        .withMessage('Competitor fees must be an array'),
+      body('competitorFees.*')
+        .isInt({ min: 0, max: 10000 })
+        .withMessage('Each competitor fee must be 0-10000 bps'),
+      handleValidationErrors,
+    ],
+    async (req: Request, res: Response) => {
+      try {
+        const request: OptimizeFeesRequest = req.body;
 
-      const optimization = await contractService.optimizeFees(request);
+        const optimization = await service.optimizeFees(request);
 
-      res.json({
-        success: true,
-        data: optimization,
-      });
-    } catch (error) {
-      console.error('Error optimizing fees:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to optimize fees',
-      });
+        res.json({
+          success: true,
+          data: optimization,
+        });
+      } catch (error) {
+        console.error('Error optimizing fees:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to optimize fees',
+        });
+      }
     }
-  }
-);
+  );
 
-/**
- * POST /api/budget/risk-assessment
- * Assess risk for a set of pools
- */
-router.post(
-  '/risk-assessment',
-  [
-    body('poolIds')
-      .isArray({ min: 1 })
-      .withMessage('Pool IDs must be a non-empty array'),
-    body('poolIds.*')
-      .isInt({ min: 1 })
-      .withMessage('Each pool ID must be a positive integer'),
-    handleValidationErrors,
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      const { poolIds } = req.body;
+  /**
+   * POST /api/budget/risk-assessment
+   * Assess risk for a set of pools
+   */
+  router.post(
+    '/risk-assessment',
+    [
+      body('poolIds')
+        .isArray({ min: 1 })
+        .withMessage('Pool IDs must be a non-empty array'),
+      body('poolIds.*')
+        .isInt({ min: 1 })
+        .withMessage('Each pool ID must be a positive integer'),
+      handleValidationErrors,
+    ],
+    async (req: Request, res: Response) => {
+      try {
+        const { poolIds } = req.body;
 
-      const assessment = await contractService.assessRisk(poolIds);
+        const assessment = await service.assessRisk(poolIds);
 
-      res.json({
-        success: true,
-        data: assessment,
-      });
-    } catch (error) {
-      console.error('Error assessing risk:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to assess risk',
-      });
+        res.json({
+          success: true,
+          data: assessment,
+        });
+      } catch (error: any) {
+        if (error instanceof NotImplementedError || error?.name === 'NotImplementedError') {
+          return res.status(501).json({
+            success: false,
+            error: error.message || 'Not implemented',
+          });
+        }
+        console.error('Error assessing risk:', error);
+        res.status(500).json({
+          success: false,
+          error: 'Failed to assess risk',
+        });
+      }
     }
-  }
-);
+  );
 
-/**
- * GET /api/budget/health
- * Health check endpoint
- */
-router.get('/health', (req: Request, res: Response) => {
-  res.json({
-    success: true,
-    service: 'Budget Planner API',
-    version: '1.0.0',
-    timestamp: new Date().toISOString(),
+  /**
+   * GET /api/budget/health
+   * Health check endpoint
+   */
+  router.get('/health', (_req: Request, res: Response) => {
+    res.json({
+      success: true,
+      service: 'Budget Planner API',
+      version: '1.0.0',
+      timestamp: new Date().toISOString(),
+    });
   });
-});
 
-export default router;
+  return router;
+}
+
+const defaultRouter = createBudgetRouter();
+export const budgetRouter = defaultRouter;
+export default defaultRouter;
+

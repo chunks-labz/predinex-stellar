@@ -371,17 +371,37 @@ export function mapEventToActivityItem(
 // ---------------------------------------------------------------------------
 
 /**
+ * Build a stable webhook event ID from on-chain identity (issue #1286).
+ *
+ * The previous ID was `evt_${poolId}_${Date.now()}`, which is unique per *call*.
+ * Since the browser re-polls the chain every 30s and multiple tabs poll at once,
+ * the same on-chain event was delivered repeatedly under a new ID each time.
+ *
+ * Deriving the ID from the transaction hash plus the event name means a
+ * re-observed event produces the same ID, so the server can collapse duplicates
+ * and delivery becomes idempotent.
+ */
+function buildWebhookEventId(event: DecodedSorobanEvent): string {
+  return `evt_${event.name}_${event.txHash}`;
+}
+
+/**
  * Trigger webhook notification for a decoded event.
  * This is fire-and-forget — failures are logged but don't block the activity feed.
  */
 async function triggerWebhookNotification(event: DecodedSorobanEvent): Promise<void> {
   if (!event.poolId) return;
 
+  const eventId = buildWebhookEventId(event);
+  const timestamp = new Date(event.timestamp * 1000).toISOString();
+
   switch (event.name) {
     case 'create_pool':
       // For pool creation, we need additional data not in the decoded event
       // This is a simplified version — in production you'd fetch pool details
       await notifyPoolCreated(
+        eventId,
+        timestamp,
         event.poolId,
         event.user ?? '',
         '', // title - would need to fetch
@@ -394,6 +414,8 @@ async function triggerWebhookNotification(event: DecodedSorobanEvent): Promise<v
     case 'place_bet':
       if (event.user && event.outcome !== undefined && event.amount) {
         await notifyBetPlaced(
+          eventId,
+          timestamp,
           event.poolId,
           event.user,
           event.outcome === 0 ? 'A' : 'B',
@@ -406,6 +428,8 @@ async function triggerWebhookNotification(event: DecodedSorobanEvent): Promise<v
     case 'settle_pool':
       if (event.winningOutcome !== undefined) {
         await notifyPoolSettled(
+          eventId,
+          timestamp,
           event.poolId,
           event.winningOutcome,
           0, // totalPoolA - would need to fetch
@@ -418,6 +442,8 @@ async function triggerWebhookNotification(event: DecodedSorobanEvent): Promise<v
     case 'claim_winnings':
       if (event.user && event.winnings) {
         await notifyPayoutClaimed(
+          eventId,
+          timestamp,
           event.poolId,
           event.user,
           event.winnings,

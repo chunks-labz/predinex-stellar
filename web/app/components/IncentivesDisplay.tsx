@@ -9,6 +9,7 @@ import { getStacksCoreApiBaseUrl, predinexReadApi } from '../lib/adapters/predin
 import { calculateTotalIncentive, DEFAULT_INCENTIVE_CONFIG, BetterIncentive } from '../lib/liquidity-incentives';
 import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { Gift, TrendingUp, Award, Zap } from 'lucide-react';
+import { stroopsToUnits, unitsToStroops, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface IncentivesDisplayProps {
   betterId?: string;
@@ -73,9 +74,9 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
     const previousBetsCount = 0;
     
     const { total, breakdown } = calculateTotalIncentive(
-      userBet.totalBet / 1_000_000,
+      stroopsToUnits(userBet.totalBet),
       1,
-      totalVolume / 1_000_000,
+      stroopsToUnits(totalVolume),
       previousBetsCount,
       false, // isReferred
       DEFAULT_INCENTIVE_CONFIG
@@ -91,7 +92,7 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
       poolId,
       betterId: userAddress,
       betAmount: userBet.totalBet,
-      bonusAmount: total * 1_000_000,
+      bonusAmount: unitsToStroops(total),
       bonusType,
       status: 'pending'
     }];

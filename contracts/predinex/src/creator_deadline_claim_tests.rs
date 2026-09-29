@@ -60,6 +60,7 @@ fn setup() -> Setup {
 }
 
 fn new_pool(s: &Setup, creator: &Address, duration: u64, deposit_deadline: Option<u64>) -> u32 {
+    s.minter.mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     s.client.create_pool(
         creator,
         &String::from_str(&s.env, "Market"),
@@ -151,6 +152,7 @@ fn default_deposit_deadline_equals_expiry() {
 fn deposit_deadline_must_be_in_the_future() {
     let s = setup();
     let creator = Address::generate(&s.env);
+    s.minter.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     // now == 1_000; a deadline at/below now is rejected.
     let res = s.client.try_create_pool(
         &creator,
@@ -169,6 +171,7 @@ fn deposit_deadline_must_be_in_the_future() {
 fn deposit_deadline_must_be_before_resolution() {
     let s = setup();
     let creator = Address::generate(&s.env);
+    s.minter.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     // expiry = 4_600; a deadline at/after expiry is rejected.
     let res = s.client.try_create_pool(
         &creator,
@@ -260,9 +263,11 @@ fn claim_all_winnings_returns_per_pool_amounts() {
     let results = s.client.claim_all_winnings(&winner, &ids);
     let after = s.token.balance(&winner);
 
-    assert_eq!(results.len(), 1);
-    let entry = results.get(0).unwrap();
+    assert_eq!(results.results.len(), 1);
+    assert!(!results.truncated);
+    let entry = results.results.get(0).unwrap();
     assert_eq!(entry.pool_id, pool_a);
+    assert_eq!(entry.error_code, 0);
     assert!(entry.amount > 0);
     // Returned amount matches the tokens actually received.
     assert_eq!(entry.amount, after - before);
@@ -275,6 +280,7 @@ struct MaSetup {
     client: PredinexContractClient<'static>,
     alt: token::Client<'static>,
     alt_minter: token::StellarAssetClient<'static>,
+    proto_minter: token::StellarAssetClient<'static>,
     admin: Address,
 }
 
@@ -289,6 +295,7 @@ fn ma_setup() -> MaSetup {
     let alt_id = env.register_stellar_asset_contract_v2(alt_admin);
     let alt = token::Client::new(&env, &alt_id.address());
     let alt_minter = token::StellarAssetClient::new(&env, &alt_id.address());
+    let proto_minter = token::StellarAssetClient::new(&env, &proto_id.address());
 
     let contract_id = env.register(PredinexContract, ());
     let client = PredinexContractClient::new(&env, &contract_id);
@@ -305,11 +312,13 @@ fn ma_setup() -> MaSetup {
         client,
         alt,
         alt_minter,
+        proto_minter,
         admin,
     }
 }
 
 fn ma_pool(s: &MaSetup, creator: &Address, deposit_deadline: Option<u64>) -> u32 {
+    s.proto_minter.mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     let mut outcomes: Vec<String> = Vec::new(&s.env);
     outcomes.push_back(String::from_str(&s.env, "Yes"));
     outcomes.push_back(String::from_str(&s.env, "No"));
@@ -324,6 +333,7 @@ fn ma_pool(s: &MaSetup, creator: &Address, deposit_deadline: Option<u64>) -> u32
         &3_600u64,
         &tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &deposit_deadline,
     )
 }

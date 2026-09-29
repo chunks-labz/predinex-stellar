@@ -117,6 +117,12 @@ npm run test
 npm run build
 ```
 
+### Playwright Visual-Test Troubleshooting
+
+- If Playwright cannot find a browser binary, install the required browsers with `npx playwright install`.
+- When an intentional UI change updates the expected rendering, regenerate snapshots with `npm run test:visual:update` and review the resulting diffs.
+- Treat a snapshot diff as legitimate only when it reflects an intended visual change. Re-run the test and investigate changes from unrelated layout, styling, browser, or timing differences before updating a baseline.
+
 ## Dependency Caching Strategy
 
 This project uses both Node.js (npm) and Rust (Cargo) toolchains. Understanding the caching strategy ensures fast, deterministic installs across local and CI environments.
@@ -200,4 +206,3 @@ Cache keys are based on lockfile hashes:
 | Slow installs | Check cache directory permissions; ensure `~/.npm` and `~/.cargo` are writable |
 | Lockfile conflicts | Run `npm ci` instead of `npm install` in CI; only update lockfile intentionally |
 | Missing Rust components | Run `rustup component add rustfmt clippy` |
-

@@ -2,6 +2,7 @@
 
 import { Trophy, TrendingUp, PieChart, Percent } from 'lucide-react';
 import { Pool } from '@/app/lib/market-types';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 const PROTOCOL_FEE_BPS = 200; // 2% — matches contract
 
@@ -46,19 +47,19 @@ export default function SettledPoolSummary({ pool }: SettledPoolSummaryProps) {
                 <div className="bg-muted/50 rounded-lg p-3 text-center">
                     <TrendingUp className="w-4 h-4 mx-auto mb-1.5 text-primary" />
                     <p className="text-xs text-muted-foreground">Total Pool</p>
-                    <p className="text-sm font-bold">{(totalPool / 1_000_000).toLocaleString()} STX</p>
+                    <p className="text-sm font-bold">{stroopsToUnits(totalPool).toLocaleString()} {TOKEN_SYMBOL}</p>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-3 text-center">
                     <PieChart className="w-4 h-4 mx-auto mb-1.5 text-green-400" />
                     <p className="text-xs text-muted-foreground">Winning Side</p>
-                    <p className="text-sm font-bold">{(winningSideTotal / 1_000_000).toLocaleString()} STX</p>
+                    <p className="text-sm font-bold">{stroopsToUnits(winningSideTotal).toLocaleString()} {TOKEN_SYMBOL}</p>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-3 text-center">
                     <PieChart className="w-4 h-4 mx-auto mb-1.5 text-red-400" />
                     <p className="text-xs text-muted-foreground">Losing Side</p>
-                    <p className="text-sm font-bold">{(losingSideTotal / 1_000_000).toLocaleString()} STX</p>
+                    <p className="text-sm font-bold">{stroopsToUnits(losingSideTotal).toLocaleString()} {TOKEN_SYMBOL}</p>
                 </div>
 
                 <div className="bg-muted/50 rounded-lg p-3 text-center">
@@ -71,11 +72,11 @@ export default function SettledPoolSummary({ pool }: SettledPoolSummaryProps) {
             {/* Fee Notice */}
             <div className="flex items-center justify-between text-xs text-muted-foreground bg-muted/30 rounded-lg px-4 py-2.5">
                 <span>Protocol fee ({PROTOCOL_FEE_BPS / 100}%)</span>
-                <span>{(protocolFee / 1_000_000).toLocaleString()} STX</span>
+                <span>{stroopsToUnits(protocolFee).toLocaleString()} {TOKEN_SYMBOL}</span>
             </div>
             <div className="flex items-center justify-between text-sm font-medium bg-muted/30 rounded-lg px-4 py-2.5">
                 <span>Net payout pool</span>
-                <span>{(netPayout / 1_000_000).toLocaleString()} STX</span>
+                <span>{stroopsToUnits(netPayout).toLocaleString()} {TOKEN_SYMBOL}</span>
             </div>
         </div>
     );

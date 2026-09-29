@@ -1,6 +1,6 @@
 # Predinex Contract Deployment Guide
 
-Step-by-step guide to build, deploy, initialize, and verify the `predinex` Soroban smart contract on Stellar testnet, then wire it into the web app.
+Step-by-step guide to build, deploy, initialize, and verify the `predinex` Soroban smart contract on Stellar testnet and mainnet.
 
 ---
 
@@ -8,15 +8,16 @@ Step-by-step guide to build, deploy, initialize, and verify the `predinex` Sorob
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Rust | ≥ 1.78 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Rust | ≥ 1.78 | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh` |
 | `wasm32-unknown-unknown` target | — | `rustup target add wasm32-unknown-unknown` |
 | Stellar CLI | ≥ 22.0 | `cargo install --locked stellar-cli --features opt` |
-| Funded testnet account | — | See step 1 |
+| Funded account | — | See step 1 |
 
 ---
 
-## 1. Fund a Testnet Account
+## 1. Fund an Account
 
+For testnet:
 ```bash
 # Generate a new keypair
 stellar keys generate deployer --network testnet
@@ -28,6 +29,8 @@ stellar keys fund deployer --network testnet
 stellar account show --network testnet $(stellar keys address deployer)
 ```
 
+For mainnet, create an account and fund it with at least 20 XLM.
+
 ---
 
 ## 2. Build the Contract WASM
@@ -36,13 +39,14 @@ From the repo root:
 
 ```bash
 cd contracts/predinex
-cargo build --target wasm32-unknown-unknown --release
+stellar contract build
+stellar contract optimize --wasm target/wasm32-unknown-unknown/release/predinex.wasm
 ```
 
 The optimised WASM is written to:
 
 ```
-contracts/predinex/target/wasm32-unknown-unknown/release/predinex.wasm
+contracts/predinex/target/wasm32-unknown-unknown/release/predinex.optimized.wasm
 ```
 
 Run tests before deploying:
@@ -53,13 +57,29 @@ cargo test
 
 ---
 
-## 3. Deploy to Testnet
+## 3. Deploy to Network
+
+### Testnet
 
 ```bash
 stellar contract deploy \
-  --wasm contracts/predinex/target/wasm32-unknown-unknown/release/predinex.wasm \
+  --wasm contracts/predinex/target/wasm32-unknown-unknown/release/predinex.optimized.wasm \
   --source deployer \
   --network testnet
+```
+
+### Mainnet
+
+Ensure you use your mainnet RPC URL and network passphrase. Check `deploy-mainnet.yml` for specifics.
+
+```bash
+stellar contract deploy \
+  --wasm contracts/predinex/target/wasm32-unknown-unknown/release/predinex.optimized.wasm \
+  --source deployer \
+  --network mainnet \
+  --rpc-url $STELLAR_RPC_URL \
+  --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+  --fee 1000000
 ```
 
 Save the printed **contract ID**:
@@ -72,25 +92,35 @@ export CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 ## 4. Initialize the Contract
 
-`initialize` must be called exactly once. It binds the SAC token and sets the treasury recipient.
+`initialize` must be called exactly once. It binds the SAC token and sets the treasury recipient and admin.
+
+### Testnet
 
 ```bash
-# Deploy a test token (or use an existing SAC address)
-stellar contract deploy \
-  --wasm /path/to/soroban_token_contract.wasm \
-  --source deployer \
-  --network testnet
-# → TOKEN_ID=CYYY...
-
-export TOKEN_ID=CYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
-
 stellar contract invoke \
   --id $CONTRACT_ID \
   --source deployer \
   --network testnet \
   -- initialize \
   --token $TOKEN_ID \
-  --treasury_recipient $(stellar keys address deployer)
+  --treasury_recipient $(stellar keys address deployer) \
+  --admin $(stellar keys address deployer)
+```
+
+### Mainnet
+
+```bash
+stellar contract invoke \
+  --id $CONTRACT_ID \
+  --source deployer \
+  --network mainnet \
+  --rpc-url $STELLAR_RPC_URL \
+  --network-passphrase "$STELLAR_NETWORK_PASSPHRASE" \
+  --fee 100000 \
+  -- initialize \
+  --token $TOKEN_ID \
+  --treasury_recipient $TREASURY_ADDRESS \
+  --admin $ADMIN_ADDRESS
 ```
 
 ---
@@ -153,14 +183,9 @@ pnpm dev
 
 ---
 
-## 7. Pubnet Checklist
+## 7. Operations and Runbook
 
-- [ ] Full test suite passes: `cargo test`
-- [ ] Contract audited by a third party
-- [ ] Admin and treasury keys on hardware wallet or multisig
-- [ ] `fee_bps` set to intended value (default 200 = 2 %)
-- [ ] Deployer keypair stored offline after initialization
-- [ ] Contract ID recorded in `CHANGELOG.md`
+For ongoing operations, monitoring, incident response, and emergency procedures, please refer to the [Operational Runbook](DEPLOYMENT_RUNBOOK.md).
 
 ---
 
@@ -171,5 +196,5 @@ pnpm dev
 | `AlreadyInitialized` | `initialize` called twice | Contract is live; skip this step |
 | `HostError: Error(Auth, InvalidAction)` | Missing `require_auth` | Pass `--source` matching the `caller` argument |
 | `insufficient balance` | Deployer not funded | Run `stellar keys fund deployer --network testnet` |
-| WASM not found | Build not run | Run `cargo build --target wasm32-unknown-unknown --release` |
+| WASM not found | Build not run | Run `stellar contract build` |
 | `PoolNotExpired` on `claim_expired` | Pool expiry not yet passed | Advance ledger time or wait |

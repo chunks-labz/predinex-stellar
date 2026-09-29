@@ -3,7 +3,10 @@
 import { useState, useCallback } from 'react';
 
 /**
- * Legacy dispute helper.
+ * Legacy dispute helper — CLIENT-SIDE ONLY.
+ *
+ * ⚠️  This hook does NOT submit votes to the blockchain. Votes are recorded
+ * in local React state only and are lost on page refresh.
  *
  * The current Predinex Soroban contract exposes a frozen/disputed lifecycle
  * for pool state, but it does not support a full on-chain community dispute

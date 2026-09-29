@@ -90,6 +90,7 @@ fn single_asset_pool_full_lifecycle() {
 
     // Bets must clear the protocol minimum (1_000_000 base units).
     let bet = 1_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     f.token_admin_client.mint(&winner, &100_000_000);
     f.token_admin_client.mint(&loser, &100_000_000);
 
@@ -143,6 +144,7 @@ fn multi_asset_pool_full_lifecycle() {
     let better_c = Address::generate(&f.env);
 
     let bet = 1_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     for who in [&better_a, &better_b, &better_c] {
         f.token_admin_client.mint(who, &100_000_000);
     }
@@ -159,6 +161,7 @@ fn multi_asset_pool_full_lifecycle() {
         &outcomes,
         &3600,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert!(event_emitted(&f.env, "create_pool"));
 
@@ -199,6 +202,7 @@ fn cancellation_and_refund_flow() {
     let bettor = Address::generate(&f.env);
 
     let stake = 2_500_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     f.token_admin_client.mint(&bettor, &100_000_000);
 
     let pool_id = f.client.create_pool(
@@ -245,6 +249,7 @@ fn claim_after_expiry_flow() {
     let bettor = Address::generate(&f.env);
 
     let stake = 4_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     f.token_admin_client.mint(&bettor, &100_000_000);
 
     let pool_id = f.client.create_pool(

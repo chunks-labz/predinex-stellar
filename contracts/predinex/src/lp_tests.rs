@@ -56,6 +56,7 @@ impl LpCtx {
     }
 
     fn create_pool(&self, creator: &Address) -> u32 {
+        self.mint(creator, MIN_CREATOR_DEPOSIT * 10);
         self.client.create_pool(
             creator,
             &String::from_str(&self.env, "LP Test Pool"),
@@ -377,6 +378,10 @@ fn test_pending_lp_rewards_matches_claimable_with_stake_boost() {
 
     ctx.client
         .distribute_lp_rewards(&ctx.admin, &pool_id, &reward_amount);
+
+    // #1245 — boost accrues over elapsed time, so advance past the lock
+    // duration before expecting the full boosted amount.
+    ctx.env.ledger().with_mut(|l| l.timestamp += MIN_POOL_DURATION_SECS);
 
     // Equal shares => base pending is 2M each. The fully-staked LP receives a
     // 2x boost => 4M, which `get_pending_lp_rewards` must report.

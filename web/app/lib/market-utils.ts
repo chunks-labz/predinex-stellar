@@ -5,19 +5,28 @@
 
 import { PoolData, ProcessedMarket, MarketStatus } from './market-types';
 import { getRuntimeConfig } from './runtime-config';
+import { formatTokenAmountCompact } from './formatting';
+
+/** Current Unix time in whole seconds. */
+export function currentTimestampSeconds(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 /**
  * Determines the current status of a market based on its settlement state and expiry time.
- * 
+ *
+ * #1284 — `expiry` is a Unix timestamp in seconds, so it is compared directly
+ * against wall-clock time rather than against a ledger height.
+ *
  * @param pool - The raw pool data from the smart contract
- * @param currentBlockHeight - The current block height of the Stellar network
+ * @param nowSeconds - Current Unix time in seconds; defaults to `Date.now()`
  * @returns 'settled' if resolved, 'expired' if deadline passed, otherwise 'active'
  */
-export function calculateMarketStatus(pool: PoolData, currentBlockHeight: number): MarketStatus {
+export function calculateMarketStatus(pool: PoolData, nowSeconds: number = currentTimestampSeconds()): MarketStatus {
   if (pool.settled) return 'settled';
   if (pool.disputed) return 'disputed';
   if (pool.frozen) return 'frozen';
-  if (currentBlockHeight > pool.expiry) return 'expired';
+  if (nowSeconds >= pool.expiry) return 'expired';
   return 'active';
 }
 
@@ -40,29 +49,34 @@ export function calculateOdds(totalA: bigint, totalB: bigint): { oddsA: number; 
 }
 
 /**
- * Calculates the number of blocks remaining until market expiry.
- * 
- * @param expiry - The block height at which the market expires
- * @param currentBlockHeight - The current blockchain height
- * @returns Number of blocks remaining, or null if already expired
+ * Calculates the number of seconds remaining until market expiry.
+ *
+ * #1284 — `expiry` is a Unix timestamp in seconds, so the remaining time is a
+ * direct difference against wall-clock time with no block-time estimate.
+ *
+ * @param expiry - The Unix timestamp (seconds) at which the market expires
+ * @param nowSeconds - Current Unix time in seconds; defaults to `Date.now()`
+ * @returns Number of seconds remaining, or null if already expired
  */
-export function calculateTimeRemaining(expiry: number, currentBlockHeight: number): number | null {
-  if (currentBlockHeight >= expiry) return null;
-  return expiry - currentBlockHeight;
+export function calculateTimeRemaining(expiry: number, nowSeconds: number = currentTimestampSeconds()): number | null {
+  if (!Number.isFinite(expiry) || expiry <= 0) return null;
+  if (nowSeconds >= expiry) return null;
+  return Math.floor(expiry - nowSeconds);
 }
 
 /**
  * Transforms raw smart contract data into a processed format ready for UI consumption.
  * Encapsulates logic for odds, status, and time remaining calculations.
- * 
+ *
  * @param pool - The input pool data
- * @param currentBlockHeight - Current blockchain state
+ * @param nowSeconds - Current Unix time in seconds; defaults to `Date.now()`
  * @returns Enriched market object with computed fields
  */
-export function processMarketData(pool: PoolData, currentBlockHeight: number): ProcessedMarket {
+export function processMarketData(pool: PoolData, nowSeconds?: number): ProcessedMarket {
+  const now = nowSeconds ?? currentTimestampSeconds();
   const odds = calculateOdds(pool.totalA, pool.totalB);
-  const status = calculateMarketStatus(pool, currentBlockHeight);
-  const timeRemaining = calculateTimeRemaining(pool.expiry, currentBlockHeight);
+  const status = calculateMarketStatus(pool, now);
+  const timeRemaining = calculateTimeRemaining(pool.expiry, now);
   const totalVolume = Number(pool.totalA + pool.totalB);
 
   return {
@@ -86,36 +100,38 @@ export function processMarketData(pool: PoolData, currentBlockHeight: number): P
 }
 
 /**
- * Formats a micro-STX amount into a user-friendly string (e.g., 1.5M STX).
- * 
- * @param amount - The numerical amount in micro-STX
+ * Formats a stroops amount into a compact human-readable string.
+ *
+ * #1285 — Delegates to the shared `formatTokenAmountCompact` helper so the
+ * stroops→unit conversion and token symbol come from a single source of truth
+ * (`TOKEN_CONFIG.STROOPS_PER_UNIT` = 1 XLM = 10_000_000 stroops) instead of the
+ * local 1e6 divisor and hardcoded "STX" suffix this function used to carry.
+ *
+ * @param amount - The amount in stroops
  * @returns Formatted currency string
  */
 export function formatSTXAmount(amount: number): string {
-  if (amount >= 1000000) {
-    return `${(amount / 1000000).toFixed(1)}M STX`;
-  } else if (amount >= 1000) {
-    return `${(amount / 1000).toFixed(1)}K STX`;
-  } else {
-    return `${amount.toLocaleString()} STX`;
-  }
+  return formatTokenAmountCompact(BigInt(Math.round(amount)));
 }
 
 /**
- * Estimates human-readable time remaining based on block count.
- * Assumes a block production time of approximately 5 seconds (Stellar average).
- * 
- * @param blocksRemaining - The number of blocks until expiry
+ * Formats human-readable time remaining from a number of seconds.
+ *
+ * #1284 — Takes seconds directly; the old version multiplied a block count by
+ * an assumed 5s block time, which compounded the block-height/timestamp mixup.
+ *
+ * @param secondsRemaining - The number of seconds until expiry
  * @returns Formatted duration string (e.g., "2d", "5h", "45m")
  */
-export function formatTimeRemaining(blocksRemaining: number | null): string {
-  if (blocksRemaining === null) return 'Expired';
-  if (blocksRemaining <= 0) return 'Expired';
+export function formatTimeRemaining(secondsRemaining: number | null): string {
+  if (secondsRemaining === null) return 'Expired';
+  if (!Number.isFinite(secondsRemaining) || secondsRemaining <= 0) return 'Expired';
 
-  // Assuming ~5 seconds per block on Stellar
-  const minutesRemaining = Math.floor((blocksRemaining * 5) / 60);
+  const minutesRemaining = Math.floor(secondsRemaining / 60);
 
-  if (minutesRemaining < 60) {
+  if (minutesRemaining < 1) {
+    return '<1m';
+  } else if (minutesRemaining < 60) {
     return `${minutesRemaining}m`;
   } else if (minutesRemaining < 1440) { // 24 hours
     return `${Math.floor(minutesRemaining / 60)}h`;

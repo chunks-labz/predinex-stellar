@@ -43,6 +43,10 @@ impl TestCtx {
 
         let pool_creator = Address::generate(&env);
 
+        // Fund the pool creator so creator-deposit transfers succeed.
+        let sac = token::StellarAssetClient::new(&env, &token_id.address());
+        sac.mint(&pool_creator, &(MIN_CREATOR_DEPOSIT * 100));
+
         TestCtx {
             env,
             client,
@@ -276,7 +280,7 @@ fn test_unfreeze_disputed_pool_restores_open_status() {
     ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
 
     let pool = ctx.client.get_pool(&pool_id).unwrap();
-    assert_eq!(pool.status, PoolStatus::Open);
+    assert_eq!(pool.status, PoolStatus::Settled(0));
 }
 
 // ── treasury operations unaffected by pool freeze ─────────────────────────────

@@ -13,6 +13,7 @@ import { toastMessages, showToastPayload } from '@/lib/toast-messages';
 import { validateBetAmount } from '@/lib/validators';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
+import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
@@ -283,15 +284,13 @@ export default function BettingSection({
           </div>
         )}
 
-      {/* Network mismatch warning */}
-      {isMismatch && (
-        <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex gap-2">
-          <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
-          <p className="text-sm text-yellow-600">
-            {t('betting.networkMismatch').replace('{network}', expectedNetworkName)}
-          </p>
-        </div>
-      )}
+      {/* Network mismatch warning — the same component the navbar banner uses,
+          so the message and the switch action have one definition. The copy is
+          passed in so it stays localised. */}
+      <NetworkMismatchWarning
+        variant="inline"
+        message={t('betting.networkMismatch').replace('{network}', expectedNetworkName)}
+      />
 
       {/* Amount input */}
       <div>

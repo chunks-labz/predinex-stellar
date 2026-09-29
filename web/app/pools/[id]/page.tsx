@@ -10,8 +10,8 @@ import type { Pool } from "../../lib/adapters/types";
 import type { PoolExtendedMetadata } from "../../lib/soroban-read-api";
 import Navbar from '@/components/Navbar';
 import CountdownTimer from '@/components/CountdownTimer';
-import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
-import { blocksToSeconds } from "../../lib/countdown-utils";
+import { secondsUntil } from "../../lib/countdown-utils";
+import { stroopsToUnits, TOKEN_SYMBOL } from "../../lib/formatting";
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import PoolExportButton from "../../../components/PoolExportButton";
 import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
@@ -46,8 +46,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const { address: stxAddress } = useWallet();
 
     const [pool, setPool] = useState<Pool | null>(null);
-    const [currentBlockHeight, setCurrentBlockHeight] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+        const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
     const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
@@ -117,22 +116,18 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         fetchUserBet();
     }, [fetchUserBet]);
 
-    useEffect(() => {
-        let cancelled = false;
-        fetchCurrentBlockHeightLive()
-            .then(({ height }) => {
-                if (!cancelled && height > 0) setCurrentBlockHeight(height);
-            })
-            .catch(() => {});
-        return () => { cancelled = true; };
-    }, []);
 
-    // Auto-refresh every 10 seconds.
+    // Auto-refresh every 10 seconds and announce updates to screen readers.
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
                 await fetchPool();
                 await fetchUserBet();
+                // Announce the update to screen readers
+                const liveRegion = document.getElementById('live-pool-update');
+                if (liveRegion) {
+                    liveRegion.textContent = 'Pool updated';
+                }
             } catch (e) {
                 log.error('Auto-refresh failed:', e);
             }
@@ -206,6 +201,12 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         Updates every 10s &middot; Pool #{poolId}
                     </div>
 
+                    {/* Live region for price/volume updates - announces on query, not every tick */}
+                    <div role="status" aria-live="polite" aria-atomic="true" className="hidden">
+                        <span className="sr-only">Live pool update</span>
+                        <span id="live-pool-update" />
+                    </div>
+
                     {/* Header */}
                     <div className="flex justify-between items-start mb-6">
                         <div>
@@ -241,7 +242,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <TrendingUp className="w-5 h-5 mx-auto mb-2 text-primary" />
                             <p className="text-sm text-muted-foreground">Total Volume</p>
-                            <p className="font-bold">{(totalVolume / 1_000_000).toLocaleString()} STX</p>
+                            <p className="font-bold">{stroopsToUnits(totalVolume).toLocaleString()} {TOKEN_SYMBOL}</p>
                         </div>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Users className="w-5 h-5 mx-auto mb-2 text-accent" />
@@ -253,15 +254,11 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Clock className="w-5 h-5 mx-auto mb-2 text-yellow-500" />
                             <p className="text-sm text-muted-foreground">Expires</p>
-                            {currentBlockHeight !== null ? (
-                                <CountdownTimer
-                                    className="font-bold justify-center"
-                                    secondsRemaining={blocksToSeconds(pool.expiry - currentBlockHeight)}
-                                    settled={pool.settled}
-                                />
-                            ) : (
-                                <p className="font-bold">Block {pool.expiry}</p>
-                            )}
+                            <CountdownTimer
+                                className="font-bold justify-center"
+                                secondsRemaining={secondsUntil(pool.expiry)}
+                                settled={pool.settled}
+                            />
                         </div>
                     </div>
 
@@ -303,11 +300,11 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Total A Bets</span>
-                                <p className="font-medium">{(pool.totalA / 1_000_000).toLocaleString()} STX</p>
+                                <p className="font-medium">{stroopsToUnits(pool.totalA).toLocaleString()} {TOKEN_SYMBOL}</p>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Total B Bets</span>
-                                <p className="font-medium">{(pool.totalB / 1_000_000).toLocaleString()} STX</p>
+                                <p className="font-medium">{stroopsToUnits(pool.totalB).toLocaleString()} {TOKEN_SYMBOL}</p>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Participants</span>
@@ -379,16 +376,16 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet!.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>
-                                    <p className="text-xl font-bold">{(userBet!.amountA / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{stroopsToUnits(userBet!.amountA).toFixed(2)} {TOKEN_SYMBOL}</p>
                                 </div>
                                 <div className={`p-3 rounded-lg ${userBet!.amountB > 0 ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeB}</p>
-                                    <p className="text-xl font-bold">{(userBet!.amountB / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{stroopsToUnits(userBet!.amountB).toFixed(2)} {TOKEN_SYMBOL}</p>
                                 </div>
                             </div>
                             <div className="mt-3 pt-3 border-t border-primary/20 flex justify-between items-center">
                                 <span className="text-sm text-muted-foreground">Total Staked</span>
-                                <span className="font-bold">{((userBet!.amountA + userBet!.amountB) / 1_000_000).toFixed(2)} STX</span>
+                                <span className="font-bold">{stroopsToUnits(userBet!.amountA + userBet!.amountB).toFixed(2)} {TOKEN_SYMBOL}</span>
                             </div>
                             {pool.settled && userWonBet && (
                                 <div className="mt-2 text-sm text-green-400">

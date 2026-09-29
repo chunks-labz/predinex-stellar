@@ -28,13 +28,21 @@ export type SorobanConfig = {
   explorerUrl: string;
   /** Deployed Soroban contract ID (C... strkey). */
   contractId: string;
+  /** Bridge contract ID (C... strkey) that settles cross-chain pool mirrors. Optional until a mirror is created. */
+  bridgeContractId?: string;
 };
 
+/**
+ * Client-visible webhook settings.
+ *
+ * #1286 — the `secret` field was removed. Webhook signing is a server concern:
+ * the secret now lives only in the server-only `WEBHOOK_SECRET` env var and is
+ * read inside `app/api/webhooks/notify`. A `NEXT_PUBLIC_` secret is compiled
+ * into the client bundle, so it cannot be used for signing.
+ */
 export type WebhookSettings = {
   /** Global webhook URL for all pools */
   url: string;
-  /** Shared secret for HMAC signature verification */
-  secret: string;
   /** Whether global webhook is enabled */
   enabled: boolean;
 };
@@ -42,14 +50,13 @@ export type WebhookSettings = {
 export type PoolWebhookSettings = {
   /** Per-pool webhook URL */
   url: string;
-  /** Per-pool secret for HMAC signature */
-  secret: string;
   /** Whether per-pool webhook is enabled */
   enabled: boolean;
 };
 
 export type RuntimeConfig = {
   network: SupportedNetwork;
+  appVersion: string;
   contract: ContractConfig;
   api: StacksApiConfig;
   soroban: SorobanConfig;
@@ -57,9 +64,15 @@ export type RuntimeConfig = {
   webhook?: WebhookSettings;
   /** Per-pool webhook configurations (poolId -> settings) */
   poolWebhooks?: Record<number, PoolWebhookSettings>;
+  /**
+   * Default oracle provider address pre-filled in the oracle registration form.
+   * Sourced from `NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS`. Empty string when not configured.
+   */
+  defaultOracleAddress: string;
 };
 
 const DEFAULT_NETWORK: SupportedNetwork = 'testnet';
+const DEFAULT_APP_VERSION = 'unknown';
 
 function parseNetwork(raw: string): SupportedNetwork {
   const v = raw.trim().toLowerCase();
@@ -108,10 +121,11 @@ function resolveContractConfig(network: SupportedNetwork): ContractConfig {
   const analyticsKey: AnalyticsNetworkKey = network === 'mainnet' ? 'MAINNET' : 'TESTNET';
   const contractIdFromAnalytics = ANALYTICS_NETWORK_CONFIG[analyticsKey]?.CONTRACT_ADDRESS;
 
+  // When no contract ID is configured (e.g. test/dev environments without a
+  // deployed contract), return a safe placeholder rather than throwing.
+  // Contract calls will fail gracefully at the RPC layer; the UI degrades.
   if (!contractIdFromAnalytics || typeof contractIdFromAnalytics !== 'string') {
-    throw new Error(
-      `Missing contract id for network '${network}'. Expected it in analytics NETWORK_CONFIG[${analyticsKey}].CONTRACT_ADDRESS.`
-    );
+    return { address: '', name: '', id: '' };
   }
 
   return parseContractId(contractIdFromAnalytics);
@@ -146,8 +160,11 @@ export function getRuntimeConfig(): RuntimeConfig {
     (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
   const contract = resolveContractConfig(network);
 
+  const appVersion = getOptionalEnv('NEXT_PUBLIC_APP_VERSION') ?? DEFAULT_APP_VERSION;
+
   cachedConfig = {
     network,
+    appVersion,
     contract,
     api: {
       coreApiUrl: walletNet.coreApiUrl,
@@ -158,9 +175,12 @@ export function getRuntimeConfig(): RuntimeConfig {
       rpcUrl: sorobanNet.rpcUrl,
       explorerUrl: sorobanNet.explorerUrl,
       contractId: sorobanContractId,
+      bridgeContractId: getOptionalEnv('NEXT_PUBLIC_SOROBAN_BRIDGE_CONTRACT_ID'),
     },
     // Webhook configuration from environment
     webhook: parseWebhookConfig(),
+    // Default oracle address for the oracle management registration form.
+    defaultOracleAddress: getOptionalEnv('NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS') ?? '',
   };
 
   return cachedConfig;
@@ -168,17 +188,16 @@ export function getRuntimeConfig(): RuntimeConfig {
 
 function parseWebhookConfig(): WebhookSettings | undefined {
   const url = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_URL;
-  const secret = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_SECRET;
   const enabled = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_ENABLED === 'true';
-  
-  if (!url || !secret) {
+
+  if (!url) {
     // Return undefined if not configured (webhook disabled by default)
     return undefined;
   }
-  
+
+  // No secret here by design (#1286) — see WebhookSettings.
   return {
     url,
-    secret,
     enabled,
   };
 }
