@@ -1,8 +1,8 @@
 /**
- * Webhook Notification Service
+ * Webhook Notification Service (browser side).
  *
- * Sends HTTP POST notifications to configured webhook URLs when
- * pool events occur on the Predinex platform.
+ * Posts pool events to the app's own `/api/webhooks/notify` route, which signs
+ * and delivers them (issue #1286).
  *
  * Events supported:
  *   - pool_created: When a new prediction market is created
@@ -10,11 +10,17 @@
  *   - pool_settled: When a pool is settled with a winning outcome
  *   - payout_claimed: When a user claims their winnings
  *
- * Security: All payloads are signed with HMAC-SHA256 using a shared secret.
- * The signature is included in the `X-Predinex-Signature` header for verification.
+ * Security: this module deliberately holds no secret and performs no signing.
+ * It previously HMAC-signed payloads in the browser using
+ * `NEXT_PUBLIC_WEBHOOK_SECRET`, which published the shared secret in the client
+ * bundle and let anyone forge signed deliveries. Signing now happens only on
+ * the server, where the secret is never exposed.
  */
 
 import { getRuntimeConfig } from './runtime-config';
+
+/** Internal route that signs and forwards events. */
+const WEBHOOK_DISPATCH_ENDPOINT = '/api/webhooks/notify';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -41,11 +47,15 @@ export interface WebhookPayload {
   data: Record<string, unknown>;
 }
 
+/**
+ * Client-visible webhook configuration.
+ *
+ * The shared secret is intentionally absent: it is read from the server-only
+ * `WEBHOOK_SECRET` inside the dispatch route, never from runtime config.
+ */
 export interface WebhookConfig {
   /** Webhook destination URL */
   url: string;
-  /** Shared secret for HMAC signature */
-  secret: string;
   /** Whether webhook is enabled */
   enabled: boolean;
 }
@@ -84,39 +94,6 @@ export function getWebhookConfig(poolId?: number): WebhookConfig | null {
 }
 
 // ---------------------------------------------------------------------------
-// HMAC Signature
-// ---------------------------------------------------------------------------
-
-/**
- * Generate HMAC-SHA256 signature for webhook payload.
- * Used in the `X-Predinex-Signature` header.
- */
-function generateSignature(payload: string, secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(payload);
-  
-  // Use SubtleCrypto for HMAC-SHA256
-  const cryptoKey = crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-  
-  return cryptoKey.then(key => 
-    crypto.subtle.sign('HMAC', key, messageData)
-  ).then(signature => {
-    // Convert to hex string
-    const array = new Uint8Array(signature);
-    return Array.from(array)
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('');
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Event Builders
 // ---------------------------------------------------------------------------
 
@@ -124,6 +101,8 @@ function generateSignature(payload: string, secret: string): Promise<string> {
  * Build webhook payload for pool creation event.
  */
 function buildPoolCreatedPayload(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   creator: string,
   title: string,
@@ -133,8 +112,8 @@ function buildPoolCreatedPayload(
 ): WebhookPayload {
   return {
     event: 'pool_created',
-    timestamp: new Date().toISOString(),
-    eventId: `evt_${poolId}_${Date.now()}`,
+    timestamp,
+    eventId,
     poolId,
     user: creator,
     data: {
@@ -150,6 +129,8 @@ function buildPoolCreatedPayload(
  * Build webhook payload for bet placement event.
  */
 function buildBetPlacedPayload(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   user: string,
   outcome: 'A' | 'B',
@@ -158,8 +139,8 @@ function buildBetPlacedPayload(
 ): WebhookPayload {
   return {
     event: 'bet_placed',
-    timestamp: new Date().toISOString(),
-    eventId: `evt_${poolId}_${Date.now()}`,
+    timestamp,
+    eventId,
     poolId,
     user,
     data: {
@@ -174,6 +155,8 @@ function buildBetPlacedPayload(
  * Build webhook payload for pool settlement event.
  */
 function buildPoolSettledPayload(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   winningOutcome: 0 | 1,
   totalPoolA: number,
@@ -182,8 +165,8 @@ function buildPoolSettledPayload(
 ): WebhookPayload {
   return {
     event: 'pool_settled',
-    timestamp: new Date().toISOString(),
-    eventId: `evt_${poolId}_${Date.now()}`,
+    timestamp,
+    eventId,
     poolId,
     data: {
       winningOutcome,
@@ -198,6 +181,8 @@ function buildPoolSettledPayload(
  * Build webhook payload for payout claim event.
  */
 function buildPayoutClaimedPayload(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   user: string,
   amount: number,
@@ -205,8 +190,8 @@ function buildPayoutClaimedPayload(
 ): WebhookPayload {
   return {
     event: 'payout_claimed',
-    timestamp: new Date().toISOString(),
-    eventId: `evt_${poolId}_${Date.now()}`,
+    timestamp,
+    eventId,
     poolId,
     user,
     data: {
@@ -221,39 +206,31 @@ function buildPayoutClaimedPayload(
 // ---------------------------------------------------------------------------
 
 /**
- * Send webhook notification to configured endpoint.
+ * Hand an event to the server for signing and delivery.
+ *
+ * The request body is untrusted input; the route validates and rebuilds it
+ * before signing, so a tampered client payload cannot influence the signature
+ * beyond the fields the route accepts.
  */
-async function sendWebhook(
-  payload: WebhookPayload,
-  config: WebhookConfig
+async function dispatchWebhook(
+  payload: WebhookPayload
 ): Promise<WebhookNotificationResult> {
-  const payloadString = JSON.stringify(payload);
-  
   try {
-    const signature = await generateSignature(payloadString, config.secret);
-    
-    const response = await fetch(config.url, {
+    const response = await fetch(WEBHOOK_DISPATCH_ENDPOINT, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Predinex-Signature': `sha256=${signature}`,
-        'X-Predinex-Event': payload.event,
-      },
-      body: payloadString,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-    
+
     if (response.ok) {
-      return {
-        success: true,
-        statusCode: response.status,
-      };
-    } else {
-      return {
-        success: false,
-        statusCode: response.status,
-        error: `HTTP ${response.status}: ${response.statusText}`,
-      };
+      return { success: true, statusCode: response.status };
     }
+
+    return {
+      success: false,
+      statusCode: response.status,
+      error: `HTTP ${response.status}: ${response.statusText}`,
+    };
   } catch (error) {
     return {
       success: false,
@@ -270,6 +247,8 @@ async function sendWebhook(
  * Notify webhook of pool creation.
  */
 export async function notifyPoolCreated(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   creator: string,
   title: string,
@@ -277,59 +256,65 @@ export async function notifyPoolCreated(
   outcomeB: string,
   expiry: number
 ): Promise<WebhookNotificationResult | null> {
-  const config = getWebhookConfig(poolId);
-  if (!config) return null;
-  
-  const payload = buildPoolCreatedPayload(poolId, creator, title, outcomeA, outcomeB, expiry);
-  return sendWebhook(payload, config);
+  if (!getWebhookConfig(poolId)) return null;
+
+  return dispatchWebhook(
+    buildPoolCreatedPayload(eventId, timestamp, poolId, creator, title, outcomeA, outcomeB, expiry)
+  );
 }
 
 /**
  * Notify webhook of bet placement.
  */
 export async function notifyBetPlaced(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   user: string,
   outcome: 'A' | 'B',
   amount: number,
   potentialWinnings: number
 ): Promise<WebhookNotificationResult | null> {
-  const config = getWebhookConfig(poolId);
-  if (!config) return null;
-  
-  const payload = buildBetPlacedPayload(poolId, user, outcome, amount, potentialWinnings);
-  return sendWebhook(payload, config);
+  if (!getWebhookConfig(poolId)) return null;
+
+  return dispatchWebhook(
+    buildBetPlacedPayload(eventId, timestamp, poolId, user, outcome, amount, potentialWinnings)
+  );
 }
 
 /**
  * Notify webhook of pool settlement.
  */
 export async function notifyPoolSettled(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   winningOutcome: 0 | 1,
   totalPoolA: number,
   totalPoolB: number,
   totalWinners: number
 ): Promise<WebhookNotificationResult | null> {
-  const config = getWebhookConfig(poolId);
-  if (!config) return null;
-  
-  const payload = buildPoolSettledPayload(poolId, winningOutcome, totalPoolA, totalPoolB, totalWinners);
-  return sendWebhook(payload, config);
+  if (!getWebhookConfig(poolId)) return null;
+
+  return dispatchWebhook(
+    buildPoolSettledPayload(eventId, timestamp, poolId, winningOutcome, totalPoolA, totalPoolB, totalWinners)
+  );
 }
 
 /**
  * Notify webhook of payout claim.
  */
 export async function notifyPayoutClaimed(
+  eventId: string,
+  timestamp: string,
   poolId: number,
   user: string,
   amount: number,
   outcome: 'A' | 'B'
 ): Promise<WebhookNotificationResult | null> {
-  const config = getWebhookConfig(poolId);
-  if (!config) return null;
-  
-  const payload = buildPayoutClaimedPayload(poolId, user, amount, outcome);
-  return sendWebhook(payload, config);
+  if (!getWebhookConfig(poolId)) return null;
+
+  return dispatchWebhook(
+    buildPayoutClaimedPayload(eventId, timestamp, poolId, user, amount, outcome)
+  );
 }

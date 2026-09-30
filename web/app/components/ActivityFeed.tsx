@@ -7,6 +7,9 @@ import {
     ExternalLink, RefreshCw, TrendingUp, Clock
 } from 'lucide-react';
 import type { ActivityItem } from '../lib/adapters/types';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { areActivityFixturesEnabled } from '../lib/feature-flags';
+import { DemoDataBanner } from './DemoDataBanner';
 
 // --- Helpers ---
 
@@ -23,7 +26,7 @@ function timeAgo(timestamp: number, nowSeconds: number): string {
 }
 
 function formatMicroSTX(micro: number): string {
-    return (micro / 1_000_000).toLocaleString(undefined, {
+    return stroopsToUnits(micro).toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 6,
     });
@@ -127,7 +130,7 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
             case 'settlement':
                 return `Settled: ${item.event.outcome === 0 ? 'Outcome A' : 'Outcome B'} won`;
             case 'claim':
-                return `Claimed ${formatMicroSTX(item.event.winnerAmount || 0)} STX`;
+                return `Claimed ${formatMicroSTX(item.event.winnerAmount || 0)} ${TOKEN_SYMBOL}`;
             default:
                 return null;
         }
@@ -159,7 +162,7 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
                         <span className="font-medium">Pool #{item.poolId}</span>
                     )}
                     {item.amount !== undefined && !item.event?.winnerAmount && (
-                        <span className="font-mono font-medium text-foreground/80">{formatMicroSTX(item.amount)} STX</span>
+                        <span className="font-mono font-medium text-foreground/80">{formatMicroSTX(item.amount)} {TOKEN_SYMBOL}</span>
                     )}
                     <span className="font-mono text-xs">{item.txId.slice(0, 10)}…</span>
                 </div>
@@ -219,6 +222,14 @@ const ActivityFeed = memo(function ActivityFeed({
 
     return (
         <div className="w-full">
+            {/* #1306 — a seeded row is shaped exactly like a real on-chain event,
+                so declare the source whenever the fixture adapter is in use. */}
+            {areActivityFixturesEnabled() && (
+                <div className="mb-4">
+                    <DemoDataBanner source="wallet activity" />
+                </div>
+            )}
+
             {showHeader && (
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">

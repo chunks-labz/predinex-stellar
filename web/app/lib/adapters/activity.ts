@@ -16,6 +16,7 @@ import type { PoolActivityEvent } from '../pool-activity';
 import { predinexReadApi } from './predinex-read-api';
 import { getRuntimeConfig } from '../runtime-config';
 import { createScopedLogger } from '../logger';
+import { areActivityFixturesEnabled } from '../feature-flags';
 
 const log = createScopedLogger('adapters/activity');
 
@@ -30,11 +31,21 @@ export interface FetchActivityResult<T> {
   hasMore: boolean;
 }
 
+/**
+ * True when fabricated activity rows are being served instead of real
+ * on-chain events.
+ *
+ * #1306 — the flag is `NEXT_PUBLIC_*`, so it is inlined into the bundle at
+ * build time rather than read at runtime. Resolution goes through
+ * `isDemoDataFlagEnabled`, which refuses the flag in a production build so a
+ * preview or staging deploy cannot ship seeded rows to real users, and which
+ * logs when it refuses so the misconfiguration is visible.
+ *
+ * `DemoDataBanner` renders a persistent marker whenever this returns true, so
+ * fixture rows are never mistaken for real activity.
+ */
 export function useFixtures(): boolean {
-  return (
-    typeof process !== 'undefined' &&
-    process.env?.NEXT_PUBLIC_ACTIVITY_FIXTURES === 'true'
-  );
+  return areActivityFixturesEnabled();
 }
 
 // ---------------------------------------------------------------------------

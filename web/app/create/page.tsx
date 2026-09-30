@@ -6,7 +6,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import AuthGuard from "@/components/AuthGuard";
+import WalletConnectGate from "@/components/WalletConnectGate";
 import { useWallet } from "@/components/WalletAdapterProvider";
 import { useToast } from "../../providers/ToastProvider";
 import { useTransactionToast } from "../../lib/hooks/useTransactionToast";
@@ -196,7 +196,7 @@ export default function CreateMarket() {
     <main className="min-h-screen bg-background">
       <Navbar />
       <RouteErrorBoundary routeName="CreateMarket">
-        <AuthGuard>
+        <WalletConnectGate>
           <div className="container mx-auto px-4 py-8 sm:py-12 max-w-2xl">
             <h1 className="text-2xl sm:text-3xl font-bold mb-2">
               Create prediction pool
@@ -360,7 +360,7 @@ export default function CreateMarket() {
               </div>
             </form>
           </div>
-        </AuthGuard>
+        </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

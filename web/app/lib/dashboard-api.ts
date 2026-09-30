@@ -5,7 +5,7 @@ import { STACKS_MAINNET, STACKS_TESTNET, type StacksNetwork } from "@stacks/netw
 import { UserBet, BetHistory, DashboardData } from "./market-types";
 import { PoolData } from "./market-types";
 import { fetchAllPools, getEnhancedPool } from "./enhanced-stacks-api";
-import { getCurrentBlockHeight } from './market-utils';
+import { currentTimestampSeconds } from './market-utils';
 import {
   calculatePortfolio, 
   calculatePotentialWinnings, 
@@ -104,7 +104,7 @@ async function createUserBetFromPool(
   betAmount: bigint
 ): Promise<UserBet | null> {
   try {
-    const currentBlockHeight = getCurrentBlockHeight();
+    const nowSeconds = currentTimestampSeconds();
     
     // Determine market status
     let status: 'active' | 'won' | 'lost' | 'expired' = 'active';
@@ -128,7 +128,7 @@ async function createUserBetFromPool(
         const alreadyClaimed = await checkIfClaimed(pool.poolId, userAddress);
         claimStatus = alreadyClaimed ? 'claimed' : 'unclaimed';
       }
-    } else if (currentBlockHeight > pool.expiry) {
+    } else if (nowSeconds >= pool.expiry) {
       status = 'expired';
     }
     

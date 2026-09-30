@@ -10,7 +10,15 @@ crate-type = ["cdylib", "rlib"]
 testutils = ["soroban-sdk/testutils"]
 
 [dependencies]
-soroban-sdk = { version = "27.0.6" }
+soroban-sdk = { version = "28.0.0" }
 
 [dev-dependencies]
-soroban-sdk = { version = "27.0.6", features = ["testutils"] }
+soroban-sdk = { version = "28.0.0", features = ["testutils"] }
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = false
+panic = "abort"
+incremental = false
+codegen-units = 1

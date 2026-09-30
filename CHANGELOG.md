@@ -10,6 +10,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### ⛓ Contract
+- `contracts/pool` now compiles and runs its test suite: 12 tests covering `extend_duration` (auth, expiry, max-duration cap, frozen/disputed, boundaries, and event emission) previously never ran because the module failed to compile. Three separate breakages were blocking it — a stale `ContractEvents` destructuring, a hardcoded `protocol_version: 20` below the host minimum of 22, and a storage fixture written outside a contract frame (closes #1305)
+- Added a CI assertion that fails when a crate declares `#[test]` functions that `cargo test` never compiles or runs. This is the failure mode behind #1305: `cargo test --workspace` was green while `contracts/pool` contributed zero tests
+- Removed `contracts/pool/src/test.rs` and `contracts/pool/src/test/` (1554 lines). Both were unreachable from the crate graph and referenced APIs that do not exist (`PoolDataKey`, `client.init`, `get_pool_expiry`) and two test frameworks that are not dependencies (`soroban_test`, `soroban_test_framework`)
+- `MAX_POOL_DURATION_SECS`'s doc comment said 1,000,000 seconds while the value is 365 days; the max-duration boundary tests had been written against the stale number and were asserting nothing. They now derive from the constant
+- `test_expiry_must_be_future` asserted `PoolError::ExpiryMustBeFuture`, which is unreachable — the expiry and increase checks together make it impossible. Renamed to `test_past_expiry_is_rejected` and pinned to the reachable behaviour
 - Emit `ClaimWinnings` event on successful claim with topics `(Symbol("claim_winnings"), pool_id, claimant)` and `ClaimEvent` payload containing payout amount, fee amount, winning outcome, and total pool size (#585)
 - Event is gated behind a successful payout — no event emitted when `user_winning_bet == 0` or the call fails
 - Added tests `l5` and `m4` verifying event topics and data match actual payout amounts
@@ -48,6 +53,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Regenerated `web/package-lock.json` so it is back in sync with `web/package.json`; `npm ci` was failing outright, which broke the install step of every workflow that builds `web/` and left the `actions/setup-node` npm cache unusable
 - Dependabot now also covers `/bot`, `/api` (npm) and the root Cargo workspace in addition to `/web` and `/contracts/predinex`, with the same weekly non-major grouping (closes #1174)
 - Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
+- Oracle TWAP aggregation now rejects an empty or fully-aged-out sample window, a zero/non-finite total liquidity, and a non-finite TWAP or spot price via a typed `PriceValidationError` with a machine-readable `code`, instead of returning `Infinity`/`NaN` or crashing on an undefined sample (closes #1307)
+- Oracle `addSample` now also rejects `NaN`/`Infinity` prices and liquidity weights, which previously passed the `<= 0` check and poisoned every downstream average
+- `oracle/` is now type-checked by the API build and its tests are collected by the API vitest run, so oracle regressions fail CI instead of sitting unexecuted (closes #1307)
 
 ---
 

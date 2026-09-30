@@ -5,7 +5,7 @@
 
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
-import { AuthValidator, authMiddleware } from '../middleware/auth.js';
+import { AuthValidator, authMiddleware, sharedAuthValidator } from '../middleware/auth.js';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 import { SecuritySanitizer } from '../middleware/security.js';
 
@@ -24,6 +24,7 @@ export interface ReferralResult {
   amount: string;
   recordedAt: string;
 }
+import { NotImplementedError } from './budget.js';
 
 export class ReferralContractService {
   private contractInvoker?: (req: RecordReferralRequest) => Promise<ReferralResult>;
@@ -41,20 +42,12 @@ export class ReferralContractService {
       return this.contractInvoker(req);
     }
 
-    // Default Soroban contract interaction
-    return {
-      txHash: '0x' + Buffer.from(`${Date.now()}-${req.callerAddress}-${req.poolId}`).toString('hex').slice(0, 64).padEnd(64, '0'),
-      callerAddress: req.callerAddress,
-      referrerAddress: req.referrerAddress,
-      poolId: req.poolId,
-      amount: req.amount,
-      recordedAt: new Date().toISOString(),
-    };
+    // Default Soroban contract interaction: not implemented until on-chain wiring
+    throw new NotImplementedError('Referral on-chain contract submission is not yet implemented');
   }
 }
 
 export const defaultReferralService = new ReferralContractService();
-const authValidator = new AuthValidator();
 
 export const referralValidation = [
   body('referrerAddress')
@@ -72,7 +65,7 @@ export const referralValidation = [
 
 export function createReferralRouter(
   contractService: ReferralContractService = defaultReferralService,
-  auth: AuthValidator = authValidator
+  auth: AuthValidator = sharedAuthValidator
 ): Router {
   const router = Router();
 
@@ -96,17 +89,21 @@ export function createReferralRouter(
     referralValidation,
     async (req: Request, res: Response, _next: NextFunction) => {
       // 1. Authenticate caller
-      const apiKey = req.headers['x-api-key'] as string | undefined;
+      let token = (req.headers['x-api-key'] as string | undefined)?.trim();
       const authHeader = req.headers['authorization'];
-      if (!apiKey && !authHeader) {
+      if (!token && typeof authHeader === 'string') {
+        token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
+      }
+
+      if (!token) {
         return res.status(401).json({
           success: false,
           error: 'Authentication required: missing API key or authorization header',
         });
       }
 
-      const authContext = auth.authenticate({ 'x-api-key': apiKey });
-      if (!apiKey && !authHeader) {
+      const authContext = auth.authenticate({ 'x-api-key': token });
+      if (!authContext || !authContext.apiKey) {
         return res.status(401).json({
           success: false,
           error: 'Unauthorized',
@@ -156,6 +153,12 @@ export function createReferralRouter(
           data: result,
         });
       } catch (err: any) {
+        if (err instanceof NotImplementedError || err?.name === 'NotImplementedError' || err?.statusCode === 501) {
+          return res.status(501).json({
+            success: false,
+            error: err?.message || 'Referral on-chain contract submission is not implemented',
+          });
+        }
         return res.status(500).json({
           success: false,
           error: err?.message || 'Failed to record referral on-chain',

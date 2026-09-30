@@ -18,8 +18,16 @@ on:
         description: 'Git tag/ref to build from (e.g., v1.0.0)'
         required: false
 
+  # Verify every published release automatically; `created` is omitted so a
+  # release does not trigger two concurrent verification runs.
   release:
-    types: [published, created]
+    types: [published]
+  # Lighter source-only check so build breakage / non-reproducibility is caught
+  # before a tag exists (no on-chain comparison, no secrets).
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/verify-contract-bytecode.yml'
 
 permissions:
   contents: read
@@ -32,8 +40,44 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  verify-bytecode:
+  reproducible-build:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli@22.0.1
+
+      - name: Build twice and compare hashes
+        working-directory: contracts/predinex
+        run: |
+          build() {
+            cargo clean --release --target wasm32v1-none
+            cargo build --target wasm32v1-none --release
+            stellar contract optimize --wasm target/wasm32v1-none/release/predinex.wasm
+            sha256sum target/wasm32v1-none/release/predinex.optimized.wasm | cut -d' ' -f1
+          }
+          FIRST=$(build | tail -n1)
+          SECOND=$(build | tail -n1)
+          echo "First build:  $FIRST"
+          echo "Second build: $SECOND"
+          if [ "$FIRST" != "$SECOND" ]; then
+            echo "::error::Contract build is not reproducible; release bytecode verification would fail."
+            exit 1
+          fi
+
+  verify-bytecode:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: write
       packages: read
@@ -44,7 +88,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.event.inputs.tag || github.ref }}
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -258,16 +302,19 @@ jobs:
             - **On-chain Hash:** `${{ env.ONCHAIN_HASH }}`
             - **Verification:** Passed
 
-      - name: Comment on release (on failure)
+      # Release events carry no issue number, so the alert is raised as a new
+      # issue linked to the release rather than a comment.
+      - name: Alert on release (on failure)
         if: github.event_name == 'release' && steps.compare.outputs.verification_passed == 'false'
         uses: actions/github-script@v7
         with:
           script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            const release = context.payload.release;
+            await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `⚠️ **Bytecode Verification Failed for ${{ env.NETWORK }}**\n\nThe on-chain bytecode does NOT match the source code at this release tag. See [verification report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for details.`
+              title: `Bytecode verification failed for ${release.tag_name} (${{ env.NETWORK }})`,
+              body: `⚠️ **Bytecode Verification Failed for ${{ env.NETWORK }}**\n\nThe on-chain bytecode does NOT match the source code at release [${release.tag_name}](${release.html_url}).\n\n- Source hash: \`${{ env.SOURCE_HASH }}\`\n- On-chain hash: \`${{ env.ONCHAIN_HASH }}\`\n\nSee [verification report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for details.`
             })
 
       - name: Fail workflow on verification failure

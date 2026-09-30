@@ -32,11 +32,17 @@ export type SorobanConfig = {
   bridgeContractId?: string;
 };
 
+/**
+ * Client-visible webhook settings.
+ *
+ * #1286 — the `secret` field was removed. Webhook signing is a server concern:
+ * the secret now lives only in the server-only `WEBHOOK_SECRET` env var and is
+ * read inside `app/api/webhooks/notify`. A `NEXT_PUBLIC_` secret is compiled
+ * into the client bundle, so it cannot be used for signing.
+ */
 export type WebhookSettings = {
   /** Global webhook URL for all pools */
   url: string;
-  /** Shared secret for HMAC signature verification */
-  secret: string;
   /** Whether global webhook is enabled */
   enabled: boolean;
 };
@@ -44,8 +50,6 @@ export type WebhookSettings = {
 export type PoolWebhookSettings = {
   /** Per-pool webhook URL */
   url: string;
-  /** Per-pool secret for HMAC signature */
-  secret: string;
   /** Whether per-pool webhook is enabled */
   enabled: boolean;
 };
@@ -95,21 +99,42 @@ function getOptionalEnv(name: string): string | undefined {
   return env ? env : undefined;
 }
 
+/**
+ * Canonical name for the deployed contract, and its deprecated predecessor.
+ *
+ * #1308 — three names used to describe the same concept (`SOROBAN_CONTRACT_ID`,
+ * `CONTRACT_ADDRESS`, `CONTRACT_NAME`) and `runtime-config` resolved them through
+ * a fallback chain that threw when only one of the override pair was set. A
+ * Soroban contract is identified by a single C... strkey, so the canonical name
+ * now carries the whole value. `NEXT_PUBLIC_CONTRACT_ADDRESS` is still read as a
+ * deprecated alias when the canonical name is absent, so existing deployments
+ * keep resolving the same contract instead of silently falling back to a default.
+ */
+const CONTRACT_ID_ENV_KEY = 'NEXT_PUBLIC_SOROBAN_CONTRACT_ID';
+const DEPRECATED_CONTRACT_ID_ENV_KEY = 'NEXT_PUBLIC_CONTRACT_ADDRESS';
+const LEGACY_CONTRACT_NAME_ENV_KEY = 'NEXT_PUBLIC_CONTRACT_NAME';
+
+/**
+ * Resolves the configured contract id, honouring the deprecated alias.
+ *
+ * Both `RuntimeConfig.contract` and `RuntimeConfig.soroban.contractId` are
+ * derived from this so the two surfaces can never disagree about which
+ * contract the deployment is pointed at.
+ */
+function resolveConfiguredContractId(): string | undefined {
+  return getOptionalEnv(CONTRACT_ID_ENV_KEY) ?? getOptionalEnv(DEPRECATED_CONTRACT_ID_ENV_KEY);
+}
+
 function resolveContractConfig(network: SupportedNetwork): ContractConfig {
-  const envAddress = getOptionalEnv('NEXT_PUBLIC_CONTRACT_ADDRESS');
-  const envName = getOptionalEnv('NEXT_PUBLIC_CONTRACT_NAME');
+  const configuredId = resolveConfiguredContractId();
 
-  if (envAddress || envName) {
-    if (!envAddress || !envName) {
-      throw new Error(
-        'NEXT_PUBLIC_CONTRACT_ADDRESS and NEXT_PUBLIC_CONTRACT_NAME must both be set when overriding contract coordinates.'
-      );
-    }
-
+  if (configuredId) {
+    // `name` is a legacy field kept for the Stacks-shaped read APIs that build
+    // `/{address}/{name}/events` URLs. It is no longer required alongside the
+    // contract id; set it only if you still run those endpoints.
     return {
-      address: envAddress,
-      name: envName,
-      id: `${envAddress}.${envName}`,
+      ...parseContractId(configuredId),
+      name: getOptionalEnv(LEGACY_CONTRACT_NAME_ENV_KEY) ?? '',
     };
   }
 
@@ -151,9 +176,9 @@ export function getRuntimeConfig(): RuntimeConfig {
     throw new Error(`Missing Soroban RPC URLs for network '${network}' in wallet configuration.`);
   }
 
-  // Soroban contract ID — used by the Stellar event/read path.
-  const sorobanContractId =
-    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
+  // Soroban contract ID — used by the Stellar event/read path. Resolved from the
+  // same source as `contract` so the two surfaces cannot drift apart.
+  const sorobanContractId = resolveConfiguredContractId() ?? '';
   const contract = resolveContractConfig(network);
 
   const appVersion = getOptionalEnv('NEXT_PUBLIC_APP_VERSION') ?? DEFAULT_APP_VERSION;
@@ -184,17 +209,16 @@ export function getRuntimeConfig(): RuntimeConfig {
 
 function parseWebhookConfig(): WebhookSettings | undefined {
   const url = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_URL;
-  const secret = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_SECRET;
   const enabled = typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_WEBHOOK_ENABLED === 'true';
-  
-  if (!url || !secret) {
+
+  if (!url) {
     // Return undefined if not configured (webhook disabled by default)
     return undefined;
   }
-  
+
+  // No secret here by design (#1286) — see WebhookSettings.
   return {
     url,
-    secret,
     enabled,
   };
 }

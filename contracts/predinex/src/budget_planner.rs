@@ -257,21 +257,21 @@ impl BudgetPlanner {
                         }
                         PoolStatus::Settled(winning_outcome) => {
                             settled_pools += 1;
-                            let winning_bet = if *winning_outcome == 0 {
-                                bet.amount_a
-                            } else {
-                                bet.amount_b
-                            };
+                            let user_outcome_bets = PredinexContract::read_user_outcome_bets(
+                                env,
+                                pool_id,
+                                lender.clone(),
+                                &bet,
+                            );
+                            let winning_bet = user_outcome_bets.get(*winning_outcome).unwrap_or(0);
                             if winning_bet > 0 {
-                                let total_pool = pool
-                                    .total_a
-                                    .checked_add(pool.total_b)
-                                    .ok_or(ContractError::PoolTotalOverflow)?;
-                                let outcome_total = if *winning_outcome == 0 {
-                                    pool.total_a
-                                } else {
-                                    pool.total_b
-                                };
+                                let outcome_totals = PredinexContract::read_outcome_totals(
+                                    env,
+                                    pool_id,
+                                    &pool,
+                                );
+                                let total_pool = PredinexContract::sum_totals(&outcome_totals)?;
+                                let outcome_total = outcome_totals.get(*winning_outcome).unwrap_or(0);
                                 if outcome_total > 0 {
                                     current_value += winning_bet
                                         .checked_mul(total_pool)
@@ -478,7 +478,8 @@ impl BudgetPlanner {
                     continue;
                 }
 
-                let total_pool = pool.total_a.checked_add(pool.total_b).ok_or(ContractError::PoolTotalOverflow)?;
+                let outcome_totals = PredinexContract::read_outcome_totals(env, pool_id, &pool);
+                let total_pool = PredinexContract::sum_totals(&outcome_totals)?;
 
                 let eligible = match risk_tolerance {
                     RiskTolerance::Conservative => {
@@ -527,7 +528,8 @@ impl BudgetPlanner {
                         .persistent()
                         .get::<_, Pool>(&DataKey::Pool(pool_id))
                     {
-                        let size = pool.total_a.checked_add(pool.total_b).ok_or(ContractError::PoolTotalOverflow)?;
+                        let outcome_totals = PredinexContract::read_outcome_totals(env, pool_id, &pool);
+                        let size = PredinexContract::sum_totals(&outcome_totals)?;
                         total_size += size;
                         pool_sizes.push_back((pool_id, size));
                     }
@@ -781,7 +783,8 @@ impl BudgetPlanner {
                     .get::<_, Pool>(&DataKey::Pool(pool_id))
                 {
                     if pool.status == PoolStatus::Open {
-                        let total_pool = pool.total_a.checked_add(pool.total_b).ok_or(ContractError::PoolTotalOverflow)?;
+                        let outcome_totals = PredinexContract::read_outcome_totals(env, pool_id, &pool);
+                        let total_pool = PredinexContract::sum_totals(&outcome_totals)?;
                         if total_pool > 0 && pool.expiry > now {
                             // Estimate return: assume fair odds, expected value is
                             // proportional to how close to expiry the pool is
@@ -817,7 +820,7 @@ impl BudgetPlanner {
     }
 
     fn calculate_optimal_fee(
-        current: u32,
+        _current: u32,
         market_avg: u32,
         _pool_size: i128,
     ) -> Result<u32, ContractError> {
@@ -892,18 +895,24 @@ impl BudgetPlanner {
             .persistent()
             .get::<_, Pool>(&DataKey::Pool(pool_id))
         {
-            let total = pool.total_a.checked_add(pool.total_b).ok_or(ContractError::PoolTotalOverflow)?;
+            let outcome_totals = PredinexContract::read_outcome_totals(env, pool_id, &pool);
+            let total = PredinexContract::sum_totals(&outcome_totals)?;
             if total == 0 {
                 return Ok(50); // Unknown volatility for empty pool
             }
-            // Measure imbalance: 50/50 split → low volatility, 90/10 → high
-            let majority = pool.total_a.max(pool.total_b);
+            // Measure imbalance: maximum outcome stake vs total
+            let mut majority = 0i128;
+            for t in outcome_totals.iter() {
+                if t > majority {
+                    majority = t;
+                }
+            }
             let ratio = majority
                 .checked_mul(100)
                 .and_then(|v| v.checked_div(total))
                 .ok_or(ContractError::PoolTotalOverflow)?;
             // ratio is 50-100; convert to 0-100 volatility score
-            let volatility = ((ratio - 50) * 2).min(100);
+            let volatility = ((ratio.saturating_sub(50)) * 2).min(100);
             Ok(volatility)
         } else {
             Err(ContractError::PoolNotFound)
@@ -916,7 +925,8 @@ impl BudgetPlanner {
             .persistent()
             .get::<_, Pool>(&DataKey::Pool(pool_id))
         {
-            let total = pool.total_a.checked_add(pool.total_b).ok_or(ContractError::PoolTotalOverflow)?;
+            let outcome_totals = PredinexContract::read_outcome_totals(env, pool_id, &pool);
+            let total = PredinexContract::sum_totals(&outcome_totals)?;
             // Higher pool size and more participants = lower risk
             let size_factor = (total / 1_000_000).min(50);
             let participant_factor =

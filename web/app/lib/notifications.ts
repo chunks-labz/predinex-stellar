@@ -7,6 +7,9 @@ import {
   type NotificationPreferences,
   type WebPushSubscriptionPayload,
 } from './push-notification-types';
+import { getWalletAuthHeaders } from './wallet-auth-client';
+
+const PUSH_AUTH_SCOPE = 'push-subscriptions';
 
 const STORAGE_KEY = 'predinex_push_notifications_v1';
 const PROMPT_SHOWN_KEY = 'predinex_push_permission_prompt_shown_v1';
@@ -137,11 +140,12 @@ export async function savePushSubscription({
   subscription: WebPushSubscriptionPayload;
   preferences: NotificationPreferences;
 }): Promise<void> {
+  const authHeaders = await getWalletAuthHeaders(PUSH_AUTH_SCOPE, userId);
   const response = await fetch('/api/push-subscriptions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-predinex-wallet-address': userId,
+      ...authHeaders,
     },
     body: JSON.stringify({ userId, subscription, preferences }),
   });
@@ -172,14 +176,19 @@ export async function unsubscribeFromPredinexPush(userId?: string | null): Promi
 
   if (!userId) return;
 
-  await fetch('/api/push-subscriptions', {
-    method: 'DELETE',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-predinex-wallet-address': userId,
-    },
-    body: JSON.stringify({ userId }),
-  }).catch(() => undefined);
+  try {
+    const authHeaders = await getWalletAuthHeaders(PUSH_AUTH_SCOPE, userId);
+    await fetch('/api/push-subscriptions', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders,
+      },
+      body: JSON.stringify({ userId }),
+    });
+  } catch {
+    // Best-effort server cleanup; the browser subscription is already gone.
+  }
 }
 
 export function notifyBrowserEvent(title: string, options: BrowserNotificationOptions = {}): boolean {

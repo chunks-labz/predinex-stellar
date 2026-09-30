@@ -41,7 +41,7 @@ describe('Insurance Marketplace & Underwriting Service Tests', () => {
   it('handles policy purchase and updates pool reserves', () => {
     const purchaseRes = handler.handlePurchase({
       poolId: 1,
-      holderAddress: 'GBND65XZ7...USER',
+      holderAddress: 'GBBWT7WPYVAB2S5CL3YIC7K4HWTARGK2CCJ7T3C3HRKBAFT5P6KP5KK7',
       coverAmount: '5000000',
       durationSeconds: 86400 * 90,
       riskTier: 'Caution',
@@ -56,7 +56,7 @@ describe('Insurance Marketplace & Underwriting Service Tests', () => {
   it('submits and processes an approved claim with 25% single payout cap', () => {
     const purchase = handler.handlePurchase({
       poolId: 1,
-      holderAddress: 'GBND65XZ7...USER',
+      holderAddress: 'GBBWT7WPYVAB2S5CL3YIC7K4HWTARGK2CCJ7T3C3HRKBAFT5P6KP5KK7',
       coverAmount: '100000000',
       durationSeconds: 86400 * 30,
       riskTier: 'Safe',
@@ -64,7 +64,7 @@ describe('Insurance Marketplace & Underwriting Service Tests', () => {
 
     const claimRes = handler.handleSubmitClaim({
       policyId: purchase.data!.policyId,
-      claimantAddress: 'GBND65XZ7...USER',
+      claimantAddress: 'GBBWT7WPYVAB2S5CL3YIC7K4HWTARGK2CCJ7T3C3HRKBAFT5P6KP5KK7',
       lossAmount: '80000000',
       proofData: '0xdeadbeef_liquidation_shortfall_proof',
     });

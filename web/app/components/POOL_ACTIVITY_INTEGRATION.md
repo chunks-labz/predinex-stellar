@@ -48,6 +48,8 @@ const fetchPoolActivity = useCallback(
   async (id: number, limit: number): Promise<PoolActivityEvent[]> => {
     // Real Soroban RPC path via adapters/activity.ts.
     // Set NEXT_PUBLIC_ACTIVITY_FIXTURES=true to use deterministic seeded fixtures.
+    // Ignored in a production build (#1306) and a "Demo data" banner is shown
+    // over the timeline whenever fixtures are actually serving rows.
     const { fetchPoolActivity } = await import('../lib/adapters/activity');
     const res = await fetchPoolActivity(id, { limit });
     return res.items;

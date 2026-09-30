@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import AdminGuard from '@/components/AdminGuard';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '@/app/providers/ToastProvider';
 import { predinexReadApi } from '@/app/lib/adapters/predinex-read-api';
@@ -221,7 +221,7 @@ export default function AdminBans() {
     <main className="min-h-screen bg-background text-foreground pb-12">
       <Navbar />
       <RouteErrorBoundary routeName="AdminBans">
-        <AuthGuard>
+        <AdminGuard>
           <div className="container mx-auto px-4 py-8 max-w-7xl">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
@@ -399,7 +399,7 @@ export default function AdminBans() {
               </div>
             )}
           </div>
-        </AuthGuard>
+        </AdminGuard>
       </RouteErrorBoundary>
 
       {/* Confirmation Dialog - Ban */}

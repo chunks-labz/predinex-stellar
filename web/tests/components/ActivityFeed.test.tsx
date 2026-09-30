@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import ActivityFeed from '../../app/components/ActivityFeed';
 import { ActivityItem } from '../../app/lib/market-types';
+import { TOKEN_SYMBOL } from '../../app/lib/formatting';
 
 const mockActivities: ActivityItem[] = [
     {
@@ -10,7 +11,7 @@ const mockActivities: ActivityItem[] = [
         functionName: 'place-bet',
         timestamp: Math.floor(Date.now() / 1000) - 3600,
         status: 'success',
-        amount: 5000000,
+        amount: 50000000, // 5 XLM (1 XLM = 10_000_000 stroops)
         poolId: 10,
         explorerUrl: '#'
     }
@@ -26,7 +27,7 @@ describe('ActivityFeed Component', () => {
     it('renders activity items when data is provided', () => {
         render(<ActivityFeed activities={mockActivities} isLoading={false} error={null} />);
         expect(screen.getByText('Bet Placed')).toBeInTheDocument();
-        expect(screen.getByText('5.00 STX')).toBeInTheDocument();
+        expect(screen.getByText(`5.00 ${TOKEN_SYMBOL}`)).toBeInTheDocument();
         expect(screen.getByText('Pool #10')).toBeInTheDocument();
     });
 

@@ -63,6 +63,24 @@ mod webhook_test;
 //   * The contract MUST never emit two version markers for the same event in
 //     the same release; consumers can rely on exactly one version per event.
 //
+// Documented deviation — `pool_unfrozen` payload (#1309):
+//   The `pool_unfrozen` data payload was widened from a bare `Address` to
+//   `PoolUnfrozenEvent { actor, trigger, had_cooling_deadline }`. The topics
+//   are unchanged, so the version marker deliberately stays `"v1"`, for two
+//   reasons:
+//     1. Topic position 1 is what indexers filter on, and #1230 added this
+//        event specifically so state reconstruction always observes the
+//        Frozen -> Open transition. Bumping the marker would make every
+//        consumer pinned to `"v1"` silently drop all future events, defeating
+//        the reason the event exists.
+//     2. The marker is a single crate-wide constant shared by every event;
+//        there is no per-event marker. Bumping it would relabel all events,
+//        which is a far larger coordinated change than this fix.
+//   Consumers that parse the data payload must therefore accept both the
+//   legacy bare-`Address` shape (still present in historical events, which
+//   cannot be rewritten) and the new struct. See `web/docs/CONTRACT_EVENTS.md`.
+//   If a future change does alter topics, the marker MUST be bumped.
+//
 // See `web/docs/CONTRACT_EVENTS.md` for the full per-event schema and the
 // upgrade expectations published to consumers.
 pub const EVENT_SCHEMA_VERSION: &str = "v1";
@@ -841,14 +859,29 @@ fn emit_pool_token_bet_limits_set(
     );
 }
 
-fn emit_pool_unfrozen(env: &Env, pool_id: u32, caller: Address) {
+/// #1309 — Publishes the `Frozen -> Open` transition.
+///
+/// `trigger` disambiguates the administrative path from the automatic
+/// cooling-period path; without it both emitted an identical event carrying
+/// only a caller address, so the thaw was attributed to a random bettor.
+fn emit_pool_unfrozen(
+    env: &Env,
+    pool_id: u32,
+    actor: Address,
+    trigger: UnfreezeTrigger,
+    had_cooling_deadline: bool,
+) {
     env.events().publish(
         (
             Symbol::new(env, "pool_unfrozen"),
             event_version(env),
             pool_id,
         ),
-        caller,
+        PoolUnfrozenEvent {
+            actor,
+            trigger,
+            had_cooling_deadline,
+        },
     );
 }
 
@@ -1424,6 +1457,48 @@ pub enum SettlementSource {
     Delegated,
 }
 
+/// #1309 — Identifies what caused a pool to transition back to `Open`.
+///
+/// `pool_unfrozen` is emitted from two paths with very different actors: a
+/// freeze admin calling `unfreeze_pool`, and the first `place_bet` submitted
+/// after an automatic cooling period elapses. Without this tag an indexer
+/// cannot tell an administrative unfreeze from a bettor incidentally
+/// reopening a pool, so "which admin unfroze this pool" answers wrongly and
+/// attributes an administrative action to an unrelated account.
+///
+/// Mirrors `SettlementSource` (#176), which solves the same ambiguity for
+/// settlements.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub enum UnfreezeTrigger {
+    /// A freeze admin called `unfreeze_pool`. The actor is that admin.
+    Admin,
+    /// An automatic cooling period elapsed and the first `place_bet` reopened
+    /// the pool. The actor is that bettor, **not** an administrator.
+    AutoThaw,
+}
+
+/// #1309 — Event payload emitted by `pool_unfrozen`.
+///
+/// Previously the payload was a bare `Address` (the caller), which was
+/// ambiguous across the admin and auto-thaw paths. The `actor` field keeps the
+/// address that signed the triggering transaction so existing consumers that
+/// only need "who" keep working; `trigger` disambiguates the cause.
+#[derive(Clone)]
+#[contracttype]
+pub struct PoolUnfrozenEvent {
+    /// Address that triggered the transition: the freeze admin for
+    /// `UnfreezeTrigger::Admin`, or the bettor whose bet ended the cooling
+    /// period for `UnfreezeTrigger::AutoThaw`.
+    pub actor: Address,
+    /// What caused the Frozen -> Open transition.
+    pub trigger: UnfreezeTrigger,
+    /// Whether a `PoolCoolingUntil` deadline was set when the pool was frozen.
+    /// Lets an indexer distinguish a cooling-lock expiry from a manual freeze
+    /// without having to reconstruct it from `pool_cooling_started`.
+    pub had_cooling_deadline: bool,
+}
+
 /// #396 — Event types that can trigger an off-chain webhook notification.
 ///
 /// Stored inside a `Webhook` entry; an indexer/satsuma that reads the contract
@@ -1944,7 +2019,9 @@ pub struct ContractConfig {
 /// Fields
 /// ------
 /// - `outcome`   – which side was bet on (0 = A, 1 = B)
-/// - `amount`    – tokens staked in this single bet
+/// - `amount`    – tokens staked in this single bet, **net of the bet fee**
+///                 (gross amount minus `fee_rate` bps). This is the value
+///                 added to `cumulative_volume` and the pool outcome totals.
 /// - `amount_a`  – user's cumulative stake on outcome A after this bet
 /// - `amount_b`  – user's cumulative stake on outcome B after this bet
 /// - `total_bet` – user's total exposure in this pool after this bet
@@ -2045,12 +2122,17 @@ pub struct SettleBatchResult {
 }
 
 /// #356 — Event payload emitted alongside `place_bet` when a referrer is present.
+///
+/// #1226 — `amount` is **net of the bet fee** and always equals the
+/// `amount` of the `place_bet` event emitted in the same transaction, so
+/// referral volume reconciles against `cumulative_volume`.
 #[derive(Clone)]
 #[contracttype]
 pub struct ReferralBetEvent {
     pub referrer: Address,
     pub pool_id: u32,
     pub outcome: u32,
+    /// Bet amount net of the bet fee (same value as `BetEvent.amount`).
     pub amount: i128,
 }
 
@@ -3588,7 +3670,7 @@ impl PredinexContract {
         outcomes
     }
 
-    fn read_outcome_totals(env: &Env, pool_id: u32, pool: &Pool) -> Vec<i128> {
+    pub(crate) fn read_outcome_totals(env: &Env, pool_id: u32, pool: &Pool) -> Vec<i128> {
         if let Some(totals) = env
             .storage()
             .persistent()
@@ -3602,7 +3684,7 @@ impl PredinexContract {
         totals
     }
 
-    fn read_user_outcome_bets(env: &Env, pool_id: u32, user: Address, bet: &UserBet) -> Vec<i128> {
+    pub(crate) fn read_user_outcome_bets(env: &Env, pool_id: u32, user: Address, bet: &UserBet) -> Vec<i128> {
         if let Some(amounts) = env
             .storage()
             .persistent()
@@ -3616,7 +3698,7 @@ impl PredinexContract {
         amounts
     }
 
-    fn sum_totals(totals: &Vec<i128>) -> Result<i128, ContractError> {
+    pub(crate) fn sum_totals(totals: &Vec<i128>) -> Result<i128, ContractError> {
         let mut total = 0i128;
         for value in totals.iter() {
             total = total
@@ -4526,7 +4608,18 @@ impl PredinexContract {
                     // #1230 — emit the same pool_unfrozen event as the
                     // dedicated unfreeze_pool path so indexers always observe
                     // the Frozen→Open transition.
-                    emit_pool_unfrozen(&env, pool_id, user.clone());
+                    // #1309 — tagged AutoThaw. `user` is the bettor whose bet
+                    // happened to land after the cooling period elapsed, not an
+                    // administrator, so consumers must not read this as an
+                    // admin action. A cooling deadline is necessarily present
+                    // here, hence `true`.
+                    emit_pool_unfrozen(
+                        &env,
+                        pool_id,
+                        user.clone(),
+                        UnfreezeTrigger::AutoThaw,
+                        true,
+                    );
                 } else {
                     return Err(ContractError::PoolIsFrozen);
                 }
@@ -4861,7 +4954,8 @@ impl PredinexContract {
                     referrer: ref_referrer,
                     pool_id,
                     outcome,
-                    amount,
+                    // #1226 — net of fee, identical to `place_bet.amount`.
+                    amount: net_amount,
                 },
             );
         }
@@ -6476,9 +6570,112 @@ impl PredinexContract {
         // the transaction reverts — but because state was mutated first the bet
         // record is already gone, preventing any retry that could double-claim.
 
-        // Credit the treasury ledger (fee on first claim, dust on final claim).
+        // #1274 — Split the settlement fee between the LP reward pool and the
+        // treasury according to LpFeeAllocationBps.  Only the fee itself is
+        // subject to the split; payout dust is always swept to the treasury
+        // because it is a tiny floor-division residual, not a protocol fee.
+        //
+        // The LP share is only diverted when the pool actually has LP shares;
+        // if nobody has deposited liquidity the full fee falls back to the
+        // treasury so it is never stranded.
+        let lp_fee_share: i128 = if is_first_claim && fee > 0 {
+            let alloc_bps: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpFeeAllocationBps)
+                .unwrap_or(0);
+            let total_shares: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpTotalShares(pool_id))
+                .unwrap_or(0);
+            if alloc_bps > 0 && total_shares > 0 {
+                // lp_fee_share = floor(fee * alloc_bps / 10_000)
+                fee.checked_mul(alloc_bps as i128)
+                    .and_then(|v| v.checked_div(10_000))
+                    .ok_or(ContractError::PoolTotalOverflow)?
+            } else {
+                0
+            }
+        } else {
+            0
+        };
+
+        // Divert the LP share into the fee-per-share accumulator for this pool,
+        // matching the arithmetic used by distribute_lp_rewards.
+        if lp_fee_share > 0 {
+            let total_shares: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::LpTotalShares(pool_id))
+                .unwrap_or(0);
+            // total_shares > 0 is guaranteed by the guard above, but re-check
+            // to keep the arithmetic sound if state somehow diverged.
+            if total_shares > 0 {
+                let scaled = lp_fee_share
+                    .checked_mul(LP_PRECISION)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let prior_dust: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpRewardDust(pool_id))
+                    .unwrap_or(0);
+                let total_scaled = scaled
+                    .checked_add(prior_dust)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let fps_delta = total_scaled / total_shares;
+                let new_lp_dust = total_scaled % total_shares;
+                let current_fps: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpFeePerShare(pool_id))
+                    .unwrap_or(0);
+                let new_fps = current_fps
+                    .checked_add(fps_delta)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                let reward_pool: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::LpRewardPool(pool_id))
+                    .unwrap_or(0);
+                let new_reward_pool = reward_pool
+                    .checked_add(lp_fee_share)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpFeePerShare(pool_id), &new_fps);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpRewardPool(pool_id), &new_reward_pool);
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::LpRewardDust(pool_id), &new_lp_dust);
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpFeePerShare(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpRewardPool(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+                env.storage().persistent().extend_ttl(
+                    &DataKey::LpRewardDust(pool_id),
+                    POOL_BUMP_THRESHOLD,
+                    POOL_BUMP_TARGET,
+                );
+            }
+        }
+
+        // Credit the treasury ledger: (fee - lp_fee_share) on the first claim,
+        // plus payout dust on the final claim.
+        let treasury_fee_portion = fee
+            .checked_sub(lp_fee_share)
+            .ok_or(ContractError::TreasuryOverflow)?;
         let treasury_delta = if is_first_claim {
-            fee.checked_add(payout_dust)
+            treasury_fee_portion
+                .checked_add(payout_dust)
                 .ok_or(ContractError::TreasuryOverflow)?
         } else {
             payout_dust
@@ -6915,7 +7112,10 @@ impl PredinexContract {
         };
 
         for i in 0..cap {
-            let pool_id = pool_ids.get(i).ok_or(ContractError::PoolNotFound)?;
+            let pool_id = match pool_ids.get(i) {
+                Some(id) => id,
+                None => continue,
+            };
 
             // Skip multi-asset pools — callers must use claim_multi_asset_winnings.
             if env
@@ -7516,6 +7716,14 @@ impl PredinexContract {
             pool.status = PoolStatus::Open;
         }
 
+        // #1309 — Read the cooling deadline before clearing it so the event can
+        // report whether this freeze was a cooling lock or a manual freeze.
+        let had_cooling_deadline = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::PoolCoolingUntil(pool_id))
+            .is_some();
+
         env.storage()
             .persistent()
             .remove(&DataKey::PoolCoolingUntil(pool_id));
@@ -7528,7 +7736,9 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_pool_unfrozen(&env, pool_id, caller);
+        // #1309 — tagged Admin so consumers can distinguish this from a bettor's
+        // bet auto-thawing a pool whose cooling period had elapsed.
+        emit_pool_unfrozen(&env, pool_id, caller, UnfreezeTrigger::Admin, had_cooling_deadline);
         Ok(())
     }
 
@@ -7982,7 +8192,7 @@ impl PredinexContract {
 
     /// #721 — Write extended metadata for a pool. Only the pool creator may
     /// call this function. The record is immutable once the first bet has been
-    /// placed (i.e. `pool.total_a + pool.total_b > 0`).
+    /// placed on any outcome (per `read_outcome_totals`).
     pub fn set_pool_ext_metadata(
         env: Env,
         creator: Address,
@@ -7998,8 +8208,11 @@ impl PredinexContract {
         if creator != pool.creator {
             return Err(ContractError::Unauthorized);
         }
-        // Lock metadata once any bet has been placed.
-        if pool.total_a > 0 || pool.total_b > 0 {
+        // Lock metadata once any bet has been placed on any outcome. The
+        // legacy total_a/total_b mirrors only cover outcomes 0 and 1, so read
+        // the authoritative per-outcome totals instead.
+        let totals = Self::read_outcome_totals(&env, pool_id, &pool);
+        if totals.iter().any(|t| t > 0) {
             return Err(ContractError::PoolAlreadySettled);
         }
         if let Some(ref rc) = metadata.resolution_criteria {
@@ -10278,10 +10491,13 @@ impl PredinexContract {
             } else if is_main_token {
                 if let Some(pool) = env.storage().persistent().get::<_, Pool>(&DataKey::Pool(pid)) {
                     if pool.status != PoolStatus::Cancelled {
-                        let total_bets = pool
-                            .total_a
-                            .checked_add(pool.total_b)
-                            .ok_or(ContractError::PoolTotalOverflow)?;
+                        // #1272 — pool.total_a / pool.total_b only mirror
+                        // outcomes 0 and 1; stakes on outcomes 2+ live solely
+                        // in PoolOutcomeTotals. Use read_outcome_totals so
+                        // every outcome's stake is counted as bettor liability.
+                        let outcome_totals = Self::read_outcome_totals(&env, pid, &pool);
+                        let total_bets = Self::sum_totals(&outcome_totals)
+                            .map_err(|_| ContractError::PoolTotalOverflow)?;
                         let payout_state: PoolPayoutState = env
                             .storage()
                             .persistent()

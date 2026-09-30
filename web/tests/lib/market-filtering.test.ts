@@ -15,11 +15,11 @@ function market(overrides: Partial<ProcessedMarket>): ProcessedMarket {
     description: 'Crypto price prediction',
     outcomeA: 'Yes',
     outcomeB: 'No',
-    totalVolume: 1_000_000,
+    totalVolume: 10_000_000,
     oddsA: 50,
     oddsB: 50,
     status: 'active',
-    timeRemaining: 20,
+    timeRemaining: 2 * 60 * 60, // #1284: seconds, not blocks
     createdAt: 1_800_000_000,
     settledAt: null,
     creator: 'GABC',
@@ -35,10 +35,12 @@ const baseFilters: MarketFilters = { ...DEFAULT_MARKET_FILTERS };
 describe('market filtering', () => {
   it('combines search, status, asset, volume, and time range filters', () => {
     const markets = [
-      market({ poolId: 1, title: 'BTC election pool', totalVolume: 3_000_000, timeRemaining: 50 }),
-      market({ poolId: 2, title: 'ETH election pool', totalVolume: 500_000, timeRemaining: 50 }),
-      market({ poolId: 3, title: 'BTC settled pool', status: 'settled', totalVolume: 5_000_000 }),
-      market({ poolId: 4, title: 'BTC USD pool', assetType: 'USD', totalVolume: 5_000_000 }),
+      // Volumes are stroops: 3 XLM = 30_000_000, and the 2–4 XLM filter window
+      // only matches with the 10_000_000 stroops-per-unit conversion (#1285).
+      market({ poolId: 1, title: 'BTC election pool', totalVolume: 30_000_000, timeRemaining: 5 * 3600 }),
+      market({ poolId: 2, title: 'ETH election pool', totalVolume: 5_000_000, timeRemaining: 5 * 3600 }),
+      market({ poolId: 3, title: 'BTC settled pool', status: 'settled', totalVolume: 50_000_000 }),
+      market({ poolId: 4, title: 'BTC USD pool', assetType: 'USD', totalVolume: 50_000_000 }),
     ];
 
     const result = filterAndSortMarkets(markets, {
@@ -65,9 +67,9 @@ describe('market filtering', () => {
 
   it('sorts by newest, ending soon, highest volume, and most participants', () => {
     const markets = [
-      market({ poolId: 1, createdAt: 10, timeRemaining: 30, totalVolume: 2_000_000, participantCount: 2 }),
-      market({ poolId: 2, createdAt: 30, timeRemaining: 10, totalVolume: 1_000_000, participantCount: 5 }),
-      market({ poolId: 3, createdAt: 20, timeRemaining: 20, totalVolume: 4_000_000, participantCount: 1 }),
+      market({ poolId: 1, createdAt: 10, timeRemaining: 3000, totalVolume: 20_000_000, participantCount: 2 }),
+      market({ poolId: 2, createdAt: 30, timeRemaining: 1000, totalVolume: 10_000_000, participantCount: 5 }),
+      market({ poolId: 3, createdAt: 20, timeRemaining: 2000, totalVolume: 40_000_000, participantCount: 1 }),
     ];
 
     expect(filterAndSortMarkets(markets, { ...baseFilters, sortBy: 'newest' }).map((item) => item.poolId)).toEqual([

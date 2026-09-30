@@ -29,7 +29,7 @@ use soroban_sdk::{
     Address, BytesN, Env, Symbol,
 };
 
-/// Maximum total duration of a pool since creation (1,000,000 seconds).
+/// Maximum total duration of a pool since creation (365 days).
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
 
 /// Event topic for pool duration extension.
@@ -307,32 +307,96 @@ impl PoolContract {
 // ---------------------------------------------------------------------------
 #[cfg(test)]
 mod test {
+    extern crate std;
+
     use super::*;
     use soroban_sdk::{
-        testutils::{Address as _, BytesN as _, Ledger, LedgerInfo},
-        Address, Env, IntoVal, Symbol,
+        testutils::{Address as _, BytesN as _, Ledger, Events},
+        xdr, Address, Env, IntoVal, Symbol, TryFromVal,
     };
-    use soroban_sdk::xdr::ContractEvent;
-    use soroban_sdk::testutils::Events;
 
-    /// Helper to create a minimal test environment with a pool.
-    fn setup_pool(env: &Env, created_at_offset: u64, expiry_offset: u64, state: PoolState) -> (Address, BytesN<32>, PoolData) {
+    /// Converts a contract value to the XDR form used inside emitted events.
+    fn sc_val<T>(env: &Env, value: T) -> xdr::ScVal
+    where
+        T: IntoVal<Env, soroban_sdk::Val>,
+    {
+        xdr::ScVal::try_from_val(env, &value.into_val(env)).unwrap()
+    }
+
+    /// Sets the simulated ledger timestamp, leaving the rest of the ledger
+    /// info at the host's defaults.
+    ///
+    /// #1305 — these tests each built a `LedgerInfo` literal with
+    /// `protocol_version: 20`, below the host minimum of 22, so the whole
+    /// module failed with "ledger protocol version too old for host" and never
+    /// ran. Deriving from the current ledger keeps the protocol version valid
+    /// across SDK upgrades instead of pinning a number that silently rots.
+    fn set_ledger_timestamp(env: &Env, timestamp: u64) {
+        let mut info = env.ledger().get();
+        info.timestamp = timestamp;
+        env.ledger().set(info);
+    }
+
+    /// Registers a fresh `PoolContract` and seeds one pool fixture for it.
+    ///
+    /// Returns `(contract_id, pool_id, pool)`.
+    ///
+    /// #1305 — the pool is written inside `env.as_contract` and the contract is
+    /// registered, because `env.storage()` is inaccessible outside a contract
+    /// frame and because the tests below invoke through a client. Previously
+    /// the fixture was written bare, so every test in this module trapped at
+    /// setup and none of them ever ran.
+    fn setup_pool(
+        env: &Env,
+        created_at_offset: u64,
+        expiry_offset: u64,
+        state: PoolState,
+    ) -> (Address, BytesN<32>, PoolData) {
+        let contract_id = env.register(PoolContract, ());
         let creator = Address::generate(env);
         let pool_id = BytesN::<32>::random(env);
         let created_at = env.ledger().timestamp() + created_at_offset;
         let expiry = env.ledger().timestamp() + expiry_offset;
 
         let pool = PoolData {
-            creator: creator.clone(),
+            creator,
             created_at,
             expiry,
             state,
         };
 
         let key = DataKey::Pool(pool_id.clone());
-        env.storage().persistent().set(&key, &pool);
+        env.as_contract(&contract_id, || {
+            env.storage().persistent().set(&key, &pool);
+        });
 
-        (creator, pool_id, pool)
+        (contract_id, pool_id, pool)
+    }
+
+    /// Calls `extend_duration` through the generated client for `contract_id`.
+    ///
+    /// Uses `try_extend_duration` because the plain client method panics on
+    /// error, whereas these tests assert on the returned `PoolError`. The client
+    /// returns a nested `Result` (conversion error inside, contract error
+    /// outside), which is flattened here so every assertion below reads the same
+    /// as it did when the contract was called statically.
+    fn extend(
+        env: &Env,
+        contract_id: &Address,
+        pool_id: &BytesN<32>,
+        new_expiry: u64,
+    ) -> Result<(), PoolError> {
+        match PoolContractClient::new(env, contract_id).try_extend_duration(pool_id, &new_expiry) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(conversion)) => panic!("conversion error: {conversion:?}"),
+            Err(Ok(contract_error)) => Err(contract_error),
+            Err(Err(invoke)) => panic!("invoke error: {invoke:?}"),
+        }
+    }
+
+    /// Calls `get_pool` through the generated client for `contract_id`.
+    fn get_pool(env: &Env, contract_id: &Address, pool_id: &BytesN<32>) -> Option<PoolData> {
+        PoolContractClient::new(env, contract_id).get_pool(pool_id)
     }
 
     #[test]
@@ -340,37 +404,42 @@ mod test {
         let env = Env::default();
         env.mock_all_auths();
         // Set current ledger time to 1000
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
         // Current time = 1000, created_at = 1000, expiry = 6000
         let new_expiry = 7000_u64;
 
         // Extend as creator
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), new_expiry);
+        let result = extend(&env, &contract_id, &pool_id, new_expiry);
         assert!(result.is_ok());
 
-        // Verify updated pool
-        let updated = PoolContract::get_pool(env.clone(), pool_id.clone()).unwrap();
-        assert_eq!(updated.expiry, new_expiry);
-
-        // Verify event
-        let events = env.events().all().events();
+        // Verify the event first: in soroban-sdk 27 `env.events().all()` reports
+        // only the most recent invocation, so the `get_pool` call below would
+        // clear it. #1305 — `ContractEvents` is also neither indexable nor
+        // destructurable, so the previous `let (contract_id, topics, data) =
+        // &events[0]` could not compile, which is why this whole module, and
+        // with it every test in the crate, never ran. Read the XDR body.
+        let all_events = env.events().all();
+        let events = all_events.events();
         assert_eq!(events.len(), 1);
-        let (contract_id, topics, data) = &events[0];
-        assert_eq!(topics.len(), 2);
-        assert_eq!(topics[0], Symbol::new(&env, "dur_ext").into_val(&env));
-        assert_eq!(topics[1], pool_id.into_val(&env));
-        assert_eq!(data, new_expiry.into_val(&env));
+        let xdr::ContractEventBody::V0(body) = &events[0].body else {
+            panic!("expected a V0 contract event body");
+        };
+        assert_eq!(body.topics.len(), 2);
+        assert_eq!(
+            body.topics.get(0).cloned(),
+            Some(sc_val(&env, Symbol::new(&env, "dur_ext")))
+        );
+        assert_eq!(
+            body.topics.get(1).cloned(),
+            Some(sc_val(&env, pool_id.clone()))
+        );
+        assert_eq!(body.data, sc_val(&env, new_expiry));
+
+        // Verify updated pool
+        let updated = get_pool(&env, &contract_id, &pool_id).unwrap();
+        assert_eq!(updated.expiry, new_expiry);
     }
 
     #[test]
@@ -381,38 +450,21 @@ mod test {
         // matching set_auths() entry), the host has no authorization for
         // that address and require_auth() traps.
         let env = Env::default();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (_creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
-        let _ = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let _ = extend(&env, &contract_id, &pool_id, 7000);
     }
 
     #[test]
     fn test_pool_not_found() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
+        let contract_id = env.register(PoolContract, ());
         let pool_id = BytesN::<32>::random(&env);
-        let result = PoolContract::extend_duration(env, pool_id, 2000);
+        let result = extend(&env, &contract_id, &pool_id, 2000);
         assert_eq!(result, Err(PoolError::PoolNotFound));
     }
 
@@ -420,25 +472,16 @@ mod test {
     fn test_expired_pool_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
         // Create pool with expiry at 1500 (offsets are relative to the
         // current ledger timestamp of 1000, and are u64 so must be
         // non-negative — advance the ledger past expiry afterwards instead
         // of trying to create an already-past expiry directly).
-        let (creator, pool_id, _) = setup_pool(&env, 0, 500, PoolState::Open);
-        env.ledger().set_timestamp(2000);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 500, PoolState::Open);
+        set_ledger_timestamp(&env, 2000);
         // current time = 2000, expiry = 1500 (so expired)
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 3000);
+        let result = extend(&env, &contract_id, &pool_id, 3000);
         assert_eq!(result, Err(PoolError::PoolExpired));
     }
 
@@ -446,20 +489,11 @@ mod test {
     fn test_expiry_must_increase() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
         // current expiry = 6000, try to set same or lower
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 6000);
+        let result = extend(&env, &contract_id, &pool_id, 6000);
         assert_eq!(result, Err(PoolError::ExpiryMustIncrease));
     }
 
@@ -467,62 +501,47 @@ mod test {
     fn test_max_duration_exceeded() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        // Pool created at time 1000, so max allowed = 1000 + 1_000_000 = 1_001_000
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
-        let too_big = 1_001_001;
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), too_big);
+        // #1305 — this test pinned the literal 1_001_001, which was derived from
+        // a long-removed 1,000,000-second cap. The cap is now
+        // MAX_POOL_DURATION_SECS (365 days), so derive the boundary from the
+        // constant instead of a magic number that silently stops testing
+        // anything.
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let too_big = 1_000 + MAX_POOL_DURATION_SECS + 1;
+        let result = extend(&env, &contract_id, &pool_id, too_big);
         assert_eq!(result, Err(PoolError::MaxDurationExceeded));
     }
 
+    /// #1305 — this test previously asserted `PoolError::ExpiryMustBeFuture`,
+    /// which is unreachable: step 4 rejects when `current_time >= pool.expiry`
+    /// (so `pool.expiry > current_time`) and step 5 rejects when
+    /// `new_expiry <= pool.expiry` (so `new_expiry > pool.expiry`), which
+    /// together make step 6's `new_expiry <= current_time` condition
+    /// impossible. A past `new_expiry` is therefore caught one step earlier, as
+    /// a decrease. The contract keeps the step 6 check as defence in depth; this
+    /// test pins the behaviour that is actually reachable.
     #[test]
-    fn test_expiry_must_be_future() {
+    fn test_past_expiry_is_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 2000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 2000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
         // current time = 2000, expiry = 7000, try to set new_expiry = 1500 (past)
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 1500);
-        assert_eq!(result, Err(PoolError::ExpiryMustBeFuture));
+        let result = extend(&env, &contract_id, &pool_id, 1500);
+        assert_eq!(result, Err(PoolError::ExpiryMustIncrease));
     }
 
     #[test]
     fn test_frozen_pool_locked() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Frozen);
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Frozen);
+        let result = extend(&env, &contract_id, &pool_id, 7000);
         assert_eq!(result, Err(PoolError::PoolLocked));
     }
 
@@ -530,19 +549,10 @@ mod test {
     fn test_disputed_pool_locked() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Disputed);
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Disputed);
+        let result = extend(&env, &contract_id, &pool_id, 7000);
         assert_eq!(result, Err(PoolError::PoolLocked));
     }
 
@@ -550,20 +560,11 @@ mod test {
     fn test_non_open_state_rejected() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
         for state in &[PoolState::Settled, PoolState::Voided] {
-            let (creator, pool_id, _) = setup_pool(&env, 0, 5000, *state);
-            let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), 7000);
+            let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, *state);
+            let result = extend(&env, &contract_id, &pool_id, 7000);
             assert_eq!(result, Err(PoolError::PoolNotOpen));
         }
     }
@@ -572,21 +573,12 @@ mod test {
     fn test_boundary_max_duration_allowed() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        // Pool created at 1000, max allowed = 1_001_000
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
-        let max_allowed = 1_001_000;
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), max_allowed);
+        // Pool created at 1000, so the cap is 1000 + MAX_POOL_DURATION_SECS.
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let max_allowed = 1_000 + MAX_POOL_DURATION_SECS;
+        let result = extend(&env, &contract_id, &pool_id, max_allowed);
         assert!(result.is_ok());
     }
 
@@ -594,20 +586,11 @@ mod test {
     fn test_boundary_max_duration_exceeded_by_one() {
         let env = Env::default();
         env.mock_all_auths();
-        env.ledger().set(LedgerInfo {
-            timestamp: 1000,
-            protocol_version: 20,
-            sequence_number: 1,
-            network_id: Default::default(),
-            base_reserve: 10,
-            min_temp_entry_ttl: 1000,
-            min_persistent_entry_ttl: 1000,
-            max_entry_ttl: 2000000,
-        });
+        set_ledger_timestamp(&env, 1000);
 
-        let (creator, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
-        let too_big = 1_001_001;
-        let result = PoolContract::extend_duration(env.clone(), pool_id.clone(), too_big);
+        let (contract_id, pool_id, _) = setup_pool(&env, 0, 5000, PoolState::Open);
+        let too_big = 1_000 + MAX_POOL_DURATION_SECS + 1;
+        let result = extend(&env, &contract_id, &pool_id, too_big);
         assert_eq!(result, Err(PoolError::MaxDurationExceeded));
     }
 }

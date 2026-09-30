@@ -7,6 +7,7 @@ import {
 } from '@/app/lib/rate-limit';
 import { resolveExportWindow, filterActivitiesForExport, toExportRecords } from '@/app/lib/activity-export';
 import type { ActivityItem } from '@/app/lib/market-types';
+import { stroopsToUnits } from '@/app/lib/formatting';
 
 export const runtime = 'nodejs';
 
@@ -35,7 +36,7 @@ function getMockActivities(address: string): ActivityItem[] {
       functionName: 'Yes',
       timestamp: now - 86400,
       status: 'success',
-      amount: 1_000_000,
+      amount: 10_000_000,
       poolId: 1,
       poolTitle: 'Will BTC hit $100k?',
       explorerUrl: '',
@@ -74,8 +75,9 @@ function itemsToCsv(items: ActivityItem[]): string {
   }
   const rows = items.map((item) => {
     const date = new Date(item.timestamp * 1000).toISOString().slice(0, 10);
-    const amount = item.amount !== undefined && item.amount !== null ? (item.amount / 1_000_000).toFixed(2) : '';
-    const payout = item.type === 'winnings-claimed' && item.amount !== undefined && item.amount !== null ? (item.amount / 1_000_000).toFixed(2) : '';
+    // #1285 — 1 XLM = 10_000_000 stroops.
+    const amount = item.amount !== undefined && item.amount !== null ? stroopsToUnits(item.amount).toFixed(2) : '';
+    const payout = item.type === 'winnings-claimed' && item.amount !== undefined && item.amount !== null ? stroopsToUnits(item.amount).toFixed(2) : '';
     const rawTitle = item.poolTitle ?? '';
     const title = `"${rawTitle.replace(/"/g, '""')}"`;
     return [

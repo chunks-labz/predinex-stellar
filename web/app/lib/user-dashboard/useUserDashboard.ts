@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { DashboardStats, UserBet } from './types';
 import { calculateDashboardStats } from './model';
 import { sorobanReadApi } from '../soroban-read-api';
+import { stroopsToUnits } from './formatting';
 
 async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]> {
   const poolCount = await sorobanReadApi.getPoolCount();
@@ -35,10 +36,10 @@ async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]
           poolId,
           poolTitle: pool.title,
           outcome: pool.outcomeA,
-          amount: bet.amountA / 1_000_000,
+          amount: stroopsToUnits(bet.amountA),
           status: !isSettled ? 'active' : won ? 'won' : lost ? 'lost' : 'pending',
           createdAt: Date.now(),
-          winnings: won ? (bet.amountA / pool.totalA) * (pool.totalA + pool.totalB) / 1_000_000 : undefined,
+          winnings: won ? stroopsToUnits((bet.amountA / pool.totalA) * (pool.totalA + pool.totalB)) : undefined,
         });
       }
 
@@ -49,10 +50,10 @@ async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]
           poolId,
           poolTitle: pool.title,
           outcome: pool.outcomeB,
-          amount: bet.amountB / 1_000_000,
+          amount: stroopsToUnits(bet.amountB),
           status: !isSettled ? 'active' : won ? 'won' : lost ? 'lost' : 'pending',
           createdAt: Date.now(),
-          winnings: won ? (bet.amountB / pool.totalB) * (pool.totalA + pool.totalB) / 1_000_000 : undefined,
+          winnings: won ? stroopsToUnits((bet.amountB / pool.totalB) * (pool.totalA + pool.totalB)) : undefined,
         });
       }
     } catch (err) {

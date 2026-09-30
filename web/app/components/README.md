@@ -91,6 +91,8 @@ Feature status: fixture-backed placeholder tooling, disabled by default for prod
 
 Set `NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER=true` only in a contributor or test environment to review the mock oracle-management path. When enabled, the component labels itself as a placeholder preview and keeps registration actions disabled so fixture data is not presented as live oracle administration.
 
+Because the flag is `NEXT_PUBLIC_*`, its value is inlined into the bundle at build time, so it is a property of the built artifact rather than a runtime switch. `isOracleManagementPlaceholderEnabled` therefore routes through the same production refusal as `NEXT_PUBLIC_ACTIVITY_FIXTURES` and `NEXT_PUBLIC_ENABLE_DISPUTE_MOCK_DATA` (#1306): in a build where `NODE_ENV=production` the flag is ignored, the refusal is logged, and the route renders its "unavailable" state.
+
 To find the oracle-management route visit [page.tsx](file:///C:/Stellar%20Contributions/predinex-stellar/web/app/oracle-management/page.tsx).
 
 To find oracle-management placeholder gating visit [OracleManagement.tsx](file:///C:/Stellar%20Contributions/predinex-stellar/web/app/components/OracleManagement.tsx).

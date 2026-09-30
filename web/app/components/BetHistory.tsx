@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { Clock, CheckCircle2, XCircle } from 'lucide-react';
 import type { Pool } from '../lib/adapters/types';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface UserBet {
   pool: Pool;
@@ -68,7 +69,7 @@ export default function BetHistory({ bets }: BetHistoryProps) {
                   </Link>
                 </td>
                 <td className="px-6 py-4 font-semibold">
-                  {(bet.totalBet / 1_000_000).toFixed(2)} STX
+                  {stroopsToUnits(bet.totalBet).toFixed(2)} {TOKEN_SYMBOL}
                 </td>
                 <td className="px-6 py-4">
                   {bet.amountA > 0 ? bet.pool.outcomeA : bet.pool.outcomeB}
