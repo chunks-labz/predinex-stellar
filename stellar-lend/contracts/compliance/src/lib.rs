@@ -7,9 +7,7 @@
 
 pub mod types;
 
-use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
 use types::{
     ComplianceAction, ComplianceError, ComplianceRecord, ComplianceTier,
     ComplianceVerificationResult, JurisdictionRule,
@@ -45,12 +43,19 @@ impl ComplianceContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::Officer(admin), &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::Officer(admin), &true);
         Ok(())
     }
 
     /// Sets compliance officer role for an address.
-    pub fn set_officer(env: Env, admin: Address, officer: Address, active: bool) -> Result<(), ComplianceError> {
+    pub fn set_officer(
+        env: Env,
+        admin: Address,
+        officer: Address,
+        active: bool,
+    ) -> Result<(), ComplianceError> {
         admin.require_auth();
         let stored_admin: Address = env
             .storage()
@@ -61,7 +66,9 @@ impl ComplianceContract {
             return Err(ComplianceError::Unauthorized);
         }
 
-        env.storage().instance().set(&DataKey::Officer(officer), &active);
+        env.storage()
+            .instance()
+            .set(&DataKey::Officer(officer), &active);
         Ok(())
     }
 
@@ -210,6 +217,13 @@ impl ComplianceContract {
 
     /// Verifies if a transaction adheres to institutional compliance rules and records the volume.
     ///
+    /// Only an authenticated compliance officer may call this: the call writes the
+    /// participant's rolling volume back to storage and appends to the audit log, so
+    /// leaving it open would let anyone reset another participant's 24-hour limit or
+    /// forge audit events attributed to them. The evaluation clock is the ledger
+    /// timestamp, never a caller-supplied one — a caller-chosen `current_time` would
+    /// let a future date roll the window early and a past date dodge an expired KYC.
+    ///
     /// # Checks Performed:
     /// 1. Address exists and is not Tier 0 (Unverified).
     /// 2. KYC expiration is in the future.
@@ -219,11 +233,14 @@ impl ComplianceContract {
     /// 6. Transaction amount does not exceed remaining rolling 24-hour limit.
     pub fn verify_transaction(
         env: Env,
+        officer: Address,
         participant: Address,
         action: ComplianceAction,
         amount_usd: i128,
-        current_time: u64,
     ) -> Result<ComplianceVerificationResult, ComplianceError> {
+        Self::require_officer(&env, &officer)?;
+        let current_time = env.ledger().timestamp();
+
         if amount_usd < 0 {
             return Err(ComplianceError::InvalidParameter);
         }
@@ -359,18 +376,66 @@ impl ComplianceContract {
             .get(&DataKey::Record(participant))
             .ok_or(ComplianceError::RecordNotFound)
     }
+
+    /// Asserts that `officer` authorized this call and currently holds the
+    /// compliance officer role.
+    fn require_officer(env: &Env, officer: &Address) -> Result<(), ComplianceError> {
+        officer.require_auth();
+        let is_officer: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Officer(officer.clone()))
+            .unwrap_or(false);
+        if !is_officer {
+            return Err(ComplianceError::Unauthorized);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Events};
-    use soroban_sdk::Env;
+    use soroban_sdk::testutils::{Address as _, Events, Ledger as _};
+    use soroban_sdk::xdr::ContractEventBody;
+    use soroban_sdk::{Env, TryFromVal, Val};
+
+    /// Ledger timestamp used by the tests. KYC is registered with a later expiry
+    /// so the participant stays compliant at this instant.
+    const NOW: u64 = 1_700_000_000;
+    const KYC_EXPIRY: u64 = 1_800_000_000;
+
+    const USD: i128 = 10_000_000; // amounts are USD scaled by 1e7
+
+    /// Registers `user` as an accredited (Tier 2, $250k/day) participant.
+    fn register_accredited(client: &ComplianceContractClient, officer: &Address, user: &Address) {
+        client.register_participant(
+            officer,
+            user,
+            &ComplianceTier::Tier2Accredited,
+            &KYC_EXPIRY,
+            &840, // USA
+            &0,   // default limit ($250,000)
+            &NOW,
+        );
+    }
+
+    /// Decodes the payload of the last event emitted by `contract_id`.
+    fn last_event_data(env: &Env, contract_id: &Address) -> (u32, i128, u64) {
+        let events = env.events().all().filter_by_contract(contract_id);
+        let event = events.events().last().expect("an event was emitted");
+        let ContractEventBody::V0(body) = &event.body;
+        let val = <Val as TryFromVal<Env, soroban_sdk::xdr::ScVal>>::try_from_val(env, &body.data)
+            .expect("event data decodes to a Val");
+        <(u32, i128, u64) as TryFromVal<Env, Val>>::try_from_val(env, &val)
+            .expect("event data is (action, amount, timestamp)")
+    }
 
     #[test]
     fn test_compliance_workflow() {
         let env = Env::default();
         env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
 
         let contract_id = env.register(ComplianceContract, ());
         let client = ComplianceContractClient::new(&env, &contract_id);
@@ -381,47 +446,210 @@ mod tests {
         client.initialize(&admin);
 
         // Register user as Tier 2 Accredited
-        let expiry = 1_800_000_000;
-        let now = 1_700_000_000;
-        client.register_participant(
-            &admin,
-            &user,
-            &ComplianceTier::Tier2Accredited,
-            &expiry,
-            &840, // USA
-            &0,   // default limit ($250,000)
-            &now,
-        );
+        register_accredited(&client, &admin, &user);
 
         // Verify valid transaction of $50,000
-        let res = client.verify_transaction(
-            &user,
-            &ComplianceAction::Deposit,
-            &(50_000 * 10_000_000),
-            &now,
-        );
+        let res =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(50_000 * USD));
         assert!(res.is_allowed);
         assert_eq!(res.error_code, 0);
 
         // Verify exceeding remaining limit
-        let res2 = client.verify_transaction(
-            &user,
-            &ComplianceAction::Deposit,
-            &(250_000 * 10_000_000),
-            &now,
-        );
+        let res2 =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(250_000 * USD));
         assert!(!res2.is_allowed);
         assert_eq!(res2.error_code, ComplianceError::DailyLimitExceeded as u32);
 
         // Sanction user
         client.set_sanctions(&admin, &user, &true);
-        let res3 = client.verify_transaction(
-            &user,
-            &ComplianceAction::Deposit,
-            &(1_000 * 10_000_000),
-            &now,
-        );
+        let res3 =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(1_000 * USD));
         assert!(!res3.is_allowed);
         assert_eq!(res3.error_code, ComplianceError::SanctionedAddress as u32);
+    }
+
+    /// A non-officer must not be able to spend another participant's allowance.
+    #[test]
+    fn verify_transaction_rejects_non_officer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let outsider = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        register_accredited(&client, &admin, &user);
+
+        let result = client.try_verify_transaction(
+            &outsider,
+            &user,
+            &ComplianceAction::Deposit,
+            &(1_000 * USD),
+        );
+        assert!(
+            matches!(result, Err(Ok(ComplianceError::Unauthorized))),
+            "non-officer must be rejected, got {result:?}"
+        );
+
+        // The rejected call must not have consumed any of the participant's limit.
+        assert_eq!(client.get_record(&user).daily_volume_used_usd, 0);
+    }
+
+    /// `require_auth` is genuinely enforced: with nothing authorized, even the admin
+    /// cannot move another address's volume.
+    #[test]
+    fn verify_transaction_requires_auth() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        register_accredited(&client, &admin, &user);
+
+        // Drop the blanket auth mock: nothing is authorized anymore.
+        env.mock_auths(&[]);
+
+        let result = client.try_verify_transaction(
+            &admin,
+            &user,
+            &ComplianceAction::Deposit,
+            &(1_000 * USD),
+        );
+        assert!(result.is_err(), "unauthenticated call must fail");
+        assert_eq!(client.get_record(&user).daily_volume_used_usd, 0);
+    }
+
+    /// A revoked officer loses the ability to move volume and emit audit events.
+    #[test]
+    fn verify_transaction_rejects_revoked_officer() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let officer = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        client.set_officer(&admin, &officer, &true);
+        register_accredited(&client, &admin, &user);
+
+        client.set_officer(&admin, &officer, &false);
+
+        let result = client.try_verify_transaction(
+            &officer,
+            &user,
+            &ComplianceAction::Deposit,
+            &(1_000 * USD),
+        );
+        assert!(
+            matches!(result, Err(Ok(ComplianceError::Unauthorized))),
+            "revoked officer must be rejected, got {result:?}"
+        );
+    }
+
+    /// The rolling 24h window advances with ledger time; no caller argument can roll
+    /// it early to re-consume an exhausted allowance.
+    #[test]
+    fn verify_transaction_uses_ledger_time() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        register_accredited(&client, &admin, &user);
+
+        // Burn the full $250,000 daily allowance.
+        let exhausted =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(250_000 * USD));
+        assert!(exhausted.is_allowed);
+        assert_eq!(exhausted.daily_remaining_usd, 0);
+
+        // Still inside the window: the next deposit is rejected.
+        env.ledger().set_timestamp(NOW + ROLLING_WINDOW_SECONDS - 1);
+        let blocked =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(1_000 * USD));
+        assert!(!blocked.is_allowed);
+        assert_eq!(
+            blocked.error_code,
+            ComplianceError::DailyLimitExceeded as u32
+        );
+
+        // The window has elapsed: the allowance is restored.
+        env.ledger().set_timestamp(NOW + ROLLING_WINDOW_SECONDS);
+        let refreshed =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(1_000 * USD));
+        assert!(refreshed.is_allowed);
+        assert_eq!(refreshed.daily_remaining_usd, 249_000 * USD);
+    }
+
+    /// KYC expiry is judged against the ledger clock, not a value the caller picks,
+    /// so no stale timestamp can revive an expired verification.
+    #[test]
+    fn verify_transaction_rejects_kyc_expired_at_ledger_time() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        register_accredited(&client, &admin, &user);
+
+        env.ledger().set_timestamp(KYC_EXPIRY);
+
+        let expired =
+            client.verify_transaction(&admin, &user, &ComplianceAction::Deposit, &(1_000 * USD));
+        assert!(!expired.is_allowed);
+        assert_eq!(expired.error_code, ComplianceError::KycExpired as u32);
+    }
+
+    /// The audit event records the ledger timestamp, so a caller cannot forge a
+    /// backdated or future-dated compliance record.
+    #[test]
+    fn verify_transaction_audit_event_uses_ledger_time() {
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().set_timestamp(NOW);
+
+        let contract_id = env.register(ComplianceContract, ());
+        let client = ComplianceContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+
+        client.initialize(&admin);
+        register_accredited(&client, &admin, &user);
+
+        client.verify_transaction(&admin, &user, &ComplianceAction::Borrow, &(1_000 * USD));
+
+        assert_eq!(
+            last_event_data(&env, &contract_id),
+            (ComplianceAction::Borrow as u32, 1_000 * USD, NOW)
+        );
     }
 }

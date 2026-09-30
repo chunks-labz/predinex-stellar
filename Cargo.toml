@@ -7,3 +7,17 @@ members = [
     "stellar-lend/contracts/referral",
 ]
 resolver = "2"
+
+# Release hardening for every contract in this workspace.
+#
+# Cargo only honours `[profile.*]` in the workspace root manifest, so this block
+# used to live (and do nothing) in each contract crate's own Cargo.toml. Do not
+# move it back down: a per-crate profile is silently ignored and
+# `stellar contract build` will compile with stock defaults.
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = false
+panic = "abort"
+incremental = false
+codegen-units = 1

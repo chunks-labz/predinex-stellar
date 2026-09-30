@@ -89,8 +89,9 @@ sequenceDiagram
     participant Comp as Compliance Engine
     participant Audit as Audit Event Log
 
-    App->>Comp: verify_transaction(address, action, amount)
-    Comp->>Comp: 1. Check KYC Expiration
+    App->>Comp: verify_transaction(officer, address, action, amount)
+    Comp->>Comp: 0. Authorize officer (require_auth + officer role)
+    Comp->>Comp: 1. Check KYC Expiration (ledger timestamp)
     Comp->>Comp: 2. Check OFAC / Sanctions List
     Comp->>Comp: 3. Check Account Freeze Status
     Comp->>Comp: 4. Check Jurisdiction Rules

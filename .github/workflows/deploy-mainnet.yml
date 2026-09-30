@@ -72,6 +72,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      wasm-hash: ${{ steps.build.outputs.wasm-hash }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -95,6 +97,7 @@ jobs:
         run: cargo test
 
       - name: Build & optimize WASM
+        id: build
         working-directory: contracts/predinex
         run: |
           stellar contract build
@@ -130,6 +133,14 @@ jobs:
           # Persist size info for reporting
           mkdir -p deployments
           echo "{\"size_bytes\": $WASM_SIZE, "limit_bytes": $MAX_WASM_BYTES, "network": "mainnet"}" > deployments/size-metrics.json
+
+      - name: Upload optimized WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: predinex-wasm
+          path: contracts/predinex/target/wasm32v1-none/release/*.optimized.wasm
+          if-no-files-found: error
+          retention-days: 7
 
   safety-checks:
     name: Pre-deployment Safety Checks
@@ -175,11 +186,12 @@ jobs:
         run: cargo install --locked stellar-cli@22.0.1
 
       - name: Build & optimize WASM (final)
+        id: build
         working-directory: contracts/predinex
         run: |
           stellar contract build
           stellar contract optimize \
-            --wasm target/wasm32v1-none/release/predinex.optimized.wasm
+            --wasm target/wasm32v1-none/release/predinex.wasm
           HASH=$(sha256sum target/wasm32v1-none/release/predinex.optimized.wasm | awk '{print $1}')
           echo "wasm-hash=$HASH" >> "$GITHUB_OUTPUT"
 
@@ -217,6 +229,7 @@ jobs:
     environment: mainnet
     outputs:
       contract-id: ${{ steps.deploy.outputs.contract-id }}
+      treasury: ${{ steps.initialize.outputs.treasury }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -264,11 +277,17 @@ jobs:
           echo "Deployed contract: $CONTRACT_ID"
 
       - name: Initialize contract
+        id: initialize
         env:
           CONTRACT_ID: ${{ steps.deploy.outputs.contract-id }}
           XLM_SAC: ${{ secrets.MAINNET_XLM_SAC }}
           TREASURY_ADDRESS: ${{ secrets.MAINNET_TREASURY_ADDRESS }}
         run: |
+          if [ -z "$TREASURY_ADDRESS" ]; then
+            echo "::error::MAINNET_TREASURY_ADDRESS is not configured for this repo."
+            exit 1
+          fi
+          echo "treasury=$TREASURY_ADDRESS" >> "$GITHUB_OUTPUT"
           stellar contract invoke \
             --id "$CONTRACT_ID" \
             --network mainnet \
@@ -319,9 +338,9 @@ jobs:
       pool_count_before: ${{ steps.run.outputs.before }}
       pool_count_after: ${{ steps.run.outputs.after }}
       pool_id: ${{ steps.run.outputs.pool_id }}
-      bet_placed: ${{ steps.run.outputs.bet }}
-      settled: ${{ steps.run.outputs.settle }}
-      claim_amount: ${{ steps.run.outputs.claim }}
+      bet_placed: ${{ steps.lifecycle.outputs.bet }}
+      settled: ${{ steps.lifecycle.outputs.settle }}
+      claim_amount: ${{ steps.lifecycle.outputs.claim }}
     steps:
       - uses: actions/checkout@v4
 
@@ -347,6 +366,17 @@ jobs:
           DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
         run: stellar keys add deployer --secret-key "$DEPLOYER_SECRET" --quiet
 
+      - name: Import bettor key
+        if: inputs.run_lifecycle_smoke == 'true'
+        env:
+          BETTOR_SECRET: ${{ secrets.STELLAR_MAINNET_BETTOR_SECRET_KEY }}
+        run: |
+          if [ -z "$BETTOR_SECRET" ]; then
+            echo "::error::run_lifecycle_smoke requires the STELLAR_MAINNET_BETTOR_SECRET_KEY secret (pre-funded bettor)"
+            exit 1
+          fi
+          stellar keys add bettor --secret-key "$BETTOR_SECRET" --quiet
+
       - name: Run smoke checks
         id: run
         env:
@@ -354,8 +384,10 @@ jobs:
           TREASURY: ${{ needs.deploy.outputs.treasury }}
         run: |
           set -euo pipefail
-          BETTOR=$(stellar keys address bettor)
-          echo "Bettor address: $BETTOR"
+          if [ -z "$TREASURY" ]; then
+            echo "::error::TREASURY is empty - deploy did not export a treasury address (check MAINNET_TREASURY_ADDRESS secret)"
+            exit 1
+          fi
 
           BEFORE=$(stellar contract invoke \
             --id "$CONTRACT_ID" \
@@ -422,6 +454,19 @@ jobs:
             exit 1
           fi
 
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run lifecycle smoke (place_bet -> settle -> claim)
+        if: inputs.run_lifecycle_smoke == 'true'
+        id: lifecycle
+        env:
+          CONTRACT_ID: ${{ needs.deploy.outputs.contract-id }}
+          TREASURY: ${{ needs.deploy.outputs.treasury }}
+        run: |
+          set -euo pipefail
+          BETTOR=$(stellar keys address bettor)
+          echo "Bettor address: $BETTOR"
+
           # place_bet
           stellar contract invoke \
             --id "$CONTRACT_ID" \
@@ -470,8 +515,5 @@ jobs:
           echo "claim=$CLAIM" >> "$GITHUB_OUTPUT"
           if [ -z "$CLAIM" ] || [ "$CLAIM" -le 0 ]; then
             echo "::error::claim_winnings returned a non-positive payout ($CLAIM)"
-            echo "passed=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
-
-          echo "passed=true" >> "$GITHUB_OUTPUT"
