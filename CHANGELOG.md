@@ -48,6 +48,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Regenerated `web/package-lock.json` so it is back in sync with `web/package.json`; `npm ci` was failing outright, which broke the install step of every workflow that builds `web/` and left the `actions/setup-node` npm cache unusable
 - Dependabot now also covers `/bot`, `/api` (npm) and the root Cargo workspace in addition to `/web` and `/contracts/predinex`, with the same weekly non-major grouping (closes #1174)
 - Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
+- Oracle TWAP aggregation now rejects an empty or fully-aged-out sample window, a zero/non-finite total liquidity, and a non-finite TWAP or spot price via a typed `PriceValidationError` with a machine-readable `code`, instead of returning `Infinity`/`NaN` or crashing on an undefined sample (closes #1307)
+- Oracle `addSample` now also rejects `NaN`/`Infinity` prices and liquidity weights, which previously passed the `<= 0` check and poisoned every downstream average
+- `oracle/` is now type-checked by the API build and its tests are collected by the API vitest run, so oracle regressions fail CI instead of sitting unexecuted (closes #1307)
 
 ---
 

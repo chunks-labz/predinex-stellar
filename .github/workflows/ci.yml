@@ -173,10 +173,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build (also type-checks oracle/, which api/tsconfig.json includes)
+      - name: Build (also type-checks oracle/ via oracle/tsconfig.json)
         run: npm run build
 
-      - name: Test (also covers oracle/, which api/jest.config.js roots include)
+      - name: Test (also covers oracle/ via the vitest include path)
         run: npm test
 
   bot-checks:
