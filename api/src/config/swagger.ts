@@ -443,7 +443,7 @@ export const openApiDoc = {
       post: { summary: 'Verify a transaction against compliance rules', responses: { '200': { description: 'Compliance verdict' } } },
     },
     '/api/compliance/register': {
-      post: { summary: 'Register a participant (officer/admin only)', responses: { '200': { description: 'Compliance record' } } },
+      post: { summary: 'Register a participant (officer/admin only)', security: [{ apiKey: [] }], responses: { '200': { description: 'Compliance record' } } },
     },
     '/api/compliance/status/{address}': {
       get: { summary: 'Get compliance status', responses: { '200': { description: 'Compliance record' } } },
@@ -452,28 +452,28 @@ export const openApiDoc = {
       get: { summary: 'Compliance service health', responses: { '200': { description: 'OK' } } },
     },
     '/api/emergency/activate': {
-      post: { summary: 'Activate emergency mode (admin, real on-chain tx)', responses: { '200': { description: 'Activation tx hash' } } },
+      post: { summary: 'Activate emergency mode (admin, real on-chain tx)', security: [{ apiKey: [] }], responses: { '200': { description: 'Activation tx hash' } } },
     },
     '/api/emergency/deactivate': {
-      post: { summary: 'Deactivate emergency mode (admin, real on-chain tx)', responses: { '200': { description: 'Deactivation tx hash' } } },
+      post: { summary: 'Deactivate emergency mode (admin, real on-chain tx)', security: [{ apiKey: [] }], responses: { '200': { description: 'Deactivation tx hash' } } },
     },
     '/api/emergency/withdraw/request': {
-      post: { summary: 'Create an emergency withdrawal request', responses: { '200': { description: 'Request + tx hash' } } },
+      post: { summary: 'Create an emergency withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Request + tx hash' } } },
     },
     '/api/emergency/withdraw/approve': {
-      post: { summary: 'Approve a withdrawal request', responses: { '200': { description: 'Approval tx hash' } } },
+      post: { summary: 'Approve a withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Approval tx hash' } } },
     },
     '/api/emergency/withdraw/execute': {
-      post: { summary: 'Execute an approved withdrawal', responses: { '200': { description: 'Execution tx hash' } } },
+      post: { summary: 'Execute an approved withdrawal', security: [{ apiKey: [] }], responses: { '200': { description: 'Execution tx hash' } } },
     },
     '/api/emergency/withdraw/cancel': {
-      post: { summary: 'Cancel a withdrawal request', responses: { '200': { description: 'Cancellation tx hash' } } },
+      post: { summary: 'Cancel a withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Cancellation tx hash' } } },
     },
     '/api/emergency/admin/add': {
-      post: { summary: 'Add a secondary admin', responses: { '200': { description: 'Add-admin tx hash' } } },
+      post: { summary: 'Add a secondary admin', security: [{ apiKey: [] }], responses: { '200': { description: 'Add-admin tx hash' } } },
     },
     '/api/emergency/config/update': {
-      post: { summary: 'Update emergency configuration', responses: { '200': { description: 'Update tx hash' } } },
+      post: { summary: 'Update emergency configuration', security: [{ apiKey: [] }], responses: { '200': { description: 'Update tx hash' } } },
     },
     '/api/emergency/config': {
       get: { summary: 'Get emergency configuration', responses: { '200': { description: 'Emergency config' } } },
@@ -518,7 +518,7 @@ export const openApiDoc = {
       get: { summary: 'Insurance service health', responses: { '200': { description: 'OK' } } },
     },
     '/api/referral': {
-      post: { summary: 'Create a referral (stub, 501 until on-chain wiring)', responses: { '501': { description: 'Not implemented' } } },
+      post: { summary: 'Create a referral', security: [{ apiKey: [] }], responses: { '200': { description: 'Success' } } },
     },
     '/api/referral/health': {
       get: { summary: 'Referral service health', responses: { '200': { description: 'OK' } } },
@@ -550,23 +550,18 @@ export const openApiDoc = {
       ...baseSchemas,
       ...budgetSchemas,
       ...gasEstimateSchemas,
-      // ...insuranceSchemas,
-      // ...referralSchemas,
-      // ...reputationSchemas,
-      // ...emergencySchemas,
-      // ...simulationSchemas,
+      ...insuranceSchemas,
+      ...referralSchemas,
+      ...reputationSchemas,
+      ...emergencySchemas,
+      ...simulationSchemas,
     },
     securitySchemes: {
-      bearerAuth: {
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
+      apiKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-api-key',
       },
     },
   },
-  security: [
-    {
-      bearerAuth: [''],
-    },
-  ],
 };

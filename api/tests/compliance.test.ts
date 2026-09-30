@@ -6,7 +6,7 @@ describe('Institutional Compliance Engine Tests', () => {
   let engine: ComplianceEngine;
   let handler: ComplianceRouteHandler;
 
-  const testUser = 'GAX765YUVH7654...INST';
+  const testUser = 'GBBWT7WPYVAB2S5CL3YIC7K4HWTARGK2CCJ7T3C3HRKBAFT5P6KP5KK7';
 
   beforeEach(() => {
     engine = new ComplianceEngine();
@@ -15,7 +15,7 @@ describe('Institutional Compliance Engine Tests', () => {
 
   it('rejects unverified (Tier 0) participants', () => {
     const res = handler.handleVerifyTransaction({
-      participantAddress: 'G_UNKNOWN_ADDRESS',
+      participantAddress: 'GBDMUNKPSPE6JMCVCVU6LOE5W2QJGSBLKL7JQHPM7KUKBMTFRGCOUWJZ',
       action: 'Deposit',
       amountUsd: 1000,
     });
@@ -27,7 +27,7 @@ describe('Institutional Compliance Engine Tests', () => {
 
   it('registers participant and enforces daily tier limits', () => {
     handler.handleRegister({
-      officerAddress: 'G_OFFICER',
+      officerAddress: 'GDP3O7CA4G5VTVNKVMCD45ZPSQOGAQVWGYATXPK7QNNBPIGTBAFEQKGA',
       participantAddress: testUser,
       tier: 'Tier1_Retail',
       kycExpiryTimestamp: Math.floor(Date.now() / 1000) + 86400 * 365,
@@ -92,7 +92,7 @@ describe('Institutional Compliance Engine Tests', () => {
   });
 
   it('handles getStatus route and not found errors', () => {
-    const res = handler.handleGetStatus('G_NON_EXISTENT');
+    const res = handler.handleGetStatus('GC4TEGMGRB2XFBETXRKV2XLW7M7MP5DIBNOGCAA5M2W4QMLIDCQJLM3V');
     expect(res.success).toBe(false);
     expect(res.error?.code).toBe('NOT_FOUND');
 

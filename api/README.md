@@ -10,6 +10,7 @@ module (see #1194):
 
 ```bash
 npm install
+cp .env.example .env   # then set AUTH_SECRET, e.g. `openssl rand -hex 32`
 npm run build
 npm start
 # -> predinex-api listening on :3001 (health: GET /health)
@@ -35,7 +36,12 @@ curl http://localhost:3001/api/openapi.json
 ```
 
 Configuration (`PORT`, `AUTH_SECRET`, `ADMIN_API_KEYS`, `OFFICER_API_KEYS`,
-`ASSESSOR_API_KEYS`) is read from the environment. Mutating emergency and
+`ASSESSOR_API_KEYS`) is read from the environment; see `.env.example`.
+`AUTH_SECRET` is required: the HMAC secret has no built-in default, so the
+server refuses to start when it is missing or blank, and `AuthValidator`
+rejects the publicly known value that older releases fell back to. Use a
+fresh random value per deployment. The test suite generates a random
+`AUTH_SECRET` per run in `vitest.config.ts`. Mutating emergency and
 compliance routes require an `x-api-key` header with the matching role and
 are rate-limited; all routes apply shared auth + rate-limit middleware.
 

@@ -4,12 +4,25 @@
 
 export class SecuritySanitizer {
   /**
-   * Validates and sanitizes a Stellar public key (G... or C... address).
+   * Validates a Stellar address (G... account or C... contract).
+   *
+   * The first character is a character class of exactly `G` or `C`. It used to
+   * be written `[G|C]`, which also let `|` through (issue #1302).
    */
-  public static isValidStellarAddress(address: string): boolean {
+  public static isValidStellarAddress(address: unknown): address is string {
     if (typeof address !== 'string') return false;
     // Stellar addresses start with G (account) or C (contract) and are 56 chars base32
-    return /^[G|C][A-Z0-9]{55}$/.test(address);
+    return /^[GC][A-Z0-9]{55}$/.test(address);
+  }
+
+  /**
+   * Reads a caller-supplied address field. Returns the address unchanged when it
+   * is a well-formed Stellar address, otherwise `undefined`. Non-strings are
+   * rejected rather than coerced with `String()`, so a number or object can
+   * never be recorded as an account identity.
+   */
+  public static readStellarAddress(value: unknown): string | undefined {
+    return SecuritySanitizer.isValidStellarAddress(value) ? value : undefined;
   }
 
   /**
