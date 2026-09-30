@@ -1944,7 +1944,9 @@ pub struct ContractConfig {
 /// Fields
 /// ------
 /// - `outcome`   – which side was bet on (0 = A, 1 = B)
-/// - `amount`    – tokens staked in this single bet
+/// - `amount`    – tokens staked in this single bet, **net of the bet fee**
+///                 (gross amount minus `fee_rate` bps). This is the value
+///                 added to `cumulative_volume` and the pool outcome totals.
 /// - `amount_a`  – user's cumulative stake on outcome A after this bet
 /// - `amount_b`  – user's cumulative stake on outcome B after this bet
 /// - `total_bet` – user's total exposure in this pool after this bet
@@ -2045,12 +2047,17 @@ pub struct SettleBatchResult {
 }
 
 /// #356 — Event payload emitted alongside `place_bet` when a referrer is present.
+///
+/// #1226 — `amount` is **net of the bet fee** and always equals the
+/// `amount` of the `place_bet` event emitted in the same transaction, so
+/// referral volume reconciles against `cumulative_volume`.
 #[derive(Clone)]
 #[contracttype]
 pub struct ReferralBetEvent {
     pub referrer: Address,
     pub pool_id: u32,
     pub outcome: u32,
+    /// Bet amount net of the bet fee (same value as `BetEvent.amount`).
     pub amount: i128,
 }
 
@@ -4861,7 +4868,8 @@ impl PredinexContract {
                     referrer: ref_referrer,
                     pool_id,
                     outcome,
-                    amount,
+                    // #1226 — net of fee, identical to `place_bet.amount`.
+                    amount: net_amount,
                 },
             );
         }
