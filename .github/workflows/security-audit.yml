@@ -16,24 +16,16 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'web/package.json'
-      - 'web/package-lock.json'
-      - 'bot/package.json'
-      - 'bot/package-lock.json'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - '**/package.json'
+      - '**/package-lock.json'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '.github/workflows/security-audit.yml'
   push:
     branches: [main]
     paths:
-      - 'web/package.json'
-      - 'web/package-lock.json'
-      - 'bot/package.json'
-      - 'bot/package-lock.json'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+      - '**/package.json'
+      - '**/package-lock.json'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - '.github/workflows/security-audit.yml'
@@ -114,6 +106,38 @@ jobs:
           path: bot/bot-npm-audit-report.json
           retention-days: 30
 
+  api-npm-audit:
+    name: API npm dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit (high and critical only)
+        run: npm audit --audit-level=high
+
+      - name: Generate audit report
+        run: npm audit --json > api-npm-audit-report.json || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-npm-audit-report
+          path: api/api-npm-audit-report.json
+          retention-days: 30
+
   cargo-audit:
     name: Cargo dependency audit
     runs-on: ubuntu-latest
@@ -145,20 +169,21 @@ jobs:
           retention-days: 30
 
   # A single required status check, so branch protection needs one entry rather
-  # than three, and so a skipped audit can never read as a passing one.
+  # than four, and so a skipped audit can never read as a passing one.
   audit-summary:
     name: Dependency Audit
-    needs: [npm-audit, bot-npm-audit, cargo-audit]
+    needs: [npm-audit, bot-npm-audit, api-npm-audit, cargo-audit]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Require every audit to pass
         run: |
-          results="${{ needs.npm-audit.result }} ${{ needs.bot-npm-audit.result }} ${{ needs.cargo-audit.result }}"
+          results="${{ needs.npm-audit.result }} ${{ needs.bot-npm-audit.result }} ${{ needs.api-npm-audit.result }} ${{ needs.cargo-audit.result }}"
           echo "npm audit:      ${{ needs.npm-audit.result }}"
           echo "bot npm audit:  ${{ needs.bot-npm-audit.result }}"
+          echo "api npm audit:  ${{ needs.api-npm-audit.result }}"
           echo "cargo audit:    ${{ needs.cargo-audit.result }}"
-          if [ "$results" != "success success success" ]; then
+          if [ "$results" != "success success success success" ]; then
             echo "::error::One or more dependency audits did not pass ($results)."
             exit 1
           fi

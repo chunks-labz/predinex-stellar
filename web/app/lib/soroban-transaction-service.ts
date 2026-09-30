@@ -70,6 +70,17 @@ const CHAIN_ID_SYMBOLS: Record<ChainIdValue, string> = {
 };
 
 /**
+ * Minimum creator deposit enforced by `collect_creator_deposit`
+ * (`MIN_CREATOR_DEPOSIT` in contracts/predinex/src/lib.rs), in stroops.
+ */
+export const MIN_CREATOR_DEPOSIT_STROOPS = 10_000_000;
+
+/** Encode an optional u64 as a Soroban `Option<u64>` (None is `void`). */
+function optionalU64ToScVal(value: number | null | undefined): xdr.ScVal {
+  return value == null ? xdr.ScVal.scvVoid() : nativeToScVal(value, { type: "u64" });
+}
+
+/**
  * Encode a `ChainIdValue` as the Soroban union ScVal used for `ChainId`
  * (`#[contracttype]` unit enum → `Vec<Symbol>`).
  */
@@ -174,6 +185,10 @@ export class SorobanTransactionService {
       outcomeA: string;
       outcomeB: string;
       duration: number;
+      /** Creator deposit in stroops; defaults to the contract minimum. */
+      amountStroops?: number | bigint;
+      /** Optional unix timestamp after which deposits close. */
+      depositDeadline?: number | null;
     },
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
@@ -196,6 +211,8 @@ export class SorobanTransactionService {
           nativeToScVal(params.outcomeA),
           nativeToScVal(params.outcomeB),
           nativeToScVal(params.duration, { type: "u64" }),
+          nativeToScVal(params.amountStroops ?? MIN_CREATOR_DEPOSIT_STROOPS, { type: "i128" }),
+          optionalU64ToScVal(params.depositDeadline),
         ),
       )
       .setTimeout(30)
@@ -216,6 +233,8 @@ export class SorobanTransactionService {
       outcomes: string[];
       duration: number;
       metadataUri?: string | null;
+      /** Creator deposit in stroops; defaults to the contract minimum. */
+      amountStroops?: number | bigint;
     },
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
@@ -238,6 +257,7 @@ export class SorobanTransactionService {
           nativeToScVal(params.outcomes),
           nativeToScVal(params.duration, { type: "u64" }),
           nativeToScVal(params.metadataUri ?? null),
+          nativeToScVal(params.amountStroops ?? MIN_CREATOR_DEPOSIT_STROOPS, { type: "i128" }),
         ),
       )
       .setTimeout(30)
@@ -248,12 +268,36 @@ export class SorobanTransactionService {
 
   /**
    * Creates a pool from an on-chain template with optional field overrides.
+   *
+   * Mirrors the contract signature
+   * `create_pool_from_template(creator, template_id, amount, overrides)`.
+   *
+   * @param wallet - Connected Freighter wallet client
+   * @param contractId - Soroban contract ID to invoke
+   * @param params.templateId - ID of the template to instantiate
+   * @param params.amountStroops - Creator deposit in stroops; the contract
+   *   rejects anything below its minimum creator deposit
+   * @param params.overrides - Per-field overrides; omitted fields keep the
+   *   template's values
+   * @param onStageChange - Optional callback for transaction stage updates
+   * @param onFeeEstimated - Optional callback to approve/reject the estimated fee
+   * @returns The submitted transaction result
+   *
+   * @example
+   * ```ts
+   * await sorobanTxService.createPoolFromTemplate(wallet, contractId, {
+   *   templateId: 3,
+   *   amountStroops: 10_000_000,
+   *   overrides: { duration: 86400 },
+   * });
+   * ```
    */
   async createPoolFromTemplate(
     wallet: FreighterWalletClient,
     contractId: string,
     params: {
       templateId: number;
+      amountStroops: number;
       overrides: {
         title?: string;
         description?: string;
@@ -286,7 +330,18 @@ export class SorobanTransactionService {
           "create_pool_from_template",
           new Address(wallet.address).toScVal(),
           nativeToScVal(params.templateId, { type: "u32" }),
-          nativeToScVal(overrides),
+          nativeToScVal(params.amountStroops, { type: "i128" }),
+          // `PoolTemplateOverrides` is a `#[contracttype]` struct, which the
+          // host only accepts as a map keyed by symbols.
+          nativeToScVal(overrides, {
+            type: {
+              title: ["symbol", null],
+              description: ["symbol", null],
+              outcomes: ["symbol", null],
+              duration: ["symbol", "u64"],
+              metadata_uri: ["symbol", null],
+            },
+          }),
         ),
       )
       .setTimeout(30)
@@ -303,6 +358,7 @@ export class SorobanTransactionService {
    * @param params.poolId - ID of the pool to bet on
    * @param params.outcome - Index of the outcome being backed
    * @param params.amountStroops - Bet amount in stroops
+   * @param params.referrer - Optional referrer address (encoded as `Option<Address>`)
    * @param onStageChange - Optional callback for transaction stage updates
    * @param onFeeEstimated - Optional callback to approve/reject the estimated fee
    * @returns The submitted transaction result
@@ -315,7 +371,7 @@ export class SorobanTransactionService {
   async placeBet(
     wallet: FreighterWalletClient,
     contractId: string,
-    params: { poolId: number; outcome: number; amountStroops: number },
+    params: { poolId: number; outcome: number; amountStroops: number; referrer?: string | null },
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
@@ -335,6 +391,9 @@ export class SorobanTransactionService {
           nativeToScVal(params.poolId, { type: "u32" }),
           nativeToScVal(params.outcome, { type: "u32" }),
           nativeToScVal(params.amountStroops, { type: "i128" }),
+          params.referrer
+            ? new Address(params.referrer).toScVal()
+            : xdr.ScVal.scvVoid(),
         ),
       )
       .setTimeout(30)

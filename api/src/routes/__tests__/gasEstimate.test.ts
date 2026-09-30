@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import express from 'express';
+import request from 'supertest';
 import {
   GasEstimatorService,
   createGasEstimator,
@@ -9,6 +11,8 @@ import {
   handleGasEstimateRequest,
   handleOptimizationSuggestionsRequest,
   handleAnalysisReportRequest,
+  gasEstimateRouter,
+  isOperationType,
 } from '../gasEstimate.js';
 
 describe('GasEstimatorService', () => {
@@ -494,6 +498,116 @@ describe('Route Handlers', () => {
           report: expect.any(Object),
         })
       );
+    });
+  });
+});
+
+describe('Unknown operations (issue #1300)', () => {
+  const contractId = 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC';
+  const mockRes = () => ({
+    json: vi.fn(),
+    status: vi.fn().mockReturnThis(),
+  });
+
+  it('isOperationType accepts every OperationType and nothing else', () => {
+    for (const op of Object.values(OperationType)) {
+      expect(isOperationType(op)).toBe(true);
+    }
+    for (const op of ['create_pool_x', 'CREATE_POOL', '', 'toString', '__proto__', 42, null, undefined, {}]) {
+      expect(isOperationType(op)).toBe(false);
+    }
+  });
+
+  it('estimateOperation throws instead of returning NaN for an unknown operation', async () => {
+    const estimator = createGasEstimator('https://soroban-testnet.stellar.org', contractId);
+    await expect(
+      estimator.estimateOperation('create_pool_x' as OperationType, {})
+    ).rejects.toThrow('Unknown operation: create_pool_x');
+  });
+
+  it('generateAnalysisReport throws instead of summing NaN for an unknown operation', async () => {
+    const estimator = createGasEstimator('https://soroban-testnet.stellar.org', contractId);
+    await expect(
+      estimator.generateAnalysisReport([OperationType.PLACE_BET, 'nope' as OperationType])
+    ).rejects.toThrow('Unknown operation: nope');
+  });
+
+  it('handleGasEstimateRequest returns 400 and no estimate for an unknown operation', async () => {
+    for (const operation of ['create_pool_x', 42, { op: 'create_pool' }]) {
+      const res = mockRes();
+      await handleGasEstimateRequest({ body: { operation, contractId, parameters: {} } }, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const body = res.json.mock.calls[0][0];
+      expect(body.success).toBe(false);
+      expect(body.error).toContain('Unknown operation');
+      expect(body).not.toHaveProperty('estimate');
+    }
+  });
+
+  it('handleOptimizationSuggestionsRequest returns 400 for unknown or malformed operations', async () => {
+    for (const operations of [['settle_pool', 'create_pool_x'], [undefined], 'settle_pool']) {
+      const res = mockRes();
+      await handleOptimizationSuggestionsRequest({ body: { operations, contractId } }, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      expect(res.json.mock.calls[0][0].success).toBe(false);
+    }
+  });
+
+  it('handleAnalysisReportRequest returns 400 for unknown or malformed operations', async () => {
+    for (const operations of [['create_pool', 'create_pool_x'], [null], { 0: 'create_pool' }]) {
+      const res = mockRes();
+      await handleAnalysisReportRequest({ body: { operations, contractId } }, res);
+
+      expect(res.status).toHaveBeenCalledWith(400);
+      const body = res.json.mock.calls[0][0];
+      expect(body.success).toBe(false);
+      expect(body).not.toHaveProperty('report');
+    }
+  });
+
+  describe('over HTTP', () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/gas-estimate', gasEstimateRouter);
+
+    it('rejects the reported trigger with 400 instead of success:true with null numbers', async () => {
+      const res = await request(app)
+        .post('/api/gas-estimate/estimate')
+        .send({ operation: 'create_pool_x', contractId, parameters: {} });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('Unknown operation: create_pool_x');
+      expect(res.body.estimate).toBeUndefined();
+    });
+
+    it('still returns finite numbers for a known operation', async () => {
+      const res = await request(app)
+        .post('/api/gas-estimate/estimate')
+        .send({ operation: OperationType.CREATE_POOL, contractId, parameters: {} });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      for (const key of [
+        'estimatedInstructions',
+        'estimatedCpuCost',
+        'estimatedMemoryCost',
+        'estimatedStorageCost',
+        'totalCost',
+      ]) {
+        expect(Number.isFinite(res.body.estimate[key]), key).toBe(true);
+      }
+    });
+
+    it('rejects an unknown operation in a report request', async () => {
+      const res = await request(app)
+        .post('/api/gas-estimate/report')
+        .send({ operations: ['create_pool', 'create_pool_x'], contractId });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
     });
   });
 });

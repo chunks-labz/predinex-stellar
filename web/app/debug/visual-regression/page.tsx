@@ -1,5 +1,6 @@
 'use client';
 
+import { notFound } from 'next/navigation';
 import MarketCard from '@/components/MarketCard';
 import ActivityFeed from '@/app/components/ActivityFeed';
 import PoolIntegration from '@/app/components/PoolIntegration';
@@ -57,6 +58,9 @@ const MOCK_ACTIVITIES = [
 ];
 
 export default function VisualRegressionPage() {
+  // Debug-only fixture page: never serve it from a production build.
+  if (process.env.NODE_ENV === 'production') notFound();
+
   return (
     <div className="p-8 space-y-12 bg-background min-h-screen">
       <h1 className="text-3xl font-bold border-b pb-4">Visual Regression Test Surface</h1>
