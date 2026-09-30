@@ -1037,9 +1037,10 @@ export async function handleApproveWithdrawal(req: any, res: any) {
     if (result.success) {
       res.json(result);
     } else {
-      const isClientError =
-        result.error?.includes('Invalid request ID') ||
-        result.error?.includes('Request ID is required');
+      // Client errors (invalid requestId) should return 400, not 500
+      const isClientError = result.error?.includes('Invalid request ID') || 
+                            result.error?.includes('Request ID is required');
+
       res.status(isClientError ? 400 : 500).json(result);
     }
   } catch (error: any) {
@@ -1081,7 +1082,14 @@ export async function handleExecuteWithdrawal(req: any, res: any) {
 
     const result = await service.executeWithdrawal(adminKeypair, requestId);
 
-    res.json(result);
+    if (result.success) {
+      res.json(result);
+    } else {
+      // Client errors (invalid requestId) should return 400, not 500
+      const isClientError = result.error?.includes('Invalid request ID') || 
+                            result.error?.includes('Request ID is required');
+      res.status(isClientError ? 400 : 500).json(result);
+    }
   } catch (error: any) {
     res.status(500).json({
       success: false,
@@ -1093,6 +1101,10 @@ export async function handleExecuteWithdrawal(req: any, res: any) {
 /**
  * GET /api/emergency/config
  * Get current emergency configuration
+ * 
+ * NOTE: Returns 501 until contract storage reads are implemented.
+ * Hardcoded NORMAL status with success:true is dangerous during incidents
+ * (see #1296).
  */
 export async function handleGetConfig(req: any, res: any) {
   try {
@@ -1101,12 +1113,13 @@ export async function handleGetConfig(req: any, res: any) {
       return res.status(400).json({ success: false, error: config.error });
     }
 
-    const service = createEmergencyService(config.rpcUrl, config.contractId);
-    const resultConfig = await service.getConfig();
+    // Return 501 until contract storage reads are implemented.
+    // Never return hardcoded NORMAL status — monitoring relies on this endpoint.
+    return res.status(501).json({
+      success: false,
+      error: 'Emergency config reads not yet implemented. Use contract query directly.',
+      details: 'This endpoint will read from contract storage once implemented. Hardcoded stub data removed per #1296.',
 
-    res.json({
-      success: true,
-      config: resultConfig,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -1119,6 +1132,10 @@ export async function handleGetConfig(req: any, res: any) {
 /**
  * GET /api/emergency/status
  * Get comprehensive system status
+ * 
+ * NOTE: Returns 501 until contract storage reads are implemented.
+ * Hardcoded isOperational:true during an actual emergency is the most
+ * dangerous possible failure mode (see #1296).
  */
 export async function handleGetSystemStatus(req: any, res: any) {
   try {
@@ -1127,12 +1144,13 @@ export async function handleGetSystemStatus(req: any, res: any) {
       return res.status(400).json({ success: false, error: config.error });
     }
 
-    const service = createEmergencyService(config.rpcUrl, config.contractId);
-    const status = await service.getSystemStatus();
+    // Return 501 until contract storage reads are implemented.
+    // Hardcoded NORMAL status would report "operational" during real emergencies.
+    return res.status(501).json({
+      success: false,
+      error: 'Emergency status reads not yet implemented. Use contract query directly.',
+      details: 'This endpoint will read from contract storage once implemented. Hardcoded stub data removed per #1296.',
 
-    res.json({
-      success: true,
-      status,
     });
   } catch (error: any) {
     res.status(500).json({
@@ -1145,6 +1163,10 @@ export async function handleGetSystemStatus(req: any, res: any) {
 /**
  * GET /api/emergency/audit-logs
  * Get audit logs
+ * 
+ * NOTE: Returns 501 until contract storage reads are implemented.
+ * Empty audit log with success:true silently under-reports all emergency
+ * actions (see #1296).
  */
 export async function handleGetAuditLogs(req: any, res: any) {
   try {
@@ -1153,18 +1175,13 @@ export async function handleGetAuditLogs(req: any, res: any) {
       return res.status(400).json({ success: false, error: config.error });
     }
 
-    const { limit = 50, offset = 0 } = req.query;
+    // Return 501 until contract storage reads are implemented.
+    // Empty audit log implies no emergency actions ever occurred — dangerously misleading.
+    return res.status(501).json({
+      success: false,
+      error: 'Emergency audit log reads not yet implemented. Use contract event query directly.',
+      details: 'This endpoint will read from contract storage once implemented. Hardcoded empty array removed per #1296.',
 
-    const service = createEmergencyService(config.rpcUrl, config.contractId);
-    const logs = await service.getAuditLogs(
-      parseInt(limit as string),
-      parseInt(offset as string)
-    );
-
-    res.json({
-      success: true,
-      logs,
-      count: logs.length,
     });
   } catch (error: any) {
     res.status(500).json({

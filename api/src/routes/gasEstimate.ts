@@ -91,6 +91,16 @@ const OPERATION_BASELINES: Record<OperationType, number> = {
   [OperationType.CLAIM_ALL]: 15000,
 };
 
+const KNOWN_OPERATIONS: ReadonlySet<string> = new Set(Object.values(OperationType));
+
+/**
+ * True when `value` is one of the `OperationType` values. Anything else has no
+ * baseline, so estimating it would only produce `NaN` (issue #1300).
+ */
+export function isOperationType(value: unknown): value is OperationType {
+  return typeof value === 'string' && KNOWN_OPERATIONS.has(value);
+}
+
 /**
  * GasEstimatorService - Core service for gas cost estimation
  */
@@ -110,6 +120,9 @@ export class GasEstimatorService {
     operation: OperationType,
     parameters?: Record<string, any>
   ): Promise<GasEstimate> {
+    if (!isOperationType(operation)) {
+      throw new Error(`Unknown operation: ${String(operation)}`);
+    }
     const baseInstructions = OPERATION_BASELINES[operation];
     
     // Adjust for parameter complexity
@@ -455,6 +468,25 @@ export function createGasEstimator(
   return new GasEstimatorService(rpcUrl, contractId);
 }
 
+function unknownOperationError(operation: unknown) {
+  return {
+    success: false,
+    error: `Unknown operation: ${String(operation)}. Expected one of: ${[...KNOWN_OPERATIONS].join(', ')}`,
+  };
+}
+
+/**
+ * Returns a 400 body when `operations` is not an array of known operations,
+ * or `undefined` when every entry can be estimated.
+ */
+function validateOperationList(operations: unknown) {
+  if (!Array.isArray(operations)) {
+    return { success: false, error: 'operations must be an array' };
+  }
+  const unknownIndex = operations.findIndex((op) => !isOperationType(op));
+  return unknownIndex === -1 ? undefined : unknownOperationError(operations[unknownIndex]);
+}
+
 /**
  * Express route handler for gas estimation API
  */
@@ -466,6 +498,10 @@ export async function handleGasEstimateRequest(req: any, res: any) {
       return res.status(400).json({
         error: 'Missing required fields: operation and contractId',
       });
+    }
+
+    if (!isOperationType(operation)) {
+      return res.status(400).json(unknownOperationError(operation));
     }
 
     const estimator = createGasEstimator(rpcUrl, contractId);
@@ -496,6 +532,11 @@ export async function handleOptimizationSuggestionsRequest(req: any, res: any) {
       });
     }
 
+    const operationsError = validateOperationList(operations);
+    if (operationsError) {
+      return res.status(400).json(operationsError);
+    }
+
     const estimator = createGasEstimator(rpcUrl, contractId);
     const suggestions = await estimator.generateOptimizationSuggestions(operations);
 
@@ -522,6 +563,11 @@ export async function handleAnalysisReportRequest(req: any, res: any) {
       return res.status(400).json({
         error: 'Missing required fields: operations and contractId',
       });
+    }
+
+    const operationsError = validateOperationList(operations);
+    if (operationsError) {
+      return res.status(400).json(operationsError);
     }
 
     const estimator = createGasEstimator(rpcUrl, contractId);

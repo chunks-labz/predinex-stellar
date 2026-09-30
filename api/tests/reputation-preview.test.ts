@@ -7,8 +7,10 @@ import { ReputationRouteHandler } from '../src/routes/reputation.js';
 describe('reputation preview: OnTimeRepay volume bonus', () => {
   let engine: ReputationEngine;
   let handler: ReputationRouteHandler;
-  const newcomer = 'GB_NEW_USER';
+  const newcomer = 'GCKXGKV5GFLMJ5QBSIHEYAFCZQ37BH72QKJWU4CEWHZOLYEY3TS4YKVK';
   const seeded = 'GCLV6627K7625WXZQJ64KYW6YQ6L5465C5L2Z7E2B4B27QWYWQCX7L4K';
+  const paidOff = 'GDCLUZNKGMR2QWFF6IA66S72SDNISWUUVFDMAIVCOFTE7IIJG7O2VYGQ';
+  const whale = 'GCCYW4LHPI4O2XH22SHQH7JC6UTKRMBHWX7J44T7WNPAHKYPNBI7PQSO';
 
   beforeEach(() => {
     engine = new ReputationEngine();
@@ -56,10 +58,10 @@ describe('reputation preview: OnTimeRepay volume bonus', () => {
   });
 
   it('a user with history but nothing outstanding earns no volume bonus', () => {
-    const profile = engine.getProfile('GB_PAID_OFF');
+    const profile = engine.getProfile(paidOff);
     profile.totalBorrowedVolume = '1000000';
     profile.totalRepaidVolume = '1000000';
-    const data = preview('GB_PAID_OFF', '5000000');
+    const data = preview(paidOff, '5000000');
     expect(data.scoreDelta).toBe(15);
     expect(data.volumeCounted).toBe('0');
     expect(data.volumeCapped).toBe(true);
@@ -67,10 +69,10 @@ describe('reputation preview: OnTimeRepay volume bonus', () => {
 
   it('represents 2^53 + 1 exactly instead of rounding through a float', () => {
     const exact = '9007199254740993';
-    const profile = engine.getProfile('GB_WHALE');
+    const profile = engine.getProfile(whale);
     profile.totalBorrowedVolume = '9007199254740993000';
     profile.totalRepaidVolume = '0';
-    const data = preview('GB_WHALE', exact);
+    const data = preview(whale, exact);
     expect(data.volumeCounted).toBe(exact);
     expect(data.volumeCapped).toBe(false);
     expect(BigInt(data.volumeCounted!)).toBe(2n ** 53n + 1n);
