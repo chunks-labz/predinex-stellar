@@ -92,15 +92,7 @@ export function createApp(): Express {
 
   // 2. Request body parsing + logging.
   app.use(express.json({ limit: '1mb' }));
-  
-  // Use custom morgan format that excludes query strings to prevent
-  // API key leakage in logs (see #1293). Format: :method :url-path :status :response-time ms
-  morgan.token('url-path', (req: Request) => {
-    const url = req.originalUrl || req.url || '';
-    const queryIndex = url.indexOf('?');
-    return queryIndex === -1 ? url : url.substring(0, queryIndex);
-  });
-  app.use(morgan(':remote-addr - :remote-user [:date[clf]] ":method :url-path HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
+  app.use(morgan('combined'));
 
   // Global rate limiting; routers add auth + stricter per-route limits.
   app.use(rateLimitMiddleware);

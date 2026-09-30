@@ -1,33 +1,218 @@
-import { Request, Response, Router } from 'express';
-import { body, validationResult } from 'express-validator';
-import { BigInt } from 'big-integer';
-import { BudgetOptimizationResult } from '../../types';
+/**
+ * Lending Protocol Budget Planner API Routes
+ *
+ * This module provides RESTful API endpoints for lenders to plan and optimize
+ * their capital allocation across prediction market pools.
+ *
+ * Features:
+ * - Budget plan creation with multiple allocation strategies
+ * - Portfolio performance tracking
+ * - Liquidity projection
+ * - Fee optimization recommendations
+ * - Risk assessment
+ *
+ * Security measures:
+ * - Input validation on all parameters
+ * - Rate limiting
+ * - Authentication required
+ * - Read-only operations (no state mutations via API)
+ *
+ * Issue #1110: Build lending protocol budget planner for lenders
+ */
 
-const router = Router();
+import { Router, Request, Response, NextFunction } from 'express';
+import { body, param, query, validationResult } from 'express-validator';
+import { authMiddleware } from '../middleware/auth.js';
+import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+
+// ============================================================================
+// Types & Interfaces
+// ============================================================================
+
+export enum AllocationStrategy {
+  EQUAL_WEIGHT = 'equal_weight',
+  SIZE_WEIGHTED = 'size_weighted',
+  RETURN_WEIGHTED = 'return_weighted',
+  RISK_ADJUSTED = 'risk_adjusted',
+  CUSTOM = 'custom',
+}
+
+export enum RiskTolerance {
+  CONSERVATIVE = 'conservative',
+  MODERATE = 'moderate',
+  AGGRESSIVE = 'aggressive',
+}
+
+export enum PlanningHorizon {
+  SHORT_TERM = 'short_term', // 1-7 days
+  MEDIUM_TERM = 'medium_term', // 1-4 weeks
+  LONG_TERM = 'long_term', // 1-3 months
+}
+
+export interface PoolAllocation {
+  poolId: number;
+  allocatedAmount: string; // BigInt as string
+  weightPct: number; // Percentage
+  expectedReturn: string;
+  riskScore: number; // 0-100
+}
+
+export interface BudgetPlan {
+  lender: string; // Address
+  totalBudget: string;
+  allocatedAmount: string;
+  reserveAmount: string;
+  allocations: PoolAllocation[];
+  strategy: AllocationStrategy;
+  expectedTotalReturn: string;
+  portfolioRiskScore: number;
+  diversificationScore: number;
+  createdAt: string; // ISO timestamp
+}
+
+export interface PortfolioMetrics {
+  totalInvested: string;
+  currentValue: string;
+  totalReturn: string;
+  returnPct: number;
+  feeRevenue: string;
+  activePools: number;
+  settledPools: number;
+  sharpeRatio: number;
+  lastUpdated: string;
+}
+
+export interface LiquidityProjection {
+  currentLiquid: string;
+  lockedUntilTimestamp: number;
+  expectedReturns7d: string;
+  expectedReturns30d: string;
+  minimumReserveNeeded: string;
+  excessCapacity: string;
+}
+
+export interface FeeOptimization {
+  currentFeeBps: number;
+  recommendedFeeBps: number;
+  expectedVolumeImpactPct: number;
+  expectedRevenueImpact: string;
+  competitivenessScore: number;
+}
+
+export interface RiskAssessment {
+  volatilityScore: number;
+  liquidityRisk: number;
+  concentrationRisk: number;
+  timeRisk: number;
+  overallRiskScore: number;
+}
+
+export interface CreatePlanRequest {
+  lenderAddress: string;
+  totalBudget: string;
+  strategy: AllocationStrategy;
+  riskTolerance: RiskTolerance;
+  reservePct: number;
+}
+
+export interface OptimizeFeesRequest {
+  currentFeeBps: number;
+  avgPoolSize: string;
+  competitorFees: number[];
+}
+
+// ============================================================================
+// Validation Middleware
+// ============================================================================
+
+const validateAddress = () =>
+  body('lenderAddress')
+    .isString()
+    .matches(/^G[A-Z0-9]{55}$/)
+    .withMessage('Invalid Stellar address format');
+
+const validateAmount = (field: string) =>
+  body(field)
+    .isString()
+    .matches(/^\d+$/)
+    .withMessage(`${field} must be a positive integer string`);
+
+const validateStrategy = () =>
+  body('strategy')
+    .isIn(Object.values(AllocationStrategy))
+    .withMessage('Invalid allocation strategy');
+
+const validateRiskTolerance = () =>
+  body('riskTolerance')
+    .isIn(Object.values(RiskTolerance))
+    .withMessage('Invalid risk tolerance level');
+
+const validateReservePct = () =>
+  body('reservePct')
+    .isInt({ min: 0, max: 100 })
+    .withMessage('Reserve percentage must be between 0 and 100');
+
+const validateHorizon = () =>
+  query('horizon')
+    .optional()
+    .isIn(Object.values(PlanningHorizon))
+    .withMessage('Invalid planning horizon');
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 /**
- * Budget optimization endpoint
+ * Handle validation errors
  */
-router.post('/optimize-fees', [
-  body('currentFeeBps')
-    .isInt({ min: 0, max: 10000 })
-    .withMessage('Current fee must be 0-10000 bps'),
-  body('avgPoolSize').isInt({ min: 0 }).withMessage('Pool size must be positive'),
-  body('competitorFees').isArray().withMessage('Competitor fees must be an array'),
-], async (req: Request, res: Response) => {
+const handleValidationErrors = (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return res.status(400).json({
+      success: false,
+      errors: errors.array(),
+    });
+  }
+  next();
+};
+
+/**
+ * Error thrown when an on-chain contract query/operation is not yet implemented.
+ */
+export class NotImplementedError extends Error {
+  constructor(message: string = 'On-chain contract interaction is not implemented') {
+    super(message);
+    this.name = 'NotImplementedError';
+  }
+}
+
+/**
+ * Contract interaction service for lending budget planner.
+ * Queries on-chain balance and pool states via Soroban / Stellar SDK.
+ */
+export class ContractService {
+  private balanceProvider?: (address: string) => Promise<bigint>;
+  private poolProvider?: () => Promise<PoolAllocation[] | null>;
+
+  constructor(options?: {
+    balanceProvider?: (address: string) => Promise<bigint>;
+    poolProvider?: () => Promise<PoolAllocation[] | null>;
+  }) {
+    this.balanceProvider = options?.balanceProvider;
+    this.poolProvider = options?.poolProvider;
   }
 
-  try {
-    const request = req.body;
-    const competitorFees = request.competitorFees || [];
-    const marketAvg = competitorFees.length > 0
-      ? competitorFees.reduce((sum, fee) => sum + fee, 0) / competitorFees.length
-      : 0;
+  public setBalanceProvider(provider: (address: string) => Promise<bigint>): void {
+    this.balanceProvider = provider;
+  }
 
-    const recommendedFee = marketAvg > 0 ? Math.round(marketAvg) : 50;
+  public setPoolProvider(provider: () => Promise<PoolAllocation[] | null>): void {
+    this.poolProvider = provider;
+  }
 
   /**
    * Retrieves the lender's current on-chain balance.
@@ -50,34 +235,34 @@ router.post('/optimize-fees', [
   public hasBalanceProvider(): boolean {
     return this.balanceProvider !== undefined;
   }
-    // Guard against division by zero
-    const feeChangePct = request.currentFeeBps > 0
-      ? ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100
-      : 0;
-    const volumeImpactPct = feeChangePct * -2;
-    const clampedVolumeImpact = Math.max(-99, Math.min(99, volumeImpactPct));
 
-    const newVolume = (BigInt(request.avgPoolSize) * BigInt(100 + Math.floor(clampedVolumeImpact))) / BigInt(100);
+  /**
+   * Derives budget plan from live on-chain pool state, or raises NotImplementedError.
+   */
+  public async createBudgetPlan(request: CreatePlanRequest): Promise<BudgetPlan> {
+    const onChainPools = this.poolProvider ? await this.poolProvider() : null;
+    if (!onChainPools || onChainPools.length === 0) {
+      throw new NotImplementedError('On-chain pool state derivation requires an active Stellar contract connection');
+    }
 
-    const competitiveness = marketAvg > 0
-      ? (request.currentFeeBps - marketAvg) / marketAvg
-      : 0;
+    const reserveAmount =
+      (BigInt(request.totalBudget) * BigInt(request.reservePct)) /
+      BigInt(100);
+    const allocatedAmount = BigInt(request.totalBudget) - reserveAmount;
 
-    const result: BudgetOptimizationResult = {
-      recommendedFee,
-      feeChangePct,
-      volumeImpactPct: clampedVolumeImpact,
-      newVolume: newVolume.toString(),
-      competitiveness,
-      status: 'success'
+    return {
+      lender: request.lenderAddress,
+      totalBudget: request.totalBudget,
+      allocatedAmount: allocatedAmount.toString(),
+      reserveAmount: reserveAmount.toString(),
+      allocations: onChainPools,
+      strategy: request.strategy,
+      expectedTotalReturn: '0',
+      portfolioRiskScore: 0,
+      diversificationScore: 100,
+      createdAt: new Date().toISOString(),
     };
-
-    res.json(result);
-  } catch (error) {
-    console.error('Budget optimization error:', error);
-    res.status(500).json({ error: 'Failed to optimize fees' });
   }
-});
 
   public async getPortfolioMetrics(_lenderAddress: string): Promise<PortfolioMetrics> {
     throw new NotImplementedError('On-chain portfolio metrics query is not yet implemented');
@@ -105,8 +290,11 @@ router.post('/optimize-fees', [
     );
 
     // Estimate impact
+    // Issue #1314: guard against division by zero when currentFeeBps is 0
     const feeChangePct =
-      ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100;
+      request.currentFeeBps > 0
+        ? ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100
+        : 0;
     const volumeImpactPct = feeChangePct * -2; // -2% volume per 1% fee increase
 
     const currentRevenue =
@@ -406,4 +594,4 @@ export function createBudgetRouter(service: ContractService = contractService): 
 const defaultRouter = createBudgetRouter();
 export const budgetRouter = defaultRouter;
 export default defaultRouter;
-export default router;
+
