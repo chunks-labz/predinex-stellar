@@ -501,6 +501,7 @@ pub fn create_pool_from_template(
     env: Env,
     creator: Address,
     template_id: u32,
+    amount: i128,
     overrides: PoolTemplateOverrides,
 ) -> Result<u32, ContractError>
 ```
@@ -511,10 +512,11 @@ Creates a new pool from a saved template. Fields in `overrides` replace the temp
 | Parameter | Type | Description |
 |---|---|---|
 | `template_id` | `u32` | ID returned by `create_pool_template` |
+| `amount` | `i128` | Creator deposit in stroops, transferred from `creator`; at least `MIN_CREATOR_DEPOSIT` |
 | `overrides` | `PoolTemplateOverrides` | Optional per-field overrides |
 
 **Returns:** `u32` — new pool ID.  
-**Errors:** `PoolNotFound` (template not found), plus all `create_pool` errors.
+**Errors:** `PoolNotFound` (template not found), `InsufficientCreatorDeposit` (`amount` below the minimum), plus all `create_pool` errors.
 
 **Example:**
 
@@ -524,6 +526,7 @@ stellar contract invoke \
   -- create_pool_from_template \
   --creator $MY_ADDRESS \
   --template_id 3 \
+  --amount 10000000 \
   --overrides '{"title":null,"description":null,"outcomes":null,"duration":86400,"metadata_uri":null}'
 ```
 

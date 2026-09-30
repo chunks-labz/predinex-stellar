@@ -173,10 +173,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build (also type-checks oracle/, which api/tsconfig.json includes)
+      - name: Build (also type-checks oracle/ via oracle/tsconfig.json)
         run: npm run build
 
-      - name: Test (also covers oracle/, which api/jest.config.js roots include)
+      - name: Test (also covers oracle/ via the vitest include path)
         run: npm test
 
   bot-checks:
@@ -353,7 +353,15 @@ jobs:
             fi
           done
           exit "$failed"
-
+      - name: Verify Rust module declarations
+        # #1310 — a file in src/ with no `mod` declaration is never compiled, so
+        # it can never break CI and quietly rots. Scoped to the crates that
+        # have been audited: contracts/pool is clean as of this commit, while
+        # contracts/predinex still carries three pre-existing orphans
+        # (events.rs, events_test.rs, referral_tests.rs) that need a
+        # register-or-delete decision. Widen the argument list as those are
+        # resolved; the script is already workspace-capable.
+        run: python3 scripts/verify-module-declarations.py contracts/pool
       - name: Cache stellar-cli
         id: stellar-cli-cache
         uses: actions/cache@v4

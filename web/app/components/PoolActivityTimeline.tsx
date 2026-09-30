@@ -15,6 +15,8 @@ import {
 } from 'lucide-react';
 import { TruncatedAddress } from '../../components/TruncatedAddress';
 import { usePoolActivity } from '../hooks/usePoolActivity';
+import { areActivityFixturesEnabled } from '../lib/feature-flags';
+import { DemoDataBanner } from './DemoDataBanner';
 import {
   POOL_ACTIVITY_EVENT_META,
   POOL_ACTIVITY_EVENT_ACCENT,
@@ -235,6 +237,14 @@ export default function PoolActivityTimeline({
 
   return (
     <section className="mt-8" aria-label="Pool activity timeline">
+      {/* #1306 — seeded rows are indistinguishable from real on-chain events at a
+          glance, so say so whenever the fixture source is in use. */}
+      {areActivityFixturesEnabled() && (
+        <div className="mb-4">
+          <DemoDataBanner source="pool activity" />
+        </div>
+      )}
+
       {/* Section header */}
       <div className="flex items-center gap-2 mb-6">
         <Clock className="w-5 h-5 text-primary" aria-hidden="true" />

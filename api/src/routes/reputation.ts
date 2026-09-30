@@ -11,6 +11,7 @@ import {
   UserReputationDto,
 } from '../types/index.js';
 import { ReputationEngine } from '../services/reputation-engine.js';
+import { SecuritySanitizer } from '../middleware/security.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 
@@ -26,6 +27,14 @@ export class ReputationRouteHandler {
       return {
         success: false,
         error: { code: 'MISSING_ADDRESS', message: 'User address is required' },
+        timestamp: Date.now(),
+      };
+    }
+
+    if (!SecuritySanitizer.isValidStellarAddress(address)) {
+      return {
+        success: false,
+        error: { code: 'INVALID_ADDRESS', message: 'address must be a valid Stellar address' },
         timestamp: Date.now(),
       };
     }
@@ -59,8 +68,17 @@ export class ReputationRouteHandler {
       };
     }
 
+    const userAddress = SecuritySanitizer.readStellarAddress(body.userAddress);
+    if (!userAddress) {
+      return {
+        success: false,
+        error: { code: 'INVALID_ADDRESS', message: 'userAddress must be a valid Stellar address' },
+        timestamp: Date.now(),
+      };
+    }
+
     const request: ReputationSimulateRequest = {
-      userAddress: String(body.userAddress),
+      userAddress,
       action: body.action,
       amount: ReputationRouteHandler.readAmount(body.amount),
     };
@@ -89,6 +107,10 @@ export class ReputationRouteHandler {
  */
 export const reputationRouter = Router();
 
+// One handler (and engine) for the router's lifetime so state — records,
+// policies, daily volume counters — persists across requests.
+const handler = new ReputationRouteHandler();
+
 reputationRouter.use(authMiddleware);
 reputationRouter.use(rateLimitMiddleware);
 
@@ -102,19 +124,16 @@ reputationRouter.get('/health', (_req: Request, res: Response) => {
 });
 
 reputationRouter.get('/profile/:address', (req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   const result = handler.handleGetProfile(req.params.address);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 reputationRouter.post('/simulate', (req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   const result = handler.handleSimulateAction(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 reputationRouter.get('/leaderboard', (_req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   res.json(handler.handleLeaderboard());
 });
 
