@@ -217,12 +217,23 @@ export class ContractService {
   /**
    * Retrieves the lender's current on-chain balance.
    */
+  /**
+   * Get lender's on-chain balance
+   * Issue #1295: Throws when no provider configured instead of returning 0n
+   */
   public async getLenderBalance(lenderAddress: string): Promise<bigint> {
-    if (this.balanceProvider) {
-      return this.balanceProvider(lenderAddress);
+    if (!this.balanceProvider) {
+      throw new Error('Balance provider not configured');
     }
-    // Default to 0n when no on-chain balance provider is wired
-    return 0n;
+    return this.balanceProvider(lenderAddress);
+  }
+
+  /**
+   * Check if balance provider is configured
+   * Issue #1295: Allows routes to return 501 instead of misleading 400
+   */
+  public hasBalanceProvider(): boolean {
+    return this.balanceProvider !== undefined;
   }
 
   /**
@@ -279,8 +290,11 @@ export class ContractService {
     );
 
     // Estimate impact
+    // Issue #1314: guard against division by zero when currentFeeBps is 0
     const feeChangePct =
-      ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100;
+      request.currentFeeBps > 0
+        ? ((recommendedFee - request.currentFeeBps) / request.currentFeeBps) * 100
+        : 0;
     const volumeImpactPct = feeChangePct * -2; // -2% volume per 1% fee increase
 
     const currentRevenue =
@@ -343,6 +357,15 @@ export function createBudgetRouter(service: ContractService = contractService): 
     ],
     async (req: Request, res: Response) => {
       try {
+        // Issue #1295: Return 501 when balance provider not wired
+        if (!service.hasBalanceProvider()) {
+          return res.status(501).json({
+            success: false,
+            error: 'On-chain balance provider not configured',
+            hint: 'The server has not been configured to query on-chain balances. Contact the administrator.',
+          });
+        }
+
         const request: CreatePlanRequest = req.body;
 
         // Additional business logic validation
@@ -354,12 +377,14 @@ export function createBudgetRouter(service: ContractService = contractService): 
           });
         }
 
-        // Validate that budget does not exceed on-chain balance
+        // Issue #1295: Check actual on-chain balance
         const availableBalance = await service.getLenderBalance(request.lenderAddress);
         if (budgetBigInt > availableBalance) {
           return res.status(400).json({
             success: false,
             error: 'Budget exceeds available on-chain balance',
+            availableBalance: availableBalance.toString(),
+            requestedBudget: request.totalBudget,
           });
         }
 

@@ -6,7 +6,7 @@ describe('User Reputation Protocol Tests', () => {
   let engine: ReputationEngine;
   let handler: ReputationRouteHandler;
 
-  const testUser = 'GB_REPUTED_BORROWER';
+  const testUser = 'GCP6CYQCMOWCCU5WFU44F3LN2DBG2EBXKFJRJNCSVE63LE43PFERCK4F';
 
   beforeEach(() => {
     engine = new ReputationEngine();

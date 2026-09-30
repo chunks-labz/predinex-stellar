@@ -11,8 +11,19 @@
  * - Batch pool reads (get_pools_batch)
  */
 
+import {
+  Account,
+  Address,
+  BASE_FEE,
+  Contract,
+  Networks,
+  TransactionBuilder,
+  nativeToScVal,
+  xdr,
+} from '@stellar/stellar-sdk';
 import { getRuntimeConfig } from './runtime-config';
 import { createScopedLogger } from './logger';
+import { fetchHorizon } from './horizon-client';
 import {
   encodeEd25519PublicKey,
   encodeScContractAddress,
@@ -101,119 +112,68 @@ interface RawSorobanBetLimits {
 // ---------------------------------------------------------------------------
 
 /**
- * Build a simple Soroban transaction XDR for a read-only contract call.
- * This creates a minimal transaction envelope that can be simulated.
+ * Source account used for read-only simulations. `simulateTransaction` never
+ * loads or charges the source, so any valid account strkey works; this is the
+ * all-zero ed25519 key.
  */
-function buildReadTransactionXDR(
-  contractId: string,
-  functionName: string,
-  args: unknown[] = []
-): string {
-  // For Soroban contract reads, we need to build a transaction that invokes the contract.
-  // Since we don't have the full Stellar SDK, we use a minimal approach:
-  // Build a simple invoke host function operation wrapped in a transaction.
-
-  // The contract ID is a 32-byte hash from the C... strkey
-  const contractHash = contractIdToHex(contractId);
-
-  // Build the operation XDR manually
-  // This is a simplified XDR builder - in production, use @stellar/stellar-sdk
-  const scValArgs = args.map(argToScValXDR).join('');
-
-  // Build the invoke host function op XDR
-  // We use a placeholder approach that works with Soroban RPC
-  const opXDR = buildInvokeContractOpXDR(contractHash, functionName, scValArgs);
-
-  // Build the transaction envelope XDR
-  // Sequence 0, no source account needed for simulation
-  const txXDR = buildTransactionEnvelopeXDR(opXDR);
-
-  return txXDR;
-}
+const SIMULATION_SOURCE = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF';
 
 /**
- * Convert C... contract ID strkey to hex hash.
+ * Error thrown when a Soroban read cannot be completed (transport failure,
+ * RPC error, or a failed simulation). Reads surface this instead of returning
+ * `null`, so a broken read path is distinguishable from "no data".
  */
-function contractIdToHex(contractId: string): string {
-  // C... strkey is base32 encoded with CRC16 checksum
-  // For simulation, we can use a direct approach if the contractId
-  // is already in the right format, or decode it
-  if (contractId.startsWith('C') && contractId.length === 56) {
-    // It's a proper strkey, we'd need base32 decoding
-    // For now, return as-is and let the RPC handle it
-    return contractId;
+export class SorobanReadError extends Error {
+  constructor(message: string, readonly functionName: string) {
+    super(message);
+    this.name = 'SorobanReadError';
   }
-  return contractId;
 }
 
 /**
- * Convert a JS value to SCVal XDR representation.
+ * Encode a JS read argument as an `ScVal`.
+ *
+ * Every numeric argument of the contract's read functions is a `u32`
+ * (pool IDs, ranges); account/contract strkeys are `Address`es.
  */
-function argToScValXDR(arg: unknown): string {
+export function readArgToScVal(arg: unknown): xdr.ScVal {
   if (typeof arg === 'number') {
-    // U32 for pool IDs
-    if (arg >= 0 && arg <= 0xffffffff) {
-      return buildU32XDR(arg);
+    if (!Number.isInteger(arg) || arg < 0 || arg > 0xffffffff) {
+      throw new TypeError(`Read argument ${arg} is not a valid u32`);
     }
-    // I128 for larger numbers
-    return buildI128XDR(BigInt(arg));
+    return nativeToScVal(arg, { type: 'u32' });
   }
   if (typeof arg === 'bigint') {
-    return buildI128XDR(arg);
+    return nativeToScVal(arg, { type: 'i128' });
   }
-  if (typeof arg === 'string') {
-    // Could be an address (G... or C...) or a symbol
-    if (arg.startsWith('G') && arg.length === 56) {
-      return buildAddressXDR(arg);
-    }
-    return buildSymbolXDR(arg);
+  if (typeof arg === 'string' && /^[GC][A-Z2-7]{55}$/.test(arg)) {
+    return new Address(arg).toScVal();
   }
-  return '';
+  return nativeToScVal(arg);
 }
 
-// XDR type builders - simplified for our use case
-function buildU32XDR(value: number): string {
-  // U32: 4 bytes big-endian
-  const hex = value.toString(16).padStart(8, '0');
-  return hex.match(/.{2}/g)?.reverse().join('') || '';
+/**
+ * Build a base64 `TransactionEnvelope` invoking `functionName` on the contract,
+ * suitable for `simulateTransaction`.
+ */
+export function buildReadTransactionXDR(
+  contractId: string,
+  functionName: string,
+  args: unknown[] = [],
+  networkPassphrase: string = getNetworkPassphrase()
+): string {
+  return new TransactionBuilder(new Account(SIMULATION_SOURCE, '0'), {
+    fee: BASE_FEE,
+    networkPassphrase,
+  })
+    .addOperation(new Contract(contractId).call(functionName, ...args.map(readArgToScVal)))
+    .setTimeout(0)
+    .build()
+    .toXDR();
 }
 
-function buildI128XDR(value: bigint): string {
-  // I128: 16 bytes two's complement big-endian
-  // For positive values, just pad to 16 bytes
-  let hex = value.toString(16);
-  if (hex.length > 32) {
-    hex = hex.slice(-32);
-  }
-  return hex.padStart(32, '0');
-}
-
-function buildAddressXDR(address: string): string {
-  // For simulation, we pass the address as a string value
-  // The actual encoding would be base32 decoding of the strkey
-  return address;
-}
-
-function buildSymbolXDR(symbol: string): string {
-  // Symbol: length (1 byte) + ASCII bytes
-  const len = Math.min(symbol.length, 32);
-  const hexLen = len.toString(16).padStart(2, '0');
-  const hexChars = Array.from(symbol.slice(0, len))
-    .map(c => c.charCodeAt(0).toString(16).padStart(2, '0'))
-    .join('');
-  return hexLen + hexChars;
-}
-
-function buildInvokeContractOpXDR(contractHash: string, functionName: string, argsXDR: string): string {
-  // Simplified operation XDR
-  // In practice, this would be a full XDR-encoded Operation
-  return `invoke:${contractHash}:${functionName}:${argsXDR}`;
-}
-
-function buildTransactionEnvelopeXDR(opXDR: string): string {
-  // Simplified transaction envelope
-  // In practice, this would be a full XDR-encoded TransactionEnvelope
-  return `tx:${opXDR}`;
+function getNetworkPassphrase(): string {
+  return getRuntimeConfig().network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,17 +182,18 @@ function buildTransactionEnvelopeXDR(opXDR: string): string {
 
 /**
  * Simulate a transaction on the Soroban RPC to read contract state.
+ *
+ * @returns The decoded return value (`null` for `void` / `Option::None`).
+ * @throws {SorobanReadError} On transport, RPC, or simulation failure.
  */
 async function simulateContractRead(
   rpcUrl: string,
   contractId: string,
   functionName: string,
   args: unknown[] = []
-): Promise<unknown | null> {
-  // Build the transaction XDR
+): Promise<unknown> {
   const transactionXDR = buildReadTransactionXDR(contractId, functionName, args);
 
-  // Call simulateTransaction RPC method
   const body = {
     jsonrpc: '2.0',
     id: 1,
@@ -242,46 +203,46 @@ async function simulateContractRead(
     },
   };
 
-  try {
-    const response = await fetchHorizon(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+  const response = await fetchHorizon(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 
-    if (!response.ok) {
-      log.error(`Soroban RPC error: ${response.status}`);
-      return null;
-    }
-
-    const json = await response.json();
-
-    if (json.error) {
-      log.error('Soroban RPC returned error:', json.error.message);
-      return null;
-    }
-
-    // Extract the return value from simulation result
-    const result = json.result;
-    if (!result) return null;
-
-    // Handle different simulation result formats
-    if (result.results && result.results.length > 0) {
-      // Newer Soroban RPC format
-      const scVal = result.results[0].xdr;
-      return parseScVal(scVal);
-    }
-
-    if (result.xdr) {
-      // Legacy format
-      return parseScVal(result.xdr);
-    }
-
-    return null;
-  } catch (e) {
-    log.error(`Failed to simulate contract read for ${functionName}:`, e);
-    return null;
+  if (!response.ok) {
+    throw new SorobanReadError(`Soroban RPC error: HTTP ${response.status}`, functionName);
   }
+
+  const json = await response.json();
+
+  if (json.error) {
+    throw new SorobanReadError(
+      `Soroban RPC returned error: ${json.error.message ?? JSON.stringify(json.error)}`,
+      functionName
+    );
+  }
+
+  const result = json.result;
+  if (!result) {
+    throw new SorobanReadError('Soroban RPC returned no result', functionName);
+  }
+
+  // A failed simulation (contract panic, missing entry, bad args) reports
+  // `error` instead of `results`.
+  if (result.error) {
+    throw new SorobanReadError(`Simulation of ${functionName} failed: ${result.error}`, functionName);
+  }
+
+  if (result.results && result.results.length > 0) {
+    return parseScVal(result.results[0].xdr);
+  }
+
+  if (result.xdr) {
+    // Legacy format
+    return parseScVal(result.xdr);
+  }
+
+  throw new SorobanReadError(`Simulation of ${functionName} returned no value`, functionName);
 }
 
 /**
@@ -875,7 +836,7 @@ export async function getPoolsBatchFromSoroban(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     log.error(`Failed to fetch pools batch (start: ${startId}, count: ${count}):`, error);
-    return [];
+    throw e;
   }
 }
 
@@ -987,7 +948,7 @@ export async function getPoolBetLimitsFromSoroban(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     log.error(`Failed to fetch pool bet limits for pool ${poolId} from Soroban:`, error);
-    return null;
+    throw e;
   }
 }
 
@@ -1025,7 +986,7 @@ export async function getPoolCountFromSoroban(
     return 0;
   } catch (e) {
     log.error('Failed to fetch pool count from Soroban:', e);
-    return 0;
+    throw e;
   }
 }
 
@@ -1071,7 +1032,7 @@ export async function getFreezeAdminFromSoroban(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     log.error('Failed to fetch freeze admin from Soroban:', error);
-    return null;
+    throw e;
   }
 }
 
@@ -1110,7 +1071,7 @@ export async function getAdminFromSoroban(
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     log.error('Failed to fetch admin from Soroban:', error);
-    return null;
+    throw e;
   }
 }
 
@@ -1164,7 +1125,7 @@ export async function getLpPositionFromSoroban(
     };
   } catch (e) {
     log.error(`Failed to fetch LP position for pool ${poolId}:`, e);
-    return null;
+    throw e;
   }
 }
 
@@ -1193,7 +1154,7 @@ export async function getPendingLpRewardsFromSoroban(
     return toNum(rawResult as bigint | number | string | undefined);
   } catch (e) {
     log.error(`Failed to fetch pending LP rewards for pool ${poolId}:`, e);
-    return 0;
+    throw e;
   }
 }
 
@@ -1228,7 +1189,7 @@ export async function getLpStakeFromSoroban(
     };
   } catch (e) {
     log.error(`Failed to fetch LP stake for pool ${poolId}:`, e);
-    return null;
+    throw e;
   }
 }
 
@@ -1321,7 +1282,7 @@ export async function getUserPortfolioFromSoroban(
       cfg.rpcUrl,
       cfg.contractId,
       'get_user_portfolio',
-      [startId, count, userAddress],
+      [userAddress, startId, count],
     );
 
     if (!rawResult || !Array.isArray(rawResult)) {
@@ -1339,7 +1300,7 @@ export async function getUserPortfolioFromSoroban(
     }));
   } catch (e) {
     log.error('Failed to fetch user portfolio from Soroban:', e);
-    return [];
+    throw e;
   }
 }
 
@@ -1441,6 +1402,6 @@ export async function getPoolExtMetadataFromSoroban(
     };
   } catch (e) {
     log.error('Failed to fetch pool ext metadata from Soroban:', e);
-    return null;
+    throw e;
   }
 }

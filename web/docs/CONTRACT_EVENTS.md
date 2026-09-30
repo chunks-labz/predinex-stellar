@@ -228,11 +228,36 @@ Emitted when a settled pool is disputed.
 - **Indexer Use:** Flag pool as disputed, suspend claims
 
 ### pool_unfrozen
-Emitted when a frozen or disputed pool is unfrozen.
+Emitted when a frozen or disputed pool returns to `Open`.
 
 - **Topics:** `(Symbol("pool_unfrozen"), event_version(), pool_id: u32)`
-- **Data:** `caller: Address`
+- **Data:** `PoolUnfrozenEvent { actor: Address, trigger: UnfreezeTrigger, had_cooling_deadline: bool }`
 - **Indexer Use:** Update pool state, resume claims
+
+`pool_unfrozen` has two distinct causes, and the address alone cannot tell them
+apart — an indexer that attributes the thaw to `actor` as an administrator will
+be wrong whenever a bettor's bet happens to reopen a pool.
+
+| `trigger` | Cause | `actor` is |
+| --- | --- | --- |
+| `Admin` | Freeze admin called `unfreeze_pool` | the freeze admin |
+| `AutoThaw` | A cooling period elapsed and the first `place_bet` reopened the pool | **the bettor**, not an administrator |
+
+`had_cooling_deadline` reports whether a `PoolCoolingUntil` deadline was set when
+the pool was frozen, so a consumer can tell a cooling-lock expiry from a manual
+freeze without replaying `pool_cooling_started`. It is `true` on every
+`AutoThaw` event, since a cooling deadline is what caused the thaw.
+
+**Migration note (#1309):** the data payload was widened from a bare
+`caller: Address`. Topics are unchanged and the version marker stays `"v1"`, so
+topic filters keep working and every `pool_unfrozen` event is still observed.
+Consumers that read the data payload must accept **both** shapes — events already
+on chain cannot be rewritten and carry the old bare `Address`. A consumer that
+encounters a bare address should treat the trigger as unknown rather than assume
+an admin action.
+
+Note that `override_pool_cooling` is a separate transition with its own
+`pool_cooling_overridden` event; it does not emit `pool_unfrozen`.
 
 ### pool_cooling_overridden
 Emitted when treasury admin overrides cooling lock.

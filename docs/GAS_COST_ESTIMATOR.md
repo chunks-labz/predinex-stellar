@@ -313,6 +313,20 @@ Estimate gas cost for a single operation.
 }
 ```
 
+An `operation` that is not one of the `OperationType` values is rejected with
+`400` and no estimate, rather than a `success: true` response full of `null`
+numbers:
+
+```json
+{
+  "success": false,
+  "error": "Unknown operation: create_pool_x. Expected one of: create_pool, place_bet, ..."
+}
+```
+
+The suggestions and report endpoints apply the same check to every entry of
+`operations`, which must be an array.
+
 ### POST `/api/optimization-suggestions`
 
 Get optimization recommendations for multiple operations.
