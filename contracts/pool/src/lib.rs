@@ -13,7 +13,10 @@
 // in `contract.rs`.
 //
 // If you add a Rust file under `src/`, declare it as a module, otherwise it will
-// never run. CI enforces this via `scripts/verify-module-declarations.py`.
+// never run. CI enforces this via `scripts/verify-module-declarations.py`, and
+// `scripts/verify-declared-tests.py` fails when a `#[test]` in this crate is
+// declared in source but missing from what `cargo test` lists (#1305) — the
+// check that would have caught the two dead copies above.
 
 mod contract;
 
