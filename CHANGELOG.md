@@ -48,6 +48,9 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Regenerated `web/package-lock.json` so it is back in sync with `web/package.json`; `npm ci` was failing outright, which broke the install step of every workflow that builds `web/` and left the `actions/setup-node` npm cache unusable
 - Dependabot now also covers `/bot`, `/api` (npm) and the root Cargo workspace in addition to `/web` and `/contracts/predinex`, with the same weekly non-major grouping (closes #1174)
 - Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
+- `NEXT_PUBLIC_ACTIVITY_FIXTURES` and `NEXT_PUBLIC_ENABLE_DISPUTE_MOCK_DATA` are now refused in a production build. Being `NEXT_PUBLIC_*`, they are inlined into the client bundle at build time, so any built environment that set them (a CI preview deploy copying `.env` values, a staging build) shipped fabricated bets, settlements and claims to real users with nothing at runtime to distinguish seeded rows from real `place_bet`/`settle_pool` events. The refusal is logged rather than silent so the misconfiguration is visible (closes #1306)
+- Added `DemoDataBanner`, rendered on the pool activity timeline and wallet activity feed whenever a demo-data flag is active, so fabricated rows can never be read as real market activity. It is not dismissible, since it reports data provenance rather than interrupting the user (closes #1306)
+- Documented `NEXT_PUBLIC_ACTIVITY_FIXTURES` in `web/.env.example` (closes #1306)
 
 ---
 
