@@ -14,8 +14,14 @@ export const DEFAULT_NETWORK: NetworkName =
 export const SOROBAN_RPC_URL: string =
     process.env.NEXT_PUBLIC_SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 
+// #1308 — NEXT_PUBLIC_SOROBAN_CONTRACT_ID is the canonical name for the
+// deployed contract id. The legacy NEXT_PUBLIC_CONTRACT_ADDRESS is still read
+// so existing deployments keep resolving to the same value; prefer setting the
+// canonical name, which resolves in web/app/lib/runtime-config.ts.
 export const CONTRACT_ADDRESS: string =
-    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || 'SP2WWKKF25SED3K5P6ETY7MDDNBQH50GPSP8EJM8N';
+    process.env.NEXT_PUBLIC_SOROBAN_CONTRACT_ID ||
+    process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ||
+    'SP2WWKKF25SED3K5P6ETY7MDDNBQH50GPSP8EJM8N';
 
 export const CONTRACT_NAME: string =
     process.env.NEXT_PUBLIC_CONTRACT_NAME || 'predinex-contract';

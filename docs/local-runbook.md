@@ -132,7 +132,7 @@ NEXT_PUBLIC_NETWORK=testnet
 
 # Set to your deployed contract ID from step 2c,
 # or leave as-is to use the shared testnet deployment
-NEXT_PUBLIC_CONTRACT_ADDRESS=<your-contract-id>
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=<your-contract-id>
 NEXT_PUBLIC_CONTRACT_NAME=predinex
 
 # Optional — only needed for WalletConnect UI features
@@ -147,7 +147,7 @@ NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=YOUR_PROJECT_ID
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `NEXT_PUBLIC_NETWORK` | **Yes** | — | `testnet` or `mainnet` |
-| `NEXT_PUBLIC_CONTRACT_ADDRESS` | **Yes** | — | Deployed contract ID (`C…`) |
+| `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` | **Yes** | — | Deployed contract ID (`C…`). Replaces the deprecated `NEXT_PUBLIC_CONTRACT_ADDRESS`, which still works but logs a runtime warning |
 | `NEXT_PUBLIC_CONTRACT_NAME` | No | `predinex-pool` | Contract name suffix |
 | `NEXT_PUBLIC_APP_URL` | No | `https://predinex.app` | Used for WalletConnect metadata |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | — | WalletConnect Cloud project ID |
@@ -245,7 +245,7 @@ npm run build
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `Missing required config: NEXT_PUBLIC_NETWORK` | `.env.local` not created or missing the variable | `cp .env.example .env.local` and set `NEXT_PUBLIC_NETWORK=testnet` |
-| Markets page shows no pools | Wrong contract ID in env | Double-check `NEXT_PUBLIC_CONTRACT_ADDRESS` matches the deployed contract |
+| Markets page shows no pools | Wrong contract ID in env | Double-check `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` matches the deployed contract |
 | `Already initialized` panic on deploy | Contract was already initialized | This is expected on re-deploy; only call `initialize` once per contract ID |
 | `wasm32-unknown-unknown` target missing | Rust target not installed | `rustup target add wasm32-unknown-unknown` |
 | Wallet shows "wrong network" | Wallet connected to the wrong supported network | Switch the app to the matching supported network and reconnect |
@@ -305,7 +305,7 @@ The script:
 2. Asks for typed confirmation before touching mainnet
 3. Redeploys the verified WASM as a new contract ID
 4. Initializes the new contract
-5. Prints the steps to update `NEXT_PUBLIC_CONTRACT_ADDRESS`
+5. Prints the steps to update `NEXT_PUBLIC_SOROBAN_CONTRACT_ID`
 
 > Soroban contracts are immutable — rollback deploys a new contract ID. Update your env vars and redeploy the web app after running the rollback.
 

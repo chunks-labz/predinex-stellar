@@ -1,13 +1,29 @@
+/**
+ * Deprecated runtime env names mapped to the canonical name that replaced them.
+ *
+ * These are still honoured so existing deployments keep working, but they are
+ * documented in `.env.example` as deprecated aliases and emit a one-time
+ * runtime warning. Remove an entry here once the alias is retired.
+ */
+export const DEPRECATED_RUNTIME_ENV_ALIASES = {
+  // #1308 — NEXT_PUBLIC_SOROBAN_CONTRACT_ID is the single canonical name for
+  // the deployed contract id. Both names previously fed different config
+  // fields, so a deployment could end up pointing contract reads and Soroban
+  // event reads at two different contracts.
+  NEXT_PUBLIC_CONTRACT_ADDRESS: 'NEXT_PUBLIC_SOROBAN_CONTRACT_ID',
+} as const;
+
 export const CLIENT_SAFE_RUNTIME_ENV_KEYS = [
   'NEXT_PUBLIC_ACTIVITY_FIXTURES',
   'NEXT_PUBLIC_APP_URL',
   'NEXT_PUBLIC_APP_VERSION',
+  // Deprecated alias of NEXT_PUBLIC_SOROBAN_CONTRACT_ID — still read, see
+  // DEPRECATED_RUNTIME_ENV_ALIASES.
   'NEXT_PUBLIC_CONTRACT_ADDRESS',
   'NEXT_PUBLIC_CONTRACT_NAME',
   'NEXT_PUBLIC_DISABLE_TELEMETRY',
   'NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER',
   'NEXT_PUBLIC_NETWORK',
-  'NEXT_PUBLIC_NETWORK_TYPE',
   'NEXT_PUBLIC_PREDINEX_ALLOWED_EMBED_ORIGIN',
   'NEXT_PUBLIC_SOROBAN_CONTRACT_ID',
   'NEXT_PUBLIC_SOROBAN_RPC_URL',

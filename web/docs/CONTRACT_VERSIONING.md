@@ -83,7 +83,7 @@ stellar contract deploy \
   --source <deployer-account>
 ```
 
-Note the returned **contract ID** — this is the new `NEXT_PUBLIC_CONTRACT_ADDRESS`.
+Note the returned **contract ID** — this is the new `NEXT_PUBLIC_SOROBAN_CONTRACT_ID`.
 
 ### 4. Initialize
 
@@ -101,7 +101,7 @@ stellar contract invoke \
 Update `.env.local` (local) and the CI/CD secrets with the new contract ID:
 
 ```env
-NEXT_PUBLIC_CONTRACT_ADDRESS=<new-contract-id>
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=<new-contract-id>
 NEXT_PUBLIC_NETWORK=testnet   # or mainnet
 ```
 
@@ -136,7 +136,7 @@ stellar contract invoke \
 1. Bump `version` in `Cargo.toml` from `0.x.y` to `1.0.0`.
 2. Deploy the new contract under a **new contract ID** (Soroban contracts are immutable once deployed).
 3. The old contract remains accessible (read-only migrations are safe).
-4. Frontend: update `NEXT_PUBLIC_CONTRACT_ADDRESS` to the new ID; the old ID should be kept for historical event queries.
+4. Frontend: update `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` to the new ID; the old ID should be kept for historical event queries.
 5. If any live pools exist at migration time, coordinate with pool creators to settle before the cut-over, or provide a migration admin function that re-creates pools from the old contract's state.
 6. Update `CONTRACT_EVENTS.md` and `CONTRACT_VERSIONING.md`.
 7. Tag the release in git: `git tag -a v1.0.0 -m "Breaking: Pool struct migration"`.
@@ -148,7 +148,7 @@ stellar contract invoke \
 | Frontend version | Contract version | Compatible? |
 |-----------------|-----------------|-------------|
 | ≥ 0.1           | 0.1.x           | ✅ Yes       |
-| 0.1             | 1.0.0 (future)  | ❌ No — update `NEXT_PUBLIC_CONTRACT_ADDRESS` and adapt API calls |
+| 0.1             | 1.0.0 (future)  | ❌ No — update `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` and adapt API calls |
 
 ---
 

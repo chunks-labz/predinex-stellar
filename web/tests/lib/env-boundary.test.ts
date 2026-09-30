@@ -5,10 +5,15 @@ import { describe, expect, it } from 'vitest';
 import {
   assertClientEnvAccessIsSafe,
   CLIENT_SAFE_RUNTIME_ENV_KEYS,
+  DEPRECATED_RUNTIME_ENV_ALIASES,
 } from '../../app/lib/env-boundary';
 
 const CLIENT_SOURCE_ROOTS = ['app', 'lib'];
 const SOURCE_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
+// Matches an assignment at the start of a line, ignoring comments, so
+// NEXT_PUBLIC_FOO=<value> in the example is the only thing that counts as
+// "documented" and a mention inside prose does not satisfy the check.
+const ENV_ASSIGNMENT_PATTERN = /^([A-Z0-9_]+)=/gm;
 
 // Next.js App Router route handlers run only on the server and are never bundled
 // for the browser, so reading server-only env there is correct. The guard exists
@@ -60,6 +65,17 @@ function collectClientEnvAccesses(webRoot: string): string[] {
   return accesses;
 }
 
+function collectDocumentedEnvKeys(webRoot: string): Set<string> {
+  const examplePath = path.join(webRoot, '.env.example');
+  expect(
+    fs.existsSync(examplePath),
+    'web/.env.example is missing — it is the documented source of truth for runtime env'
+  ).toBe(true);
+
+  const content = fs.readFileSync(examplePath, 'utf8');
+  return new Set([...content.matchAll(ENV_ASSIGNMENT_PATTERN)].map((match) => match[1]));
+}
+
 describe('env boundary guardrails', () => {
   const currentFilePath = fileURLToPath(import.meta.url);
   const currentDirPath = path.dirname(currentFilePath);
@@ -82,7 +98,6 @@ describe('env boundary guardrails', () => {
         "NEXT_PUBLIC_DISABLE_TELEMETRY",
         "NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER",
         "NEXT_PUBLIC_NETWORK",
-        "NEXT_PUBLIC_NETWORK_TYPE",
         "NEXT_PUBLIC_PREDINEX_ALLOWED_EMBED_ORIGIN",
         "NEXT_PUBLIC_SOROBAN_CONTRACT_ID",
         "NEXT_PUBLIC_SOROBAN_RPC_URL",
@@ -94,6 +109,37 @@ describe('env boundary guardrails', () => {
         "NEXT_PUBLIC_WEBHOOK_URL",
       ]
     `);
+  });
+
+  // #1308 — a key that the app reads but that is absent from .env.example is
+  // invisible to anyone auditing a deployment's environment, so it silently
+  // takes whatever default runtime-config picks. Driven off the allowlist so the
+  // allowlist stays the single source of truth: add a key there and this fails
+  // until it is documented, remove one and it drops out of scope.
+  it('documents every client-safe runtime env key in .env.example', () => {
+    const documentedKeys = collectDocumentedEnvKeys(webRoot);
+    const undocumented = CLIENT_SAFE_RUNTIME_ENV_KEYS.filter((key) => !documentedKeys.has(key));
+
+    expect(
+      undocumented,
+      `These keys are readable by the browser bundle but missing from web/.env.example: ${undocumented.join(', ')}`
+    ).toEqual([]);
+  });
+
+  it('keeps deprecated aliases pointed at a key that is still documented', () => {
+    const documentedKeys = collectDocumentedEnvKeys(webRoot);
+
+    for (const [alias, canonical] of Object.entries(DEPRECATED_RUNTIME_ENV_ALIASES)) {
+      expect(CLIENT_SAFE_RUNTIME_ENV_KEYS).toContain(alias);
+      expect(
+        documentedKeys.has(alias),
+        `Deprecated alias ${alias} must stay in .env.example so operators can find and rename it`
+      ).toBe(true);
+      expect(
+        documentedKeys.has(canonical),
+        `Canonical name ${canonical} must be documented in .env.example`
+      ).toBe(true);
+    }
   });
 
   it('does not allow the webhook signing secret to be exposed to the client', () => {

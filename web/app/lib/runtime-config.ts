@@ -1,5 +1,6 @@
 import { WALLETCONNECT_CONFIG } from './walletconnect-config';
 import { NETWORK_CONFIG as ANALYTICS_NETWORK_CONFIG } from './analytics/config';
+import { DEPRECATED_RUNTIME_ENV_ALIASES } from './env-boundary';
 
 export type SupportedNetwork = 'mainnet' | 'testnet';
 
@@ -99,22 +100,67 @@ function getOptionalEnv(name: string): string | undefined {
   return env ? env : undefined;
 }
 
-function resolveContractConfig(network: SupportedNetwork): ContractConfig {
-  const envAddress = getOptionalEnv('NEXT_PUBLIC_CONTRACT_ADDRESS');
+const warnedDeprecatedAliases = new Set<string>();
+
+function warnDeprecatedAliasOnce(alias: string, canonical: string): void {
+  if (warnedDeprecatedAliases.has(alias)) return;
+  warnedDeprecatedAliases.add(alias);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[runtime-config] ${alias} is deprecated. Set ${canonical} instead; ` +
+      `both resolve to the same contract id, so this can be renamed with no behaviour change.`
+  );
+}
+
+/**
+ * Resolve the single deployed contract id.
+ *
+ * #1308 — `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` is canonical. The former
+ * `NEXT_PUBLIC_CONTRACT_ADDRESS` is still honoured as a deprecated alias so
+ * existing deployments keep working, but both names now feed the same value.
+ * Previously the two were read into different fields, so a deployment that set
+ * only one of them could have contract reads and Soroban event reads pointed at
+ * two different contracts.
+ *
+ * When both are set the canonical name wins, so an operator who migrates takes
+ * effect immediately instead of being shadowed by the value they just replaced.
+ */
+function resolveContractIdFromEnv(): string | undefined {
+  const legacy = getOptionalEnv('NEXT_PUBLIC_CONTRACT_ADDRESS');
+  if (legacy) {
+    warnDeprecatedAliasOnce(
+      'NEXT_PUBLIC_CONTRACT_ADDRESS',
+      DEPRECATED_RUNTIME_ENV_ALIASES.NEXT_PUBLIC_CONTRACT_ADDRESS
+    );
+  }
+
+  return getOptionalEnv('NEXT_PUBLIC_SOROBAN_CONTRACT_ID') ?? legacy;
+}
+
+function resolveContractConfig(
+  network: SupportedNetwork,
+  envContractId: string | undefined
+): ContractConfig {
   const envName = getOptionalEnv('NEXT_PUBLIC_CONTRACT_NAME');
 
-  if (envAddress || envName) {
-    if (!envAddress || !envName) {
-      throw new Error(
-        'NEXT_PUBLIC_CONTRACT_ADDRESS and NEXT_PUBLIC_CONTRACT_NAME must both be set when overriding contract coordinates.'
-      );
-    }
-
+  if (envContractId) {
+    // The env-supplied id is passed through unvalidated: deployments have
+    // historically used both C... contract ids and the legacy S... account
+    // form, and rejecting either here would break them. Only the built-in
+    // analytics fallback is format-checked.
     return {
-      address: envAddress,
-      name: envName,
-      id: `${envAddress}.${envName}`,
+      address: envContractId,
+      name: envName ?? '',
+      id: envName ? `${envContractId}.${envName}` : envContractId,
     };
+  }
+
+  if (envName) {
+    throw new Error(
+      'NEXT_PUBLIC_CONTRACT_NAME must not be set on its own. Set ' +
+        'NEXT_PUBLIC_SOROBAN_CONTRACT_ID (or the deprecated NEXT_PUBLIC_CONTRACT_ADDRESS) ' +
+        'to the contract name NEXT_PUBLIC_CONTRACT_NAME refers to.'
+    );
   }
 
   type AnalyticsNetworkKey = keyof typeof ANALYTICS_NETWORK_CONFIG;
@@ -155,10 +201,10 @@ export function getRuntimeConfig(): RuntimeConfig {
     throw new Error(`Missing Soroban RPC URLs for network '${network}' in wallet configuration.`);
   }
 
-  // Soroban contract ID — used by the Stellar event/read path.
-  const sorobanContractId =
-    (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_SOROBAN_CONTRACT_ID) || '';
-  const contract = resolveContractConfig(network);
+  // Deployed contract id — one canonical value feeding both the contract
+  // coordinates and the Soroban event/read path (#1308).
+  const envContractId = resolveContractIdFromEnv();
+  const contract = resolveContractConfig(network, envContractId);
 
   const appVersion = getOptionalEnv('NEXT_PUBLIC_APP_VERSION') ?? DEFAULT_APP_VERSION;
 
@@ -174,7 +220,7 @@ export function getRuntimeConfig(): RuntimeConfig {
     soroban: {
       rpcUrl: sorobanNet.rpcUrl,
       explorerUrl: sorobanNet.explorerUrl,
-      contractId: sorobanContractId,
+      contractId: envContractId ?? '',
       bridgeContractId: getOptionalEnv('NEXT_PUBLIC_SOROBAN_BRIDGE_CONTRACT_ID'),
     },
     // Webhook configuration from environment
@@ -207,5 +253,6 @@ function parseWebhookConfig(): WebhookSettings | undefined {
  */
 export function __resetRuntimeConfigForTests(): void {
   cachedConfig = null;
+  warnedDeprecatedAliases.clear();
 }
 

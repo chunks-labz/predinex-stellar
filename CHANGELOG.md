@@ -48,6 +48,11 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Regenerated `web/package-lock.json` so it is back in sync with `web/package.json`; `npm ci` was failing outright, which broke the install step of every workflow that builds `web/` and left the `actions/setup-node` npm cache unusable
 - Dependabot now also covers `/bot`, `/api` (npm) and the root Cargo workspace in addition to `/web` and `/contracts/predinex`, with the same weekly non-major grouping (closes #1174)
 - Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
+- Documented the 9 `NEXT_PUBLIC_*` runtime variables `web/` reads but `.env.example` omitted, including the two mock-data switches (`NEXT_PUBLIC_ACTIVITY_FIXTURES`, `NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER`), `NEXT_PUBLIC_DISABLE_TELEMETRY` and the token display vars, so they are discoverable when auditing a deployment's environment (closes #1308)
+- Added a CI check that fails when a key in `CLIENT_SAFE_RUNTIME_ENV_KEYS` is missing from `web/.env.example`, so the allowlist is now the single source of truth for both the browser-bundle boundary and the documentation, instead of a hand-maintained list
+- Consolidated the deployed contract id onto one canonical name: `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` now feeds both `contract.address` and `soroban.contractId`. Previously `NEXT_PUBLIC_CONTRACT_ADDRESS` and `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` were read into different fields, so a deployment that set only one could point contract reads and Soroban event reads at two different contracts. The old name still works as a deprecated alias and logs a one-time warning (closes #1308)
+- `web/docs/RUNTIME_CONFIG_BOUNDARIES.md` no longer duplicates the client-safe key list by hand; it points at `app/lib/env-boundary.ts` and `.env.example`, which are now enforced by CI (the hand-written copy had already drifted, missing 7 of the 18 keys)
+- Removed `NEXT_PUBLIC_NETWORK_TYPE` from `CLIENT_SAFE_RUNTIME_ENV_KEYS`; it was allowlisted but read nowhere in the codebase (closes #1308)
 
 ---
 
