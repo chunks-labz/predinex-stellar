@@ -15,7 +15,8 @@
  *
  * Configuration via environment:
  *   PORT                 HTTP port (default 3001)
- *   AUTH_SECRET          HMAC secret for payload signing
+ *   AUTH_SECRET          HMAC secret for payload signing (required; the
+ *                        process exits at startup when it is unset)
  *   ADMIN_API_KEYS       comma-separated Admin API keys
  *   OFFICER_API_KEYS     comma-separated ComplianceOfficer keys
  *   ASSESSOR_API_KEYS    comma-separated Assessor keys

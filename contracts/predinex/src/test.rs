@@ -5693,6 +5693,112 @@ fn m7_place_bet_with_referrer_emits_referral_bet_event() {
     assert_eq!(payload.amount, 500);
 }
 
+/// #1226 — Places a referred bet under `fee_rate` bps and returns the decoded
+/// `(place_bet, referral_bet)` payloads plus the pool's cumulative volume.
+fn place_referred_bet_with_fee(
+    fee_rate: u32,
+    amount: i128,
+) -> (crate::BetEvent, crate::ReferralBetEvent, i128) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let treasury_recipient = Address::generate(&env);
+    client.initialize(
+        &token_id.address(),
+        &treasury_recipient,
+        &treasury_recipient,
+    );
+    let fee_recipient = Address::generate(&env);
+    client.set_fee_config(&treasury_recipient, &fee_rate, &fee_recipient);
+
+    let creator = Address::generate(&env);
+    let user = Address::generate(&env);
+    let referrer = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    token_admin_client.mint(&user, &amount);
+
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Referral Fee Pool"),
+        &String::from_str(&env, "Event amounts net of fee"),
+        &String::from_str(&env, "A"),
+        &String::from_str(&env, "B"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    client.place_bet(&user, &pool_id, &0, &amount, &Some(referrer.clone()));
+
+    let events = env.events().all();
+    let mut place_bet: Option<crate::BetEvent> = None;
+    let mut referral_bet: Option<crate::ReferralBetEvent> = None;
+    for event in events.events().iter() {
+        let topic0: Result<soroban_sdk::Symbol, _> =
+            soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 0));
+        let Ok(topic0) = topic0 else { continue };
+        let data_val: Val = match &event.body {
+            soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+                Env,
+                soroban_sdk::xdr::ScVal,
+            >>::try_from_val(&env, &v0.data)
+            .unwrap(),
+        };
+        if topic0 == soroban_sdk::Symbol::new(&env, "place_bet") {
+            place_bet = Some(soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap());
+        } else if topic0 == soroban_sdk::Symbol::new(&env, "referral_bet") {
+            referral_bet = Some(soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap());
+        }
+    }
+
+    let cumulative_volume = client.get_pool(&pool_id).unwrap().cumulative_volume;
+    (
+        place_bet.expect("place_bet event must be emitted"),
+        referral_bet.expect("referral_bet event must be emitted"),
+        cumulative_volume,
+    )
+}
+
+/// #1226 — With a non-zero fee, place_bet and referral_bet report the same
+/// (net) amount, which reconciles against the pool's cumulative volume.
+#[test]
+fn test_1226_referral_bet_amount_matches_place_bet_with_fee() {
+    let amount: i128 = 1_000_000;
+    let fee_rate: u32 = 200;
+    let (place_bet, referral_bet, cumulative_volume) =
+        place_referred_bet_with_fee(fee_rate, amount);
+
+    let fee_amount = amount * fee_rate as i128 / 10_000;
+    let net_amount = amount - fee_amount;
+
+    assert_eq!(place_bet.amount, referral_bet.amount);
+    assert_eq!(place_bet.amount, net_amount);
+    assert_eq!(referral_bet.amount, 980_000);
+    assert_eq!(net_amount + fee_amount, amount);
+    assert_eq!(cumulative_volume, referral_bet.amount);
+}
+
+/// #1226 — With a 10% fee, the emitted amounts differ from the gross bet by
+/// exactly the fee.
+#[test]
+fn test_1226_bet_event_amounts_differ_from_gross_by_exactly_fee() {
+    let amount: i128 = 1_000_000;
+    let (place_bet, referral_bet, cumulative_volume) = place_referred_bet_with_fee(1000, amount);
+
+    let fee_amount = 100_000;
+    assert_eq!(amount - place_bet.amount, fee_amount);
+    assert_eq!(amount - referral_bet.amount, fee_amount);
+    assert_eq!(place_bet.amount, referral_bet.amount);
+    assert_eq!(cumulative_volume, 900_000);
+}
+
 /// M8: claim_referral_rewards emits an event with correct topics and payload.
 #[test]
 fn m8_claim_referral_rewards_emits_referral_reward_claimed_event() {

@@ -10,8 +10,12 @@
  *     the address branch was unreachable.
  */
 import { describe, expect, it } from 'vitest';
-import { Address, StrKey, xdr } from '@stellar/stellar-sdk';
-import { parseScVal } from '../../app/lib/soroban-read-api';
+import { Address, Networks, StrKey, TransactionBuilder, xdr } from '@stellar/stellar-sdk';
+import {
+  buildReadTransactionXDR,
+  parseScVal,
+  readArgToScVal,
+} from '../../app/lib/soroban-read-api';
 import { encodeEd25519PublicKey, encodeScContractAddress } from '../../app/lib/strkey';
 
 const SEP23_PUBLIC_KEY = Buffer.from(
@@ -121,5 +125,34 @@ describe('parseScVal — neighbouring union tags', () => {
   it('returns null for SCV_VOID and for empty input', () => {
     expect(parseScVal(xdr.ScVal.scvVoid().toXDR('base64'))).toBeNull();
     expect(parseScVal('')).toBeNull();
+  });
+});
+
+describe('buildReadTransactionXDR (#1283)', () => {
+  it('builds a real base64 envelope invoking the contract function', () => {
+    const envelope = buildReadTransactionXDR(
+      SEP23_CONTRACT,
+      'get_user_bet',
+      [1, SEP23_ACCOUNT],
+      Networks.TESTNET
+    );
+    expect(envelope.startsWith('tx:')).toBe(false);
+
+    const tx = TransactionBuilder.fromXDR(envelope, Networks.TESTNET);
+    const op = tx.operations[0] as unknown as { func: xdr.HostFunction };
+    const invoke = op.func.invokeContract();
+
+    expect(Address.fromScAddress(invoke.contractAddress()).toString()).toBe(SEP23_CONTRACT);
+    expect(invoke.functionName().toString()).toBe('get_user_bet');
+    expect(invoke.args()[0].u32()).toBe(1);
+    expect(Address.fromScVal(invoke.args()[1]).toString()).toBe(SEP23_ACCOUNT);
+  });
+
+  it('encodes u32 arguments big-endian', () => {
+    expect(readArgToScVal(1).toXDR('hex')).toBe('0000000300000001');
+  });
+
+  it('rejects numbers outside the u32 range', () => {
+    expect(() => readArgToScVal(-1)).toThrow(TypeError);
   });
 });
