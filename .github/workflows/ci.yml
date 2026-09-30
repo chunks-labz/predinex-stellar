@@ -317,6 +317,43 @@ jobs:
         working-directory: .
         run: cargo test --workspace
 
+      # #1305 — `cargo test --workspace` passing says nothing about whether a
+      # crate's tests were compiled: tests behind a module the crate never
+      # declares are invisible to the runner, so the step goes green while the
+      # crate contributes zero. contracts/pool shipped that way, with a full
+      # test file and a `testutils` dev-dependency paid for but never used.
+      #
+      # Only crates that actually declare tests are checked, so a crate with no
+      # tests yet is not a failure — the assertion is "tests written must run",
+      # not "every crate must have tests".
+      - name: Assert declared tests are actually compiled and run
+        working-directory: .
+        run: |
+          set -uo pipefail
+          failed=0
+          for manifest in contracts/*/Cargo.toml stellar-lend/contracts/*/Cargo.toml; do
+            [ -f "$manifest" ] || continue
+            crate_dir="$(dirname "$manifest")"
+            crate="$(basename "$crate_dir")"
+            src_dir="$crate_dir/src"
+            [ -d "$src_dir" ] || continue
+
+            declared=$(grep -rhoE '#\[test\]' "$src_dir" --include='*.rs' 2>/dev/null | wc -l | tr -d ' ')
+            if [ "$declared" -eq 0 ]; then
+              echo "$crate: no tests declared"
+              continue
+            fi
+
+            ran=$(cargo test -p "$crate" -- --list 2>/dev/null | grep -cE ': test$' || true)
+            if [ "$ran" -eq 0 ]; then
+              echo "::error file=$manifest,title=Uncompiled tests::$crate declares $declared test(s) but cargo runs none of them. Check that every test module is declared in lib.rs."
+              failed=1
+            else
+              echo "$crate: $ran/$declared tests compiled and run"
+            fi
+          done
+          exit "$failed"
+
       - name: Cache stellar-cli
         id: stellar-cli-cache
         uses: actions/cache@v4
