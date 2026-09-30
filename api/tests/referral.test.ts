@@ -112,4 +112,53 @@ describe('Referral Route (Issue #1199)', () => {
       amount: '2500000',
     });
   });
+
+  it('authenticates caller via Authorization Bearer header', async () => {
+    const mockInvoker = vi.fn(async (req: RecordReferralRequest) => ({
+      txHash: '0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
+      callerAddress: req.callerAddress,
+      referrerAddress: req.referrerAddress,
+      poolId: req.poolId,
+      amount: req.amount,
+      recordedAt: '2026-09-26T22:00:00.000Z',
+    }));
+
+    service.setContractInvoker(mockInvoker);
+
+    const res = await request(app)
+      .post('/api/referral')
+      .set('Authorization', `Bearer ${testApiKey}`)
+      .send({
+        callerAddress: validCaller,
+        referrerAddress: validReferrer,
+        poolId: 1,
+        amount: '2500000',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockInvoker).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 501 Not Implemented when on-chain contract invoker is not configured', async () => {
+    // Unset / default service has no invoker wired
+    const defaultService = new ReferralContractService();
+    const testApp = express();
+    testApp.use(express.json());
+    testApp.use('/api/referral', createReferralRouter(defaultService, authValidator));
+
+    const res = await request(testApp)
+      .post('/api/referral')
+      .set('x-api-key', testApiKey)
+      .send({
+        callerAddress: validCaller,
+        referrerAddress: validReferrer,
+        poolId: 1,
+        amount: '2500000',
+      });
+
+    expect(res.status).toBe(501);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error).toContain('not yet implemented');
+  });
 });
