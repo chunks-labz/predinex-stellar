@@ -156,6 +156,10 @@ export class InsuranceRouteHandler {
  */
 export const insuranceRouter = Router();
 
+// One handler (and engine) for the router's lifetime so state — records,
+// policies, daily volume counters — persists across requests.
+const handler = new InsuranceRouteHandler();
+
 insuranceRouter.use(authMiddleware);
 insuranceRouter.use(rateLimitMiddleware);
 
@@ -169,30 +173,25 @@ insuranceRouter.get('/health', (_req: Request, res: Response) => {
 });
 
 insuranceRouter.get('/pools', (req: Request, res: Response) => {
-  const handler = new InsuranceRouteHandler();
   res.json(handler.handleListPools());
 });
 
 insuranceRouter.post('/quote', (req: Request, res: Response) => {
-  const handler = new InsuranceRouteHandler();
   const result = handler.handleGetQuote(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 insuranceRouter.post('/purchase', (req: Request, res: Response) => {
-  const handler = new InsuranceRouteHandler();
   const result = handler.handlePurchase(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 insuranceRouter.post('/claim', (req: Request, res: Response) => {
-  const handler = new InsuranceRouteHandler();
   const result = handler.handleSubmitClaim(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 insuranceRouter.get('/audit/:poolId', (req: Request, res: Response) => {
-  const handler = new InsuranceRouteHandler();
   const poolId = parseInt(req.params.poolId, 10);
   if (!Number.isInteger(poolId)) {
     res.status(400).json({

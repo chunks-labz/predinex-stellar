@@ -89,6 +89,10 @@ export class ReputationRouteHandler {
  */
 export const reputationRouter = Router();
 
+// One handler (and engine) for the router's lifetime so state — records,
+// policies, daily volume counters — persists across requests.
+const handler = new ReputationRouteHandler();
+
 reputationRouter.use(authMiddleware);
 reputationRouter.use(rateLimitMiddleware);
 
@@ -102,19 +106,16 @@ reputationRouter.get('/health', (_req: Request, res: Response) => {
 });
 
 reputationRouter.get('/profile/:address', (req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   const result = handler.handleGetProfile(req.params.address);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 reputationRouter.post('/simulate', (req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   const result = handler.handleSimulateAction(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
 reputationRouter.get('/leaderboard', (_req: Request, res: Response) => {
-  const handler = new ReputationRouteHandler();
   res.json(handler.handleLeaderboard());
 });
 

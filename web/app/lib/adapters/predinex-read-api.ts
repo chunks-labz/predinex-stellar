@@ -93,7 +93,10 @@ async function getUserActivitySoroban(
 async function getPool(poolId: number): Promise<Pool | null> {
   const result = await getPoolFromSoroban(poolId);
   if (result.error) {
+    // Surface read failures: returning null here made a broken RPC path look
+    // identical to "pool does not exist".
     log.error(`[predinexReadApi] Error fetching pool ${poolId}:`, result.error);
+    throw new Error(result.error);
   }
 
   if (!result.pool) return null;
@@ -121,6 +124,7 @@ async function getUserBet(
       `[predinexReadApi] Error fetching user bet for pool ${poolId}:`,
       result.error,
     );
+    throw new Error(result.error);
   }
   return result.bet;
 }

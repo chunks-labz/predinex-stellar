@@ -98,6 +98,10 @@ export class ComplianceRouteHandler {
  */
 export const complianceRouter = Router();
 
+// One handler (and engine) for the router's lifetime so state — records,
+// policies, daily volume counters — persists across requests.
+const handler = new ComplianceRouteHandler();
+
 complianceRouter.use(authMiddleware);
 complianceRouter.use(rateLimitMiddleware);
 
@@ -111,7 +115,6 @@ complianceRouter.get('/health', (_req: Request, res: Response) => {
 });
 
 complianceRouter.post('/verify', (req: Request, res: Response) => {
-  const handler = new ComplianceRouteHandler();
   const result = handler.handleVerifyTransaction(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
@@ -121,14 +124,12 @@ complianceRouter.post(
   strictRateLimitMiddleware,
   requireComplianceOfficer,
   (req: Request, res: Response) => {
-    const handler = new ComplianceRouteHandler();
     const result = handler.handleRegister(req.body);
     res.status(result.success ? 200 : 400).json(result);
   }
 );
 
 complianceRouter.get('/status/:address', (req: Request, res: Response) => {
-  const handler = new ComplianceRouteHandler();
   const result = handler.handleGetStatus(req.params.address);
   res.status(result.success ? 200 : 404).json(result);
 });
