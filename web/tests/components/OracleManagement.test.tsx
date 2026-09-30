@@ -1,5 +1,5 @@
 import React from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OracleManagementPage from '../../app/oracle-management/page';
@@ -8,6 +8,7 @@ import { __resetRuntimeConfigForTests } from '../../app/lib/runtime-config';
 
 describe('OracleManagement route', () => {
   const originalFlagValue = process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG];
+  const originalNodeEnv = process.env.NODE_ENV;
   const originalOracleAddress = process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
 
   beforeEach(() => {
@@ -22,12 +23,18 @@ describe('OracleManagement route', () => {
     } else {
       process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = originalFlagValue;
     }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
     if (originalOracleAddress === undefined) {
       delete process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
     } else {
       process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS = originalOracleAddress;
     }
     __resetRuntimeConfigForTests();
+    vi.restoreAllMocks();
   });
 
   it('hides mock oracle actions when the placeholder flag is disabled', () => {
@@ -86,5 +93,35 @@ describe('OracleManagement route', () => {
 
     const input = screen.getByRole('textbox', { hidden: true });
     expect(input).toHaveAttribute('placeholder', testAddress);
+  });
+
+  // #1306 — the flag is NEXT_PUBLIC_*, so its value is inlined into the bundle
+  // and a production build that had it set served mockProviders/mockSubmissions
+  // — reliability scores, resolution counts, pool ids — to real users with no
+  // indication they were fabricated. NODE_ENV is inlined the same way, so the
+  // refusal is checked here through the rendered route rather than only at the
+  // flag helper.
+  it('refuses the fixture-backed panel in a production build even when the flag is set', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NODE_ENV = 'production';
+
+    render(<OracleManagementPage />);
+
+    expect(screen.getByText(/oracle management is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/oracle management preview/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /register preview/i })).not.toBeInTheDocument();
+  });
+
+  it('reports the refused production flag instead of ignoring it silently', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NODE_ENV = 'production';
+
+    render(<OracleManagementPage />);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(`${ORACLE_MANAGEMENT_PLACEHOLDER_FLAG}=true was ignored`)
+    );
   });
 });

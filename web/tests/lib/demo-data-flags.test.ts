@@ -15,9 +15,11 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   ACTIVITY_FIXTURES_FLAG,
   DISPUTE_MOCK_DATA_FLAG,
+  ORACLE_MANAGEMENT_PLACEHOLDER_FLAG,
   areActivityFixturesEnabled,
   isDemoDataFlagEnabled,
   isDisputeMockDataEnabled,
+  isOracleManagementPlaceholderEnabled,
   isProductionBuild,
 } from '../../app/lib/feature-flags';
 
@@ -103,6 +105,41 @@ describe('demo-data flag guard (#1306)', () => {
 
     setEnv({ NODE_ENV: undefined });
     expect(isProductionBuild()).toBe(false);
+  });
+
+  it('refuses the oracle management placeholder in a production build', () => {
+    // The third switch that fabricates data. It used to read the variable
+    // directly, so a production build with it set served mock oracle providers
+    // and submissions — reliability scores, resolution counts, pool ids — as if
+    // they were live.
+    setEnv({ NODE_ENV: 'production', [ORACLE_MANAGEMENT_PLACEHOLDER_FLAG]: 'true' });
+    expect(isOracleManagementPlaceholderEnabled()).toBe(false);
+
+    setEnv({ NODE_ENV: 'development', [ORACLE_MANAGEMENT_PLACEHOLDER_FLAG]: 'true' });
+    expect(isOracleManagementPlaceholderEnabled()).toBe(true);
+
+    setEnv({ NODE_ENV: 'development', [ORACLE_MANAGEMENT_PLACEHOLDER_FLAG]: 'false' });
+    expect(isOracleManagementPlaceholderEnabled()).toBe(false);
+
+    setEnv({ NODE_ENV: 'development', [ORACLE_MANAGEMENT_PLACEHOLDER_FLAG]: undefined });
+    expect(isOracleManagementPlaceholderEnabled()).toBe(false);
+  });
+
+  it('names the oracle management placeholder in the refusal log', () => {
+    setEnv({ NODE_ENV: 'production', [ORACLE_MANAGEMENT_PLACEHOLDER_FLAG]: 'true' });
+
+    isOracleManagementPlaceholderEnabled();
+
+    expect(console.error).toHaveBeenCalledWith(
+      expect.stringContaining(`${ORACLE_MANAGEMENT_PLACEHOLDER_FLAG}=true was ignored`)
+    );
+  });
+
+  it('stays silent about the oracle management placeholder when it is not enabled', () => {
+    setEnv({ NODE_ENV: 'production' });
+
+    expect(isOracleManagementPlaceholderEnabled()).toBe(false);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it('reads the activity fixtures flag from the environment', () => {

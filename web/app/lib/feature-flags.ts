@@ -38,6 +38,11 @@ function isExplicitlyEnabled(value: string | undefined): boolean {
  * one in a production build is refused and logged rather than silently ignored,
  * so the misconfiguration is visible in build and runtime logs.
  *
+ * Every flag that substitutes fabricated data for chain data routes through
+ * here. A flag that fabricates and bypasses this guard is a hole in the same
+ * bug, not a different feature, so a new one belongs in this function's
+ * callers rather than on a second unguarded path.
+ *
  * Refusing is not the whole fix: `DemoDataBanner` renders a persistent marker
  * wherever these flags *are* active, so the state is never silent.
  */
@@ -48,8 +53,8 @@ export function isDemoDataFlagEnabled(flag: string, value: string | undefined): 
     // eslint-disable-next-line no-console
     console.error(
       `[feature-flags] ${flag}=true was ignored: this is a production build and ` +
-        'demo-data flags are refused there. Fabricated activity or disputes must never ' +
-        'be served to real users. Remove the variable from the build environment.'
+        'demo-data flags are refused there. Fabricated activity, dispute or oracle data ' +
+        'must never be served to real users. Remove the variable from the build environment.'
     );
     return false;
   }
@@ -78,8 +83,23 @@ export function areActivityFixturesEnabled(): boolean {
   return isDemoDataFlagEnabled(ACTIVITY_FIXTURES_FLAG, readEnv()[ACTIVITY_FIXTURES_FLAG]);
 }
 
+/**
+ * True when the fixture-backed oracle management preview is being served
+ * instead of live oracle administration.
+ *
+ * Gated by the same guard as the other demo-data flags, and for the same
+ * reason: enabled in a production build it puts the fixtures in
+ * `app/lib/fixtures/oracleManagement.ts` — mock providers with reliability
+ * scores and resolution counts, and mock submissions with pool ids and data
+ * values — in front of users who would reasonably read them as live. The
+ * disabled state already claims "fixture-backed oracle actions are hidden from
+ * production surfaces", which was only true while nobody set the flag.
+ */
 export function isOracleManagementPlaceholderEnabled(): boolean {
-  return isExplicitlyEnabled(readOracleManagementPlaceholderFlag());
+  return isDemoDataFlagEnabled(
+    ORACLE_MANAGEMENT_PLACEHOLDER_FLAG,
+    readOracleManagementPlaceholderFlag()
+  );
 }
 
 export function isDisputeMockDataEnabled(): boolean {
