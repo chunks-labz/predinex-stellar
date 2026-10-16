@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { PredinexWidgetProps, WidgetPool } from './types';
 import { buildCSSVars, pct } from './utils';
 import { WIDGET_CSS } from './styles';
@@ -156,17 +156,20 @@ export function PredinexWidget({
 
   const [pool, setPool] = useState<WidgetPool | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fetchPoolRef = useRef(fetchPool);
+  fetchPoolRef.current = fetchPool;
 
   useEffect(() => {
     if (poolId === undefined) return;
     let cancelled = false;
-    fetchPool(contractId, poolId)
-      .then((p) => { if (!cancelled) setPool(p); })
+    setError(null);
+    fetchPoolRef.current(contractId, poolId)
+      .then((p) => { if (!cancelled) { setError(null); setPool(p); } })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : 'Failed to load pool.');
       });
     return () => { cancelled = true; };
-  }, [contractId, poolId, fetchPool]);
+  }, [contractId, poolId]);
 
   return (
     <div className="pdx-widget" style={buildCSSVars(theme)}>

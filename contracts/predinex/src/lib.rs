@@ -10514,6 +10514,37 @@ impl PredinexContract {
                         total_liabilities = total_liabilities
                             .checked_add(bettor_liability)
                             .ok_or(ContractError::PoolTotalOverflow)?;
+                    } else if env
+                        .storage()
+                        .persistent()
+                        .has(&DataKey::PoolExpiredRefundCursor(pid))
+                    {
+                        // A cancelled pool can still be mid-sweep. The cursor
+                        // marks bettors whose refunds remain outstanding; they
+                        // must stay reserved until the final batch clears it.
+                        let bettors = env
+                            .storage()
+                            .persistent()
+                            .get::<_, Vec<Address>>(&DataKey::PoolBettors(pid))
+                            .unwrap_or_else(|| Vec::new(&env));
+                        let start = env
+                            .storage()
+                            .persistent()
+                            .get::<_, u32>(&DataKey::PoolExpiredRefundCursor(pid))
+                            .unwrap_or(0);
+                        let mut pending_refunds: i128 = 0;
+                        for idx in start..bettors.len() {
+                            if let Some(user_bet) = env.storage().persistent().get::<_, UserBet>(
+                                &DataKey::UserBet(pid, bettors.get(idx).unwrap()),
+                            ) {
+                                pending_refunds = pending_refunds
+                                    .checked_add(user_bet.total_bet)
+                                    .ok_or(ContractError::PoolTotalOverflow)?;
+                            }
+                        }
+                        total_liabilities = total_liabilities
+                            .checked_add(pending_refunds)
+                            .ok_or(ContractError::PoolTotalOverflow)?;
                     }
                 }
             }

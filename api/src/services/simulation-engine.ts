@@ -30,6 +30,20 @@ export class SimulationEngine {
     // 2. Clone and Apply Simulation Parameters (Price Shocks, Collateral Deltas, Debt Deltas, Time Deltas)
     const simulatedCollaterals: CollateralInput[] = request.collaterals.map(c => ({ ...c }));
     const simulatedBorrows: BorrowInput[] = request.borrows.map(b => ({ ...b }));
+    const collateralIndexes = new Map<string, number[]>();
+    simulatedCollaterals.forEach((col, index) => {
+      const key = col.asset.toLowerCase();
+      const indexes = collateralIndexes.get(key) ?? [];
+      indexes.push(index);
+      collateralIndexes.set(key, indexes);
+    });
+    const borrowIndexes = new Map<string, number[]>();
+    simulatedBorrows.forEach((borrow, index) => {
+      const key = borrow.asset.toLowerCase();
+      const indexes = borrowIndexes.get(key) ?? [];
+      indexes.push(index);
+      borrowIndexes.set(key, indexes);
+    });
 
     // Apply Price Shocks
     if (request.priceShocks && Array.isArray(request.priceShocks)) {
@@ -38,15 +52,13 @@ export class SimulationEngine {
         const clampedShockBps = Math.max(-9999, Math.min(100_000, shock.shockBps));
         const multiplier = (10_000 + clampedShockBps) / 10_000;
 
-        for (const col of simulatedCollaterals) {
-          if (col.asset.toLowerCase() === shock.asset.toLowerCase()) {
-            col.priceUsd = Math.max(0.0000001, col.priceUsd * multiplier);
-          }
+        for (const index of collateralIndexes.get(shock.asset.toLowerCase()) ?? []) {
+          const col = simulatedCollaterals[index];
+          col.priceUsd = Math.max(0.0000001, col.priceUsd * multiplier);
         }
-        for (const b of simulatedBorrows) {
-          if (b.asset.toLowerCase() === shock.asset.toLowerCase()) {
-            b.priceUsd = Math.max(0.0000001, b.priceUsd * multiplier);
-          }
+        for (const index of borrowIndexes.get(shock.asset.toLowerCase()) ?? []) {
+          const b = simulatedBorrows[index];
+          b.priceUsd = Math.max(0.0000001, b.priceUsd * multiplier);
         }
       }
     }
@@ -55,12 +67,11 @@ export class SimulationEngine {
     if (request.collateralDeltas && Array.isArray(request.collateralDeltas)) {
       for (const delta of request.collateralDeltas) {
         const cleanDelta = BigInt(delta.deltaAmount || '0');
-        for (const col of simulatedCollaterals) {
-          if (col.asset.toLowerCase() === delta.asset.toLowerCase()) {
-            const current = BigInt(col.amount);
-            const updated = current + cleanDelta;
-            col.amount = (updated > 0n ? updated : 0n).toString();
-          }
+        for (const index of collateralIndexes.get(delta.asset.toLowerCase()) ?? []) {
+          const col = simulatedCollaterals[index];
+          const current = BigInt(col.amount);
+          const updated = current + cleanDelta;
+          col.amount = (updated > 0n ? updated : 0n).toString();
         }
       }
     }
@@ -69,12 +80,11 @@ export class SimulationEngine {
     if (request.debtDeltas && Array.isArray(request.debtDeltas)) {
       for (const delta of request.debtDeltas) {
         const cleanDelta = BigInt(delta.deltaAmount || '0');
-        for (const b of simulatedBorrows) {
-          if (b.asset.toLowerCase() === delta.asset.toLowerCase()) {
-            const current = BigInt(b.borrowedAmount);
-            const updated = current + cleanDelta;
-            b.borrowedAmount = (updated > 0n ? updated : 0n).toString();
-          }
+        for (const index of borrowIndexes.get(delta.asset.toLowerCase()) ?? []) {
+          const b = simulatedBorrows[index];
+          const current = BigInt(b.borrowedAmount);
+          const updated = current + cleanDelta;
+          b.borrowedAmount = (updated > 0n ? updated : 0n).toString();
         }
       }
     }

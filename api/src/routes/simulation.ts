@@ -14,6 +14,13 @@ import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 export const DEFAULT_LIQUIDATION_THRESHOLD_BPS = 8000;
 export const DEFAULT_COLLATERAL_FACTOR_BPS = 7500;
 export const DEFAULT_BORROW_RATE_BPS = 500;
+export const MAX_SIMULATION_ASSETS = 500;
+export const MAX_SIMULATION_SHOCKS = 500;
+export const MAX_SIMULATION_DELTAS = 500;
+
+function exceedsLimit(value: unknown, limit: number): boolean {
+  return Array.isArray(value) && value.length > limit;
+}
 
 export class SimulationRouteHandler {
   /**
@@ -37,6 +44,23 @@ export class SimulationRouteHandler {
         error: {
           code: 'MISSING_COLLATERALS',
           message: 'Simulation requires at least one valid collateral asset',
+        },
+        timestamp: Date.now(),
+      };
+    }
+
+    if (
+      exceedsLimit(body.collaterals, MAX_SIMULATION_ASSETS) ||
+      exceedsLimit(body.borrows, MAX_SIMULATION_ASSETS) ||
+      exceedsLimit(body.priceShocks, MAX_SIMULATION_SHOCKS) ||
+      exceedsLimit(body.collateralDeltas, MAX_SIMULATION_DELTAS) ||
+      exceedsLimit(body.debtDeltas, MAX_SIMULATION_DELTAS)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: 'SIMULATION_INPUT_TOO_LARGE',
+          message: `Simulation inputs may contain at most ${MAX_SIMULATION_ASSETS} assets, ${MAX_SIMULATION_SHOCKS} price shocks, and ${MAX_SIMULATION_DELTAS} deltas`,
         },
         timestamp: Date.now(),
       };
@@ -136,8 +160,18 @@ export class SimulationRouteHandler {
       collaterals,
       borrows,
       priceShocks,
-      collateralDeltas: body.collateralDeltas,
-      debtDeltas: body.debtDeltas,
+      collateralDeltas: Array.isArray(body.collateralDeltas)
+        ? body.collateralDeltas.map((delta: any) => ({
+            asset: String(delta?.asset || ''),
+            deltaAmount: String(delta?.deltaAmount || '0'),
+          }))
+        : undefined,
+      debtDeltas: Array.isArray(body.debtDeltas)
+        ? body.debtDeltas.map((delta: any) => ({
+            asset: String(delta?.asset || ''),
+            deltaAmount: String(delta?.deltaAmount || '0'),
+          }))
+        : undefined,
       timeDeltaSeconds: SecuritySanitizer.sanitizePositiveNumber(body.timeDeltaSeconds, 0),
     };
 
