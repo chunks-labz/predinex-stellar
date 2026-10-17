@@ -7,6 +7,14 @@
  * market in a single response. Results are ordered by ascending market id so
  * pages are stable while new markets are appended.
  *
+ * POST /api/markets
+ *
+ * Validates a market creation payload (Issue #1434) with the shared rules in
+ * `services/market-validation.ts` and hands valid payloads, unchanged, to the
+ * configured `MarketCreator`. Invalid payloads get a structured 400 with
+ * field-level `details`. Until an on-chain creator is wired in, valid
+ * payloads receive 501, mirroring the referral route.
+ *
  * Response envelope:
  *   {
  *     success: true,
@@ -19,6 +27,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
+import { CreateMarketRequest, validateCreateMarket } from '../services/market-validation.js';
+import { NotImplementedError } from './budget.js';
 
 export type MarketStatus = 'open' | 'settled' | 'voided' | 'cancelled';
 
@@ -61,9 +71,15 @@ export class InMemoryMarketSource implements MarketSource {
   }
 }
 
+/** Submits a validated market creation request and returns the created market. */
+export type MarketCreator = (req: CreateMarketRequest) => Promise<MarketSummary>;
+
 export const defaultMarketSource = new InMemoryMarketSource();
 
-export function createMarketsRouter(source: MarketSource = defaultMarketSource): Router {
+export function createMarketsRouter(
+  source: MarketSource = defaultMarketSource,
+  creator?: MarketCreator
+): Router {
   const router = Router();
   router.use(rateLimitMiddleware);
 
@@ -93,6 +109,44 @@ export function createMarketsRouter(source: MarketSource = defaultMarketSource):
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/', async (req: Request, res: Response, next: NextFunction) => {
+    const validated = validateCreateMarket(req.body);
+    if (!validated.ok) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid market parameters',
+          details: validated.errors,
+        },
+        timestamp: new Date().toISOString(),
+      });
+      return;
+    }
+
+    try {
+      if (!creator) {
+        throw new NotImplementedError('Market creation on-chain submission is not yet implemented');
+      }
+      const data = await creator(validated.value);
+      res.status(201).json({
+        success: true,
+        data,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      if (err instanceof NotImplementedError || err?.name === 'NotImplementedError') {
+        res.status(501).json({
+          success: false,
+          error: { code: 'NOT_IMPLEMENTED', message: err.message },
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
       next(err);
     }
   });

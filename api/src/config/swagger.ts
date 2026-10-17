@@ -542,6 +542,39 @@ export const openApiDoc = {
           '429': { description: 'Rate limited; see the Retry-After header' },
         },
       },
+      post: {
+        summary: 'Create a market (validated; on-chain submission not yet implemented)',
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'outcomes', 'closeTime'],
+                properties: {
+                  title: { type: 'string', maxLength: 100, description: 'At most 100 bytes' },
+                  outcomes: {
+                    type: 'array',
+                    minItems: 2,
+                    maxItems: 20,
+                    items: { type: 'string', maxLength: 50 },
+                    description: '2-20 unique outcomes, each at most 50 bytes',
+                  },
+                  closeTime: {
+                    type: 'integer',
+                    description: 'Unix seconds, 300 s to 31,536,000 s from now',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Market created' },
+          '400': { description: 'Invalid market parameters; error.details lists each offending field' },
+          '501': { description: 'On-chain market creation is not yet implemented' },
+        },
+      },
     },
     '/api/referral': {
       post: { summary: 'Create a referral', security: [{ apiKey: [] }], responses: { '200': { description: 'Success' } } },
