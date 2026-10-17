@@ -1191,6 +1191,16 @@ pub enum DataKey {
     /// Stores the index of the next bettor to refund so the sweep can be
     /// continued across multiple transactions for large pools.
     PoolExpiredRefundCursor(u32),
+    /// #1413 — Snapshot of the per-pool bet limits in force when a user's
+    /// position in the pool was last opened or added to. `cancel_bet` re-checks
+    /// the remaining stake against these limits so a later
+    /// `set_pool_bet_limits` change only applies to bets placed afterwards.
+    UserBetLimits(u32, Address),
+    /// #1414 — Monotonic count of claim-history entries ever appended for a
+    /// user, including entries dropped by the retention cap. Lets
+    /// `get_user_claim_history` page by a stable absolute sequence offset
+    /// instead of a raw storage index that shifts when old entries are trimmed.
+    UserClaimHistorySeq(Address),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1241,6 +1251,9 @@ const MAX_WEBHOOK_URL_LENGTH: u32 = 512;
 const MIN_POOL_DURATION_SECS: u64 = 300;
 /// #151 / #570 — Maximum pool lifetime in seconds (~1 year / 365 days). Matches web validators and tests.
 const MAX_POOL_DURATION_SECS: u64 = 31_536_000;
+/// #1414 — Maximum claim-history entries retained per user. Older entries are
+/// dropped from the front once this cap is reached.
+const MAX_USER_CLAIM_HISTORY: u32 = 50;
 /// #570 — Maximum duration a single `extend_pool_duration` call may add (30 days).
 ///
 /// The total-lifetime cap (`MAX_POOL_DURATION_SECS`) already bounds how far a
@@ -3682,9 +3695,21 @@ impl PredinexContract {
         {
             return totals;
         }
+        // #1415 — Legacy pools predate `PoolOutcomeTotals`. Rebuild the vector
+        // from the legacy binary fields, but size it to the pool's actual label
+        // set so the result always aligns 1:1 with `read_outcomes`. Without
+        // this, a multi-outcome pool missing its totals key would report two
+        // totals alongside N labels, and settlement could index a different
+        // outcome than the one the UI rendered.
+        let outcomes = Self::read_outcomes(env, pool_id, pool);
         let mut totals = Vec::new(env);
         totals.push_back(pool.total_a);
-        totals.push_back(pool.total_b);
+        if outcomes.len() > 1 {
+            totals.push_back(pool.total_b);
+        }
+        while totals.len() < outcomes.len() {
+            totals.push_back(0);
+        }
         totals
     }
 
@@ -4004,6 +4029,14 @@ impl PredinexContract {
         let mut totals = Vec::new(env);
         for _ in 0..outcomes.len() {
             totals.push_back(0i128);
+        }
+        // #1415 — the per-outcome totals vector must line up 1:1 with the
+        // label vector. It is derived from `outcomes` above, so this holds by
+        // construction; the explicit check pins the invariant at creation time
+        // so a future refactor cannot silently desynchronise the labels the UI
+        // renders from the totals settlement indexes into.
+        if totals.len() != outcomes.len() {
+            return Err(ContractError::InvalidOutcome);
         }
 
         env.storage()
@@ -4410,6 +4443,8 @@ impl PredinexContract {
     /// * `PoolNotFound` – pool does not exist.
     /// * `PoolNotOpen` – pool is not in `Scheduled` status.
     /// * `PoolNotExpired` – the current time is still before `open_at`.
+    /// * `PoolExpired` – the pool's close time has already passed, so it can no
+    ///   longer be opened (cancel it instead).
     ///
     /// # Events
     /// Emits a `scheduled_pool_activated` event with the `open_at` time.
@@ -4425,6 +4460,16 @@ impl PredinexContract {
         };
         if env.ledger().timestamp() < open_at {
             return Err(ContractError::PoolNotExpired);
+        }
+
+        // #1412 — Never open a pool whose close time has already passed. A
+        // scheduled pool activated after its `expiry` would be settleable in
+        // the very ledger it opens, with no betting window at all: settlement
+        // could race (and beat) the first bet. The creator can still cancel it
+        // via `cancel_scheduled_pool`; unreachable-open pools must be retired
+        // rather than opened already closed.
+        if env.ledger().timestamp() >= pool.expiry {
+            return Err(ContractError::PoolExpired);
         }
 
         pool.status = PoolStatus::Open;
@@ -4904,6 +4949,22 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
+        // #1413 — Snapshot the pool bet limits in force for this position.
+        // `cancel_bet` re-checks the remaining stake against these snapshotted
+        // limits rather than the live values, so a later
+        // `set_pool_bet_limits` change only applies to bets placed afterwards
+        // and cannot retroactively lock an existing bettor out of a partial
+        // cancellation.
+        env.storage().persistent().set(
+            &DataKey::UserBetLimits(pool_id, user.clone()),
+            &PoolBetLimits { min_bet, max_bet },
+        );
+        env.storage().persistent().extend_ttl(
+            &DataKey::UserBetLimits(pool_id, user.clone()),
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+
         // #705 — Update user exposure tracking after bet is placed.
         Self::update_user_exposure(&env, &user, pool_id, net_amount);
 
@@ -5280,20 +5341,31 @@ impl PredinexContract {
         // Re-check per-pool bet limits against the remaining stake. A full
         // cancellation (remaining == 0) closes the position and is always allowed.
         if remaining > 0 {
-            let min_bet: i128 = env
+            // #1413 — Enforce the limits that were in force when this position
+            // was placed (snapshotted by `place_bet`), not the live values. An
+            // admin raising the minimum after the fact must not lock an honest
+            // bettor out of partially cancelling. Positions opened before the
+            // snapshot existed fall back to the live limits.
+            let limits: PoolBetLimits = env
                 .storage()
                 .persistent()
-                .get::<_, i128>(&DataKey::PoolMinBet(pool_id))
-                .unwrap_or(DEFAULT_MIN_BET_STROOPS);
-            let max_bet: i128 = env
-                .storage()
-                .persistent()
-                .get::<_, i128>(&DataKey::PoolMaxBet(pool_id))
-                .unwrap_or(DEFAULT_MAX_BET_STROOPS);
-            if min_bet > 0 && remaining < min_bet {
+                .get(&DataKey::UserBetLimits(pool_id, user.clone()))
+                .unwrap_or(PoolBetLimits {
+                    min_bet: env
+                        .storage()
+                        .persistent()
+                        .get::<_, i128>(&DataKey::PoolMinBet(pool_id))
+                        .unwrap_or(DEFAULT_MIN_BET_STROOPS),
+                    max_bet: env
+                        .storage()
+                        .persistent()
+                        .get::<_, i128>(&DataKey::PoolMaxBet(pool_id))
+                        .unwrap_or(DEFAULT_MAX_BET_STROOPS),
+                });
+            if limits.min_bet > 0 && remaining < limits.min_bet {
                 return Err(ContractError::InvalidBetAmount);
             }
-            if max_bet > 0 && remaining > max_bet {
+            if limits.max_bet > 0 && remaining > limits.max_bet {
                 return Err(ContractError::InvalidBetAmount);
             }
         }
@@ -5787,6 +5859,15 @@ impl PredinexContract {
         }
 
         let outcomes = Self::read_outcomes(env, pool_id, &pool);
+        // #1415 — Settlement validates `winning_outcome` against the label set
+        // the UI renders, then pays it out of the per-outcome totals. If the
+        // two vectors describe a different number of outcomes, a winner could
+        // be validated against one set and displayed from another, so require
+        // them to agree before resolving.
+        let totals = Self::read_outcome_totals(env, pool_id, &pool);
+        if outcomes.len() != totals.len() {
+            return Err(ContractError::InvalidOutcome);
+        }
         if winning_outcome >= outcomes.len() {
             return Err(ContractError::InvalidOutcome);
         }
@@ -5797,7 +5878,6 @@ impl PredinexContract {
 
         // #171 — compute totals for the enriched settlement event.
         // #167 — use configurable protocol fee instead of hard-coded 2%.
-        let totals = Self::read_outcome_totals(env, pool_id, &pool);
         let winning_side_total = totals
             .get(winning_outcome)
             .ok_or(ContractError::InvalidOutcome)?;
@@ -6071,27 +6151,18 @@ impl PredinexContract {
         emit_claim_refund(&env, pool_id, user.clone(), refund);
 
         // Record refund in user claim history for analytics.
-        let history_key = DataKey::UserClaimHistory(user.clone());
-        let mut history: Vec<UserClaimEntry> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        history.push_back(UserClaimEntry {
-            pool_id,
-            amount: refund,
-            fee: 0,
-            timestamp: env.ledger().timestamp(),
-            winning_outcome: 0,
-            status: UserClaimStatus::Refunded,
-        });
-        while history.len() > 50 {
-            history.remove(0);
-        }
-        env.storage().persistent().set(&history_key, &history);
-        env.storage()
-            .persistent()
-            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Self::append_claim_history(
+            &env,
+            &user,
+            UserClaimEntry {
+                pool_id,
+                amount: refund,
+                fee: 0,
+                timestamp: env.ledger().timestamp(),
+                winning_outcome: 0,
+                status: UserClaimStatus::Refunded,
+            },
+        );
 
         Ok(refund)
     }
@@ -6266,27 +6337,18 @@ impl PredinexContract {
         Self::reduce_user_exposure(&env, &user, pool_id, refund);
 
         // Record refund in user claim history for analytics consistency with claim_refund.
-        let history_key = DataKey::UserClaimHistory(user.clone());
-        let mut history: Vec<UserClaimEntry> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        history.push_back(UserClaimEntry {
-            pool_id,
-            amount: refund,
-            fee: 0,
-            timestamp: env.ledger().timestamp(),
-            winning_outcome: 0,
-            status: UserClaimStatus::Refunded,
-        });
-        while history.len() > 50 {
-            history.remove(0);
-        }
-        env.storage().persistent().set(&history_key, &history);
-        env.storage()
-            .persistent()
-            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Self::append_claim_history(
+            &env,
+            &user,
+            UserClaimEntry {
+                pool_id,
+                amount: refund,
+                fee: 0,
+                timestamp: env.ledger().timestamp(),
+                winning_outcome: 0,
+                status: UserClaimStatus::Refunded,
+            },
+        );
 
         emit_claim_expired(&env, pool_id, user, refund);
 
@@ -6787,27 +6849,18 @@ impl PredinexContract {
             .ok_or(ContractError::PoolTotalOverflow)?;
         env.storage().persistent().set(&total_key, &next_total);
 
-        let history_key = DataKey::UserClaimHistory(analytics_user.clone());
-        let mut history: Vec<UserClaimEntry> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(env));
-        history.push_back(UserClaimEntry {
-            pool_id,
-            amount: winnings,
-            fee,
-            timestamp: env.ledger().timestamp(),
-            winning_outcome,
-            status: UserClaimStatus::Paid,
-        });
-        while history.len() > 50 {
-            history.remove(0);
-        }
-        env.storage().persistent().set(&history_key, &history);
-        env.storage()
-            .persistent()
-            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Self::append_claim_history(
+            &env,
+            &analytics_user,
+            UserClaimEntry {
+                pool_id,
+                amount: winnings,
+                fee,
+                timestamp: env.ledger().timestamp(),
+                winning_outcome,
+                status: UserClaimStatus::Paid,
+            },
+        );
         env.storage()
             .persistent()
             .extend_ttl(&total_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
@@ -6893,27 +6946,18 @@ impl PredinexContract {
         emit_claim_scheduled(&env, pool_id, user.clone(), id, claim_at);
         // Record a pending history entry so frontends/off-chain bots can
         // distinguish scheduled claims from completed payouts.
-        let history_key = DataKey::UserClaimHistory(user.clone());
-        let mut history: Vec<UserClaimEntry> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        history.push_back(UserClaimEntry {
-            pool_id,
-            amount: 0,
-            fee: 0,
-            timestamp: env.ledger().timestamp(),
-            winning_outcome: 0,
-            status: UserClaimStatus::Pending,
-        });
-        while history.len() > 50 {
-            history.remove(0);
-        }
-        env.storage().persistent().set(&history_key, &history);
-        env.storage()
-            .persistent()
-            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Self::append_claim_history(
+            &env,
+            &user,
+            UserClaimEntry {
+                pool_id,
+                amount: 0,
+                fee: 0,
+                timestamp: env.ledger().timestamp(),
+                winning_outcome: 0,
+                status: UserClaimStatus::Pending,
+            },
+        );
 
         Ok(id)
     }
@@ -7249,20 +7293,28 @@ impl PredinexContract {
     /// Return a paginated slice of a user's claim history.
     ///
     /// Entries are ordered oldest-first (FIFO). The history is capped at the
-    /// 50 most recent claims per user; older entries are dropped automatically.
-    /// This retention limit means users who claim from more than 50 pools will
-    /// lose visibility into their oldest claims. Use pagination to retrieve all
-    /// available entries.
+    /// `MAX_USER_CLAIM_HISTORY` most recent claims per user; older entries are
+    /// dropped automatically. This retention limit means users who claim from
+    /// more pools than the cap will lose visibility into their oldest claims.
+    /// Use pagination to retrieve all available entries.
     ///
     /// # Arguments
     /// * `user`         – the claimant address
-    /// * `start_cursor` – zero-based index to start from (for pagination)
+    /// * `start_cursor` – absolute sequence offset to start from (for pagination)
     /// * `limit`        – maximum entries to return (capped at 20)
     ///
     /// # Notes
-    /// The 50-entry cap is enforced during claim recording. To retrieve all
-    /// available history, call this function multiple times with increasing
-    /// start_cursor values until fewer than limit entries are returned.
+    /// #1414 — `start_cursor` is a stable *absolute* offset into the user's
+    /// claim history (0 = the first entry ever recorded), not a raw storage
+    /// index. Entries dropped by the retention cap shift every storage index,
+    /// so paging by index would skip or repeat entries between calls. The
+    /// monotonic `UserClaimHistorySeq` counter lets this method translate the
+    /// absolute cursor into the correct storage index, so advancing
+    /// `start_cursor` by the number of returned entries never skips a record.
+    ///
+    /// To retrieve all available history, call this function repeatedly with
+    /// `start_cursor` advanced by the size of the previous page until fewer
+    /// than `limit` entries are returned.
     pub fn get_user_claim_history(
         env: Env,
         user: Address,
@@ -7272,25 +7324,79 @@ impl PredinexContract {
         let history: Vec<UserClaimEntry> = env
             .storage()
             .persistent()
-            .get(&DataKey::UserClaimHistory(user))
+            .get(&DataKey::UserClaimHistory(user.clone()))
             .unwrap_or_else(|| Vec::new(&env));
 
         let effective_limit = if limit > 20 { 20 } else { limit };
         let mut result = Vec::new(&env);
         let len: u32 = history.len();
-        if start_cursor >= len {
+        if effective_limit == 0 || len == 0 {
             return result;
         }
-        let mut end = start_cursor + effective_limit;
+
+        // Translate the absolute cursor into a stable storage index. `seq` is
+        // the number of entries ever appended; `len` is how many remain after
+        // trimming, so `dropped` entries have been discarded from the front.
+        let seq: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserClaimHistorySeq(user.clone()))
+            .unwrap_or(len as u64);
+        let dropped = seq.saturating_sub(len as u64);
+        let abs_cursor = core::cmp::max(start_cursor as u64, dropped);
+        if abs_cursor >= seq {
+            return result;
+        }
+        let mut start = (abs_cursor - dropped) as u32;
+        if start >= len {
+            return result;
+        }
+        let mut end = start + effective_limit;
         if end > len {
             end = len;
         }
-        let mut i = start_cursor;
-        while i < end {
-            result.push_back(history.get(i).unwrap());
-            i += 1;
+        while start < end {
+            result.push_back(history.get(start).unwrap());
+            start += 1;
         }
         result
+    }
+
+    /// #1414 — Append an entry to a user's claim history.
+    ///
+    /// Trims the retained history to `MAX_USER_CLAIM_HISTORY` entries (dropping
+    /// the oldest) and bumps the monotonic `UserClaimHistorySeq` counter that
+    /// records how many entries have ever been appended. Keeping this in one
+    /// place ensures the retained vector and the counter can never drift apart.
+    fn append_claim_history(env: &Env, user: &Address, entry: UserClaimEntry) {
+        let history_key = DataKey::UserClaimHistory(user.clone());
+        let mut history: Vec<UserClaimEntry> = env
+            .storage()
+            .persistent()
+            .get(&history_key)
+            .unwrap_or_else(|| Vec::new(env));
+        history.push_back(entry);
+        while history.len() > MAX_USER_CLAIM_HISTORY {
+            history.remove(0);
+        }
+        env.storage().persistent().set(&history_key, &history);
+        env.storage()
+            .persistent()
+            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
+        let seq_key = DataKey::UserClaimHistorySeq(user.clone());
+        // A user with no counter yet (pre-upgrade data) is assumed to have
+        // appended exactly the entries still retained, so existing relative
+        // cursors keep working until the next trim.
+        let seq: u64 = env
+            .storage()
+            .persistent()
+            .get(&seq_key)
+            .unwrap_or(history.len() as u64 - 1);
+        env.storage().persistent().set(&seq_key, &(seq + 1));
+        env.storage()
+            .persistent()
+            .extend_ttl(&seq_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
     }
 
     /// Return the current treasury balance (credited fees only).
@@ -10398,27 +10504,18 @@ impl PredinexContract {
             .ok_or(ContractError::PoolTotalOverflow)?;
         env.storage().persistent().set(&total_key, &next_total);
 
-        let history_key = DataKey::UserClaimHistory(analytics_user.clone());
-        let mut history: Vec<UserClaimEntry> = env
-            .storage()
-            .persistent()
-            .get(&history_key)
-            .unwrap_or_else(|| Vec::new(&env));
-        history.push_back(UserClaimEntry {
-            pool_id,
-            amount: total_norm_paid,
-            fee: 0,
-            timestamp: env.ledger().timestamp(),
-            winning_outcome,
-            status: UserClaimStatus::Paid,
-        });
-        while history.len() > 50 {
-            history.remove(0);
-        }
-        env.storage().persistent().set(&history_key, &history);
-        env.storage()
-            .persistent()
-            .extend_ttl(&history_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Self::append_claim_history(
+            &env,
+            &analytics_user,
+            UserClaimEntry {
+                pool_id,
+                amount: total_norm_paid,
+                fee: 0,
+                timestamp: env.ledger().timestamp(),
+                winning_outcome,
+                status: UserClaimStatus::Paid,
+            },
+        );
         env.storage()
             .persistent()
             .extend_ttl(&total_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
@@ -10895,8 +10992,11 @@ impl PredinexContract {
 
         // Reject any outcome index >= num_outcomes to prevent settling to an
         // out-of-bounds outcome that would break payout calculations.
-        let outcome_count = Self::read_outcome_totals(&env, source_pool_id, &source_pool).len();
-        if winning_outcome >= outcome_count {
+        // #1415 — Labels and per-outcome totals must describe the same set;
+        // otherwise the index validated here and the one paid out could differ.
+        let source_outcomes = Self::read_outcomes(&env, source_pool_id, &source_pool);
+        let source_totals = Self::read_outcome_totals(&env, source_pool_id, &source_pool);
+        if source_outcomes.len() != source_totals.len() || winning_outcome >= source_outcomes.len() {
             return Err(ContractError::InvalidOutcome);
         }
 
