@@ -66,7 +66,7 @@ export class PriceAggregator {
     this.policy = { ...DEFAULT_TWAP_POLICY, ...policy };
   }
 
-  addSample(sample: PriceSample): void {
+  addSample(sample: PriceSample, now: number = Date.now()): void {
     if (!Number.isFinite(sample.price) || sample.price <= 0) {
       throw new PriceValidationError('invalid_sample', 'price must be finite and positive');
     }
@@ -78,7 +78,9 @@ export class PriceAggregator {
     const existing = this.samples.get(sample.pair) ?? [];
     existing.push(sample);
     existing.sort((a, b) => a.timestamp - b.timestamp);
-    this.samples.set(sample.pair, existing);
+
+    const active = existing.filter((s) => now - s.timestamp <= this.policy.maxSampleAgeSecs);
+    this.samples.set(sample.pair, active);
   }
 
   calculateTwap(pair: string, now: number): TwapResult {

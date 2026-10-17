@@ -88,6 +88,7 @@ async function queryOracle(
   oracleSecret: string | null,
   poolId: number,
   pool: Pool,
+  signal?: AbortSignal,
 ): Promise<number | null | undefined> {
   const url = `${oracleUrl.replace(/\/$/, "")}/resolve/${poolId}`;
 
@@ -101,13 +102,24 @@ async function queryOracle(
 
   let response: Response;
   try {
-    response = await fetch(url, { headers });
-  } catch (err) {
-    logger.warn("Oracle request failed (network error) — will try fallback", {
-      poolId,
-      url,
-      error: String(err),
+    response = await fetch(url, {
+      headers,
+      signal,
+      timeout: 10_000,
     });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      logger.info("Oracle request cancelled (cycle shutdown) — will try fallback", {
+        poolId,
+        url,
+      });
+    } else {
+      logger.warn("Oracle request failed (network error or timeout) — will try fallback", {
+        poolId,
+        url,
+        error: String(err),
+      });
+    }
     return undefined; // signal: try next fallback
   }
 
@@ -203,6 +215,7 @@ export async function resolveWinningOutcome(
   poolId: number,
   pool: Pool,
   config: BotConfig,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   // ── Step 1: external oracle ───────────────────────────────────────────────
   if (config.oracleUrl) {
@@ -211,6 +224,7 @@ export async function resolveWinningOutcome(
       config.oracleSecret,
       poolId,
       pool,
+      signal,
     );
 
     if (oracleResult !== undefined) {
@@ -388,7 +402,7 @@ export class Poller {
           continue;
         }
 
-        const winningOutcome = await resolveWinningOutcome(poolId, pool, this.config);
+        const winningOutcome = await resolveWinningOutcome(poolId, pool, this.config, this.abortController?.signal);
 
         if (winningOutcome === null) {
           logger.warn("Could not resolve winning outcome — skipping pool", {

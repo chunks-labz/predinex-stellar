@@ -44,15 +44,15 @@ export class PriceValidator {
       reasons.push('asset mismatch');
     }
 
-    if (next.rateBps < 0 || next.rateBps > this.policy.maxRateBps) {
+    if (!Number.isFinite(next.rateBps) || next.rateBps < 0 || next.rateBps > this.policy.maxRateBps) {
       reasons.push('rate outside allowed bounds');
     }
 
-    if (next.utilizationBps < 0 || next.utilizationBps > 10_000) {
+    if (!Number.isFinite(next.utilizationBps) || next.utilizationBps < 0 || next.utilizationBps > 10_000) {
       reasons.push('utilization outside allowed bounds');
     }
 
-    if (now - next.timestamp > this.policy.maxStaleSecs) {
+    if (next.timestamp > now || now - next.timestamp > this.policy.maxStaleSecs) {
       reasons.push('rate observation is stale');
     }
 
