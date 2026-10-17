@@ -189,6 +189,22 @@ fn test_exact_min_deposit_accepted() {
     assert!(result.is_ok());
 }
 
+#[test]
+fn test_create_pool_with_zero_twap_period_rejected() {
+    let (env, client, _token) = setup();
+    let result = client.try_create_pool_with_twap_period(
+        &Address::generate(&env),
+        &String::from_str(&env, "Pool"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Yes"),
+        &String::from_str(&env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &0,
+    );
+    assert_eq!(result, Err(Ok(ContractError::InvalidTwapPeriod)));
+}
+
 // ── Maximum duration (~1 year) ────────────────────────────────────────────────
 
 #[test]

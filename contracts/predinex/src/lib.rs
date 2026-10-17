@@ -1473,6 +1473,8 @@ pub enum ContractError {
     /// #1402 — Token transfer succeeded but the on-chain balance did not decrease
     /// by the expected amount (e.g. fee-on-transfer or silent no-op token).
     TransferBalanceMismatch = 92,
+    /// TWAP lookback period must be greater than zero.
+    InvalidTwapPeriod = 93,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -4251,6 +4253,9 @@ impl PredinexContract {
     ) -> Result<u32, ContractError> {
         if !Self::is_initialized(&env) {
             panic_with_error!(&env, ContractError::NotInitialized);
+        }
+        if twap_period_secs == 0 {
+            return Err(ContractError::InvalidTwapPeriod);
         }
         creator.require_auth();
         Self::collect_creator_deposit(&env, &creator, amount)?;
