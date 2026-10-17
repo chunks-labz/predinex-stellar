@@ -6122,6 +6122,9 @@ impl PredinexContract {
     /// * `NothingToRefund` — bet record exists but total_bet is zero.
     pub fn claim_expired(env: Env, user: Address, pool_id: u32) -> Result<i128, ContractError> {
         user.require_auth();
+        if !Self::is_initialized(&env) {
+            panic_with_error!(&env, ContractError::NotInitialized);
+        }
         Self::require_not_paused(&env)?;
 
         // #618 — Multi-asset pools require per-token refund logic.
@@ -6162,7 +6165,10 @@ impl PredinexContract {
 
         // Pool must have actually expired. Checked for `Voided` too, so an
         // expiry refund cannot be used to drain a pool that is still open.
-        if env.ledger().timestamp() <= pool.expiry {
+        // #1408 — use the same predicate as refund_expired_pool: expiry +
+        // GRACE_PERIOD_SECS, so a pool is consistently refundable through
+        // both entrypoints at exactly the same time.
+        if env.ledger().timestamp() < pool.expiry + GRACE_PERIOD_SECS {
             return Err(ContractError::PoolNotExpired);
         }
 
@@ -7839,9 +7845,12 @@ impl PredinexContract {
         BudgetPlanner::get_portfolio_metrics(&env, &lender)
     }
 
-    pub fn get_pool(env: Env, pool_id: u32) -> Option<Pool> {
+    /// #1411 — Return `Result<Option<Pool>, ContractError>` so callers can
+    /// distinguish "contract not initialized" from "pool does not exist".
+    /// Previously used `panic_with_error!` which produced an opaque host trap.
+    pub fn get_pool(env: Env, pool_id: u32) -> Result<Option<Pool>, ContractError> {
         if !Self::is_initialized(&env) {
-            panic_with_error!(&env, ContractError::NotInitialized);
+            return Err(ContractError::NotInitialized);
         }
         let pool: Option<Pool> = env.storage().persistent().get(&DataKey::Pool(pool_id));
         if pool.is_some() {
@@ -7851,7 +7860,7 @@ impl PredinexContract {
                 POOL_BUMP_TARGET,
             );
         }
-        pool
+        Ok(pool)
     }
 
     /// #679 — Return the immutable metadata (name, description) for a pool.
@@ -11043,7 +11052,15 @@ impl PredinexContract {
             .get::<_, LpStakeInfo>(&DataKey::LpStake(pool_id, user.clone()))
         {
             if now < stake.lock_until {
-                let elapsed = now.saturating_sub(stake.staked_at);
+                // #1410 — accrue from pool creation, not from the individual stake
+                // timestamp, so late LPs cannot share fees they never backed.
+                let pool_created_at = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pool_id))
+                    .map(|p| p.created_at)
+                    .unwrap_or(stake.staked_at);
+                let elapsed = now.saturating_sub(pool_created_at);
                 let lock_duration = stake.lock_until.saturating_sub(stake.staked_at);
                 if lock_duration > 0 && elapsed >= MIN_POOL_DURATION_SECS {
                     let boost_bps: u32 = env
