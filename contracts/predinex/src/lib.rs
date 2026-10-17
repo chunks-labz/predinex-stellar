@@ -587,6 +587,13 @@ fn emit_admin_set(env: &Env, old_admin: Option<Address>, admin: Address) {
     );
 }
 
+fn emit_admin_proposed(env: &Env, proposer: Address, proposed: Address) {
+    env.events().publish(
+        (Symbol::new(env, "admin_proposed"), event_version(env)),
+        (proposer, proposed),
+    );
+}
+
 fn emit_bridge_timeout_set(env: &Env, timeout_secs: u64) {
     env.events().publish(
         (Symbol::new(env, "bridge_timeout_set"), event_version(env)),
@@ -1006,6 +1013,8 @@ pub enum DataKey {
     PoolTreasuryCredited(u32),
     /// #191 — contract state schema version stored on-chain for compatibility checks.
     ContractVersion,
+    /// #1400 — Pending admin address staged by `propose_admin`, consumed by `accept_admin`.
+    PendingAdmin,
     /// #635 — template that was used to create this pool, if any.
     PoolTemplateId(u32),
     /// #176 — who triggered settlement for this pool (Creator or Operator).
@@ -1440,6 +1449,11 @@ pub enum ContractError {
     /// frozen pool (via `freeze_pool`) must be unfrozen by the freeze admin
     /// through `unfreeze_pool`, not bypassed via the treasury-recipient role.
     PoolCoolingNotActive = 90,
+    /// #1400 — `accept_admin` called when no two-step admin transfer is pending.
+    NoPendingAdminTransfer = 91,
+    /// #1402 — Token transfer succeeded but the on-chain balance did not decrease
+    /// by the expected amount (e.g. fee-on-transfer or silent no-op token).
+    TransferBalanceMismatch = 92,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -7513,11 +7527,27 @@ impl PredinexContract {
 
         let token_client = token::Client::new(&env, &token_address);
 
+        // #1402 — snapshot the contract's balance before the transfer so we
+        // can verify the exact amount moved. SEP-41 `transfer` panics on
+        // failure, but fee-on-transfer or no-op tokens can silently move less
+        // than requested, causing the ledger to drift from the real balance.
+        let balance_before: i128 =
+            token_client.balance(&env.current_contract_address());
+
         token_client.transfer(
             &env.current_contract_address(),
             &treasury_recipient,
             &amount,
         );
+
+        let balance_after: i128 =
+            token_client.balance(&env.current_contract_address());
+        let actually_moved = balance_before
+            .checked_sub(balance_after)
+            .unwrap_or(0);
+        if actually_moved != amount {
+            return Err(ContractError::TransferBalanceMismatch);
+        }
 
         env.storage()
             .persistent()
@@ -7564,6 +7594,65 @@ impl PredinexContract {
 
         emit_admin_set(&env, old_admin, admin);
         Ok(())
+    }
+
+    /// #1400 — Stage a new admin address for a two-step ownership transfer.
+    ///
+    /// The treasury recipient calls this to propose `new_admin`. The change
+    /// does **not** take effect until `new_admin` calls `accept_admin`. This
+    /// prevents a mistyped address from permanently locking the contract.
+    ///
+    /// # Errors
+    /// * `Unauthorized` – caller is not the treasury recipient.
+    pub fn propose_admin(
+        env: Env,
+        caller: Address,
+        new_admin: Address,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PendingAdmin, &new_admin);
+
+        emit_admin_proposed(&env, caller, new_admin);
+        Ok(())
+    }
+
+    /// #1400 — Accept a pending two-step admin transfer.
+    ///
+    /// Only the address previously staged by `propose_admin` may call this.
+    /// On success the pending entry is cleared and the caller becomes the
+    /// new admin. Emits `admin_set`.
+    ///
+    /// # Errors
+    /// * `NoPendingAdminTransfer` – no transfer is currently staged.
+    /// * `Unauthorized` – caller is not the pending admin.
+    pub fn accept_admin(env: Env, caller: Address) -> Result<(), ContractError> {
+        caller.require_auth();
+
+        let pending: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::PendingAdmin)
+            .ok_or(ContractError::NoPendingAdminTransfer)?;
+
+        if pending != caller {
+            return Err(ContractError::Unauthorized);
+        }
+
+        let old_admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
+        env.storage().persistent().set(&DataKey::Admin, &caller);
+        env.storage().persistent().remove(&DataKey::PendingAdmin);
+
+        emit_admin_set(&env, old_admin, caller);
+        Ok(())
+    }
+
+    /// #1400 — Return the pending admin address staged by `propose_admin`, if any.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::PendingAdmin)
     }
 
     /// #632 — Return the current contract admin address, if one has been set.
