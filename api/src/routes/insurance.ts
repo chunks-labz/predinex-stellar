@@ -18,7 +18,7 @@ import {
 import { InsuranceEngine } from '../services/insurance-engine.js';
 import { SecuritySanitizer } from '../middleware/security.js';
 import { authMiddleware } from '../middleware/auth.js';
-import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
 
 export class InsuranceRouteHandler {
   private engine: InsuranceEngine;
@@ -194,17 +194,17 @@ insuranceRouter.get('/pools', (req: Request, res: Response) => {
   res.json(handler.handleListPools());
 });
 
-insuranceRouter.post('/quote', (req: Request, res: Response) => {
+insuranceRouter.post('/quote', strictRateLimitMiddleware, (req: Request, res: Response) => {
   const result = handler.handleGetQuote(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
-insuranceRouter.post('/purchase', (req: Request, res: Response) => {
+insuranceRouter.post('/purchase', strictRateLimitMiddleware, (req: Request, res: Response) => {
   const result = handler.handlePurchase(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });
 
-insuranceRouter.post('/claim', (req: Request, res: Response) => {
+insuranceRouter.post('/claim', strictRateLimitMiddleware, (req: Request, res: Response) => {
   const result = handler.handleSubmitClaim(req.body);
   res.status(result.success ? 200 : 400).json(result);
 });

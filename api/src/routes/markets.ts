@@ -23,6 +23,14 @@
  *     POST /api/markets/:id/cancel
  *     POST /api/markets/:id/restore
  *
+ * POST /api/markets
+ *
+ * Validates a market creation payload (Issue #1434) with the shared rules in
+ * `services/market-validation.ts` and hands valid payloads, unchanged, to the
+ * configured `MarketCreator`. Invalid payloads get a structured 400 with
+ * field-level `details`. Until an on-chain creator is wired in, valid
+ * payloads receive 501, mirroring the referral route.
+ *
  * Response envelope:
  *   {
  *     success: true,
@@ -379,68 +387,15 @@ export class InMemoryMarketSource implements MarketSource {
   }
 }
 
+/** Submits a validated market creation request and returns the created market. */
+export type MarketCreator = (req: CreateMarketRequest) => Promise<MarketSummary>;
+
 export const defaultMarketSource = new InMemoryMarketSource();
 
-function sendError(
-  res: Response,
-  status: number,
-  code: string,
-  message: string,
-  details?: string[]
-): void {
-  res.status(status).json({
-    success: false,
-    error: { code, message, ...(details ? { details } : {}) },
-    timestamp: new Date().toISOString(),
-  });
-}
-
-function authenticate(req: Request): AuthContext {
-  return sharedAuthValidator.authenticate(
-    req.headers as Record<string, string | undefined>
-  );
-}
-
-/**
- * Audit actor. API keys are deliberately not recorded so the audit trail can
- * be shared without leaking credentials; admins with a bound subject address
- * are attributed by address.
- */
-function auditActor(auth: AuthContext): string {
-  return auth.subjectAddress ?? 'admin';
-}
-
-interface ParsedId {
-  ok: boolean;
-  id: number;
-}
-
-function parseMarketId(raw: string): ParsedId {
-  if (!/^\d+$/.test(raw)) return { ok: false, id: 0 };
-  const id = Number(raw);
-  if (!Number.isSafeInteger(id) || id < 1 || id > 0xffffffff) return { ok: false, id: 0 };
-  return { ok: true, id };
-}
-
-const DEFAULT_MARKET_ARCHIVE_WINDOW_DAYS = 30;
-
-function parsePositiveInteger(raw: unknown): number | null {
-  if (typeof raw === 'number' && Number.isInteger(raw) && raw > 0) return raw;
-  if (typeof raw !== 'string') return null;
-  if (!/^\d+$/.test(raw.trim())) return null;
-  const value = Number(raw.trim());
-  return Number.isSafeInteger(value) && value > 0 ? value : null;
-}
-
-function loadArchiveWindowDays(env: NodeJS.ProcessEnv = process.env): number {
-  return parsePositiveInteger(env.MARKET_ARCHIVE_WINDOW_DAYS) ?? DEFAULT_MARKET_ARCHIVE_WINDOW_DAYS;
-}
-
-function archiveWindowMs(days: number): number {
-  return days * 24 * 60 * 60 * 1000;
-}
-
-export function createMarketsRouter(source: MarketSource = defaultMarketSource): Router {
+export function createMarketsRouter(
+  source: MarketSource = defaultMarketSource,
+  creator?: MarketCreator
+): Router {
   const router = Router();
   router.use(rateLimitMiddleware);
 

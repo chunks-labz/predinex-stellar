@@ -6,7 +6,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { AuthValidator, authMiddleware, sharedAuthValidator } from '../middleware/auth.js';
-import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
 import { SecuritySanitizer } from '../middleware/security.js';
 
 export interface RecordReferralRequest {
@@ -86,6 +86,7 @@ export function createReferralRouter(
 
   router.post(
     '/',
+    strictRateLimitMiddleware,
     referralValidation,
     async (req: Request, res: Response, _next: NextFunction) => {
       // 1. Authenticate caller

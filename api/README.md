@@ -62,9 +62,21 @@ request gets HTTP `429` with a `Retry-After` header (seconds).
 
 Values that are missing or not positive integers fall back to the default.
 
-The market archive job also reads `MARKET_ARCHIVE_WINDOW_DAYS` for the number
-of days resolved markets stay in the default listing before being archived.
-When unset, the archive window defaults to 30 days.
+### Tracing (OpenTelemetry)
+
+Tracing is opt-in and disabled by default; nothing is exported unless
+`OTEL_TRACING_ENABLED=true`. When enabled, every HTTP request gets a span and
+spans are sent to an OTLP/HTTP collector chosen with the standard
+`OTEL_EXPORTER_OTLP_ENDPOINT` variable. Incoming W3C `traceparent` headers are
+continued, and `injectTraceHeaders()` / `withSpan()` in
+`src/middleware/tracing.ts` propagate the context outward and wrap DB calls or
+indexer jobs. The API has no database or indexer code today, so only HTTP
+spans are emitted automatically.
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `OTEL_TRACING_ENABLED` | `false` | Set to `true` to export traces |
+| `OTEL_SERVICE_NAME` | `predinex-api` | Service name reported on spans |
 
 ## API Endpoints
 
@@ -98,21 +110,16 @@ reflect the filtered set.
 }
 ```
 
-### Market soft-delete (admin only)
+### POST /api/markets
+Validate a market creation request. Body: `title` (non-empty, at most 100
+bytes), `outcomes` (2-20 unique non-empty strings, each at most 50 bytes) and
+`closeTime` (integer unix seconds, 300 s to 31,536,000 s from now). These limits
+mirror the contract and live in `src/services/market-validation.ts`.
 
-Cancelling a market marks it with status `cancelled` instead of deleting the
-record: every field and the audit trail survive, so existing links keep
-working. Cancelled markets leave the default listing and can be restored.
-
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /api/markets/:id/cancel` | Soft-delete a market; optional JSON body `{ "reason": "..." }` (≤ 256 chars). Idempotent. |
-| `POST /api/markets/:id/restore` | Restore a cancelled market to the status it had before cancellation. `409 NOT_CANCELLED` otherwise. |
-| `GET /api/markets/admin/cancelled` | Paginated list of cancelled markets (`limit`, `offset`, `sort`, `order`). |
-| `GET /api/markets/admin/audit` | Cancellation/restoration history, newest first; optional `marketId` filter. |
-
-All four endpoints require an admin `x-api-key` and return `403 FORBIDDEN`
-otherwise.
+Invalid payloads return `400 VALIDATION_ERROR` with one `error.details` entry
+(`{ field, message }`) per violated field. Valid payloads are passed unchanged
+to the configured market creator and return `201`; until on-chain creation is
+wired in they return `501`.
 
 ### POST /api/budget/plan
 Create a budget plan

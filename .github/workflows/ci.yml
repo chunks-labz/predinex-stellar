@@ -14,6 +14,46 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  lint-and-format:
+    name: Lint & Format Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.87.0"
+          components: rustfmt, clippy
+
+      - name: Check Rust formatting (fail with diff)
+        run: |
+          cargo fmt --all --check || {
+            echo "::error::Rust formatting check failed! Run 'cargo fmt' to auto-fix unformatted files."
+            git diff
+            exit 1
+          }
+
+      - name: Check Rust linting (Clippy)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Check Web linting (fail on violations)
+        working-directory: ./web
+        run: npm run lint
+
   web-checks:
     name: Web Checks
     runs-on: ubuntu-latest

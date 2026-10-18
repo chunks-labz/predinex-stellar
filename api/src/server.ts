@@ -20,12 +20,17 @@
  *   ADMIN_API_KEYS       comma-separated Admin API keys
  *   OFFICER_API_KEYS     comma-separated ComplianceOfficer keys
  *   ASSESSOR_API_KEYS    comma-separated Assessor keys
+ *   OTEL_TRACING_ENABLED set to "true" to export OpenTelemetry traces
+ *                        (disabled by default; see src/middleware/tracing.ts)
  */
 
 import 'dotenv/config';
 import { createApp } from './app.js';
+import { initTracing, shutdownTracing } from './middleware/tracing.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
+
+initTracing();
 
 const app = createApp();
 
@@ -40,9 +45,11 @@ function shutdown(signal: string) {
   // eslint-disable-next-line no-console
   console.log(`Received ${signal}, shutting down predinex-api...`);
   server.close(() => {
-    // eslint-disable-next-line no-console
-    console.log('predinex-api stopped.');
-    process.exit(0);
+    shutdownTracing().finally(() => {
+      // eslint-disable-next-line no-console
+      console.log('predinex-api stopped.');
+      process.exit(0);
+    });
   });
   setTimeout(() => process.exit(1), 10_000).unref();
 }

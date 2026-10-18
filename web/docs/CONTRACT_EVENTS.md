@@ -220,6 +220,16 @@ Emitted when a pool is frozen by freeze admin.
 - **Data:** `caller: Address`
 - **Indexer Use:** Lock pool state, display frozen status
 
+### MarketPaused
+Emitted when a market/pool is paused via `freeze_pool` or `pause_market`.
+
+- **Topics:** `(Symbol("MarketPaused"), event_version(), market_id: u32)`
+- **Data:** `MarketPausedEvent { market_id: u32, actor: Address, timestamp: u64 }`
+  - `market_id: u32` — Identifier of the paused market/pool
+  - `actor: Address` — Freeze admin who triggered the pause
+  - `timestamp: u64` — Ledger timestamp when the market was paused
+- **Indexer Use:** Track market pauses, notify subscribers, update UI status badges in real time
+
 ### pool_disputed
 Emitted when a settled pool is disputed.
 
@@ -233,6 +243,16 @@ Emitted when a frozen or disputed pool returns to `Open`.
 - **Topics:** `(Symbol("pool_unfrozen"), event_version(), pool_id: u32)`
 - **Data:** `PoolUnfrozenEvent { actor: Address, trigger: UnfreezeTrigger, had_cooling_deadline: bool }`
 - **Indexer Use:** Update pool state, resume claims
+
+### MarketUnpaused
+Emitted when a market/pool is resumed/unpaused via `unfreeze_pool` or `unpause_market`.
+
+- **Topics:** `(Symbol("MarketUnpaused"), event_version(), market_id: u32)`
+- **Data:** `MarketUnpausedEvent { market_id: u32, actor: Address, timestamp: u64 }`
+  - `market_id: u32` — Identifier of the resumed market/pool
+  - `actor: Address` — Freeze admin who unpaused the market
+  - `timestamp: u64` — Ledger timestamp when the market was resumed
+- **Indexer Use:** Track market unpauses, re-enable betting and claiming UI, notify indexers
 
 `pool_unfrozen` has two distinct causes, and the address alone cannot tell them
 apart — an indexer that attributes the thaw to `actor` as an administrator will

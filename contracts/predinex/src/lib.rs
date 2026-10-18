@@ -893,6 +893,38 @@ fn emit_pool_unfrozen(
     );
 }
 
+/// #1449 — Publishes the `MarketPaused` domain event when a market is paused/frozen.
+fn emit_market_paused(env: &Env, market_id: u32, actor: Address, timestamp: u64) {
+    env.events().publish(
+        (
+            Symbol::new(env, "MarketPaused"),
+            event_version(env),
+            market_id,
+        ),
+        MarketPausedEvent {
+            market_id,
+            actor,
+            timestamp,
+        },
+    );
+}
+
+/// #1449 — Publishes the `MarketUnpaused` domain event when a market is unpaused/resumed.
+fn emit_market_unpaused(env: &Env, market_id: u32, actor: Address, timestamp: u64) {
+    env.events().publish(
+        (
+            Symbol::new(env, "MarketUnpaused"),
+            event_version(env),
+            market_id,
+        ),
+        MarketUnpausedEvent {
+            market_id,
+            actor,
+            timestamp,
+        },
+    );
+}
+
 fn emit_referral_bps_set(env: &Env, caller: Address, old_bps: u32, bps: u32) {
     env.events().publish(
         (Symbol::new(env, "referral_bps_set"), event_version(env)),
@@ -1536,6 +1568,30 @@ pub struct PoolUnfrozenEvent {
     /// Lets an indexer distinguish a cooling-lock expiry from a manual freeze
     /// without having to reconstruct it from `pool_cooling_started`.
     pub had_cooling_deadline: bool,
+}
+
+/// #1449 — Event payload emitted by `MarketPaused`.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub struct MarketPausedEvent {
+    /// Identifier of the market/pool being paused.
+    pub market_id: u32,
+    /// Freeze admin account that paused the market.
+    pub actor: Address,
+    /// Ledger timestamp when the market was paused.
+    pub timestamp: u64,
+}
+
+/// #1449 — Event payload emitted by `MarketUnpaused`.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub struct MarketUnpausedEvent {
+    /// Identifier of the market/pool being resumed.
+    pub market_id: u32,
+    /// Freeze admin account that resumed the market.
+    pub actor: Address,
+    /// Ledger timestamp when the market was resumed.
+    pub timestamp: u64,
 }
 
 /// #396 — Event types that can trigger an off-chain webhook notification.
@@ -7861,7 +7917,8 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_pool_frozen(&env, pool_id, caller);
+        emit_pool_frozen(&env, pool_id, caller.clone());
+        emit_market_paused(&env, pool_id, caller, env.ledger().timestamp());
         Ok(())
     }
 
@@ -8022,8 +8079,24 @@ impl PredinexContract {
 
         // #1309 — tagged Admin so consumers can distinguish this from a bettor's
         // bet auto-thawing a pool whose cooling period had elapsed.
-        emit_pool_unfrozen(&env, pool_id, caller, UnfreezeTrigger::Admin, had_cooling_deadline);
+        emit_pool_unfrozen(&env, pool_id, caller.clone(), UnfreezeTrigger::Admin, had_cooling_deadline);
+        // #1449 — emit MarketUnpaused domain event for market resumption
+        emit_market_unpaused(&env, pool_id, caller, env.ledger().timestamp());
         Ok(())
+    }
+
+    /// #1449 — Pause a market, blocking new bets and claim payouts.
+    /// Alias for [`freeze_pool`](Self::freeze_pool). Callable only by the freeze admin.
+    /// Emits `MarketPaused` (and `pool_frozen`).
+    pub fn pause_market(env: Env, caller: Address, market_id: u32) -> Result<(), ContractError> {
+        Self::freeze_pool(env, caller, market_id)
+    }
+
+    /// #1449 — Unpause a market, restoring it to Open status.
+    /// Alias for [`unfreeze_pool`](Self::unfreeze_pool). Callable only by the freeze admin.
+    /// Emits `MarketUnpaused` (and `pool_unfrozen`).
+    pub fn unpause_market(env: Env, caller: Address, market_id: u32) -> Result<(), ContractError> {
+        Self::unfreeze_pool(env, caller, market_id)
     }
 
     /// Treasury admin override for automatic cooling locks.
