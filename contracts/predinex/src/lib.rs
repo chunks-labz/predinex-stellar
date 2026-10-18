@@ -774,6 +774,52 @@ fn emit_pool_disputed(env: &Env, pool_id: u32, caller: Address, disputed_outcome
     );
 }
 
+/// #1416 — Publish the `resolution_finalized` domain event.
+fn emit_resolution_finalized(
+    env: &Env,
+    pool_id: u32,
+    winning_outcome: u32,
+    finalizer: Option<Address>,
+    auto: bool,
+) {
+    env.events().publish(
+        (
+            Symbol::new(env, "resolution_finalized"),
+            event_version(env),
+            pool_id,
+        ),
+        ResolutionFinalizedEvent {
+            pool_id,
+            winning_outcome,
+            finalizer,
+            auto,
+        },
+    );
+}
+
+/// #1416 — Publish the `resolution_challenged` domain event.
+fn emit_resolution_challenged(
+    env: &Env,
+    pool_id: u32,
+    challenger: Address,
+    disputed_outcome: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (
+            Symbol::new(env, "resolution_challenged"),
+            event_version(env),
+            pool_id,
+        ),
+        ResolutionChallengedEvent {
+            pool_id,
+            challenger,
+            disputed_outcome,
+            timestamp,
+        },
+    );
+}
+
 fn emit_pool_ext_metadata_set(env: &Env, pool_id: u32, creator: Address) {
     env.events().publish(
         (
@@ -991,7 +1037,9 @@ fn event_version(env: &Env) -> Symbol {
     Symbol::new(env, EVENT_SCHEMA_VERSION)
 }
 
-// Dispute window: 7 days in seconds (configurable in future)
+// Recommended dispute-window duration (7 days). Used as the default for the
+// cross-chain dispute window. For regular pools the dispute window defaults to
+// 0 (immediately final); the freeze admin enables it via `set_dispute_window`.
 const DISPUTE_WINDOW_SECS: u64 = 7 * 24 * 3600;
 
 // Precision multiplier for LP fee-per-share accumulator (avoids rounding to zero)
@@ -1248,6 +1296,15 @@ pub enum DataKey {
     /// `get_user_claim_history` page by a stable absolute sequence offset
     /// instead of a raw storage index that shifts when old entries are trimmed.
     UserClaimHistorySeq(Address),
+    /// #1416 — Deadline (ledger timestamp) after which a `ResolutionPending`
+    /// pool can be finalized to `Settled`. Set at settlement time to
+    /// `settlement_time + dispute_window`.
+    PoolResolutionDeadline(u32),
+    /// #1416 — Recorded challenges against a pending resolution. Stores a
+    /// `Vec<Challenge>` so the UI and indexers can display who challenged and
+    /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
+    /// called on a `ResolutionPending` pool.
+    PoolChallenges(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1507,6 +1564,12 @@ pub enum ContractError {
     TransferBalanceMismatch = 92,
     /// TWAP lookback period must be greater than zero.
     InvalidTwapPeriod = 93,
+    /// #1416 — A claim or finalization was attempted on a pool whose resolution
+    /// is still within the dispute window and has not yet been finalized.
+    ResolutionNotFinal = 94,
+    /// #1416 — `finalize_resolution` was called on a pool that is not in the
+    /// `ResolutionPending` status (already settled, disputed, or still open).
+    ResolutionNotPending = 95,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -1648,6 +1711,15 @@ pub enum PoolStatus {
     Cancelled,
     /// #355 — Pool parameters are stored but betting opens at this timestamp.
     Scheduled(u64),
+    /// #1416 — A winning outcome has been declared but the resolution is not
+    /// yet final. The pool enters this state immediately after settlement and
+    /// remains here until the configured dispute window elapses. During the
+    /// window any authorised party may challenge the resolution, transitioning
+    /// the pool to [`Disputed`](Self::Disputed). Once the window closes without
+    /// a challenge, [`finalize_resolution`](Self::finalize_resolution) (or an
+    /// automatic check during a claim) transitions the pool to
+    /// [`Settled`](Self::Settled), after which winner claims proceed normally.
+    ResolutionPending(u32),
 }
 
 /// #718 — Category for grouping prediction pools by topic for discovery.
@@ -2425,6 +2497,44 @@ pub struct BridgeTransferEvent {
     pub target_chain: ChainId,
 }
 
+/// #1416 — A recorded challenge against a pending pool resolution. Appended to
+/// `PoolChallenges` when a party calls [`dispute_pool`](PredinexContract::dispute_pool)
+/// on a pool in [`ResolutionPending`](PoolStatus::ResolutionPending) status.
+#[derive(Clone, PartialEq, Debug)]
+#[contracttype]
+pub struct Challenge {
+    /// Address that raised the challenge.
+    pub challenger: Address,
+    /// Ledger timestamp at which the challenge was recorded.
+    pub timestamp: u64,
+    /// The outcome index that was under dispute (the pending resolution).
+    pub disputed_outcome: u32,
+}
+
+/// #1416 — Event payload emitted when a resolution is finalized (transitions
+/// from `ResolutionPending` to `Settled`).
+#[derive(Clone)]
+#[contracttype]
+pub struct ResolutionFinalizedEvent {
+    pub pool_id: u32,
+    pub winning_outcome: u32,
+    pub finalizer: Option<Address>,
+    /// Whether finalization was triggered automatically by a claim path
+    /// (`true`) or by an explicit `finalize_resolution` call (`false`).
+    pub auto: bool,
+}
+
+/// #1416 — Event payload emitted when a challenge is recorded against a
+/// pending resolution.
+#[derive(Clone)]
+#[contracttype]
+pub struct ResolutionChallengedEvent {
+    pub pool_id: u32,
+    pub challenger: Address,
+    pub disputed_outcome: u32,
+    pub timestamp: u64,
+}
+
 /// #714 — LP position for a user in a specific pool.
 #[derive(Clone)]
 #[contracttype]
@@ -2860,9 +2970,15 @@ impl PredinexContract {
     ///
     /// Both `claim_winnings_internal` and `claim_multi_asset_winnings` use the
     /// same status mapping so Frozen/Disputed/Cancelled/Settled handling cannot diverge.
+    ///
+    /// #1416 — `ResolutionPending` is rejected with `ResolutionNotFinal`. In
+    /// practice the claim paths call `try_auto_finalize` first, so a
+    /// `ResolutionPending` pool reaching here means the dispute window has not
+    /// yet elapsed.
     fn claim_winning_outcome(pool: &Pool) -> Result<u32, ContractError> {
         match pool.status {
             PoolStatus::Settled(o) => Ok(o),
+            PoolStatus::ResolutionPending(_) => Err(ContractError::ResolutionNotFinal),
             PoolStatus::Frozen => Err(ContractError::PoolIsFrozen),
             PoolStatus::Disputed => Err(ContractError::PoolIsDisputed),
             PoolStatus::Cancelled => Err(ContractError::PoolIsCancelled),
@@ -5635,7 +5751,9 @@ impl PredinexContract {
         // have not yet opened for betting and cancellation would bypass the
         // scheduled lifecycle.
         match pool.status {
-            PoolStatus::Settled(_) => return Err(ContractError::PoolAlreadySettled),
+            PoolStatus::Settled(_) | PoolStatus::ResolutionPending(_) => {
+                return Err(ContractError::PoolAlreadySettled)
+            }
             PoolStatus::Voided => return Err(ContractError::PoolAlreadyVoided),
             PoolStatus::Cancelled => return Err(ContractError::PoolIsCancelled),
             PoolStatus::Disputed => return Err(ContractError::PoolIsDisputed),
@@ -5997,7 +6115,20 @@ impl PredinexContract {
             return Err(ContractError::InvalidOutcome);
         }
 
-        pool.status = PoolStatus::Settled(winning_outcome);
+        // #1416 — A zero dispute window means the resolution is immediately
+        // final (Open → Settled). A positive window opens a time-bounded
+        // dispute window (Open → ResolutionPending) during which challenges may
+        // be submitted and payouts are paused until finalization.
+        let dispute_window = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::DisputeWindow)
+            .unwrap_or(0);
+        if dispute_window == 0 {
+            pool.status = PoolStatus::Settled(winning_outcome);
+        } else {
+            pool.status = PoolStatus::ResolutionPending(winning_outcome);
+        }
         pool.settled = true;
         pool.winning_outcome = Some(winning_outcome);
 
@@ -6074,6 +6205,27 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
+        // #1416 — Store the resolution deadline (settlement_time + dispute_window)
+        // so `finalize_resolution` and `try_auto_finalize` can check whether the
+        // dispute window has elapsed without re-reading the global config. Only
+        // stored when a dispute window is active; pools settled directly to
+        // `Settled` (window == 0) are immediately final and have no deadline.
+        if dispute_window > 0 {
+            let resolution_deadline = env
+                .ledger()
+                .timestamp()
+                .saturating_add(dispute_window);
+            env.storage().persistent().set(
+                &DataKey::PoolResolutionDeadline(pool_id),
+                &resolution_deadline,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolResolutionDeadline(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
+        }
+
         // #176 — emit enriched settlement event including source metadata.
         emit_settle_pool(
             env,
@@ -6092,9 +6244,21 @@ impl PredinexContract {
 
     /// Settle an expired pool by declaring the winning outcome.
     ///
-    /// Transitions the pool from `Open` to `Settled(winning_outcome)`, fixes the
-    /// market's protocol fee (computed as `floor(bps × total volume)`), records
-    /// the settlement source, and emits a `settle_pool` event. After settlement,
+    /// When the configured dispute window is **zero** (`set_dispute_window(0)`),
+    /// the resolution is immediately final: the pool transitions directly from
+    /// `Open` to `Settled(winning_outcome)` and winners may claim right away.
+    ///
+    /// When the dispute window is **positive**, the pool transitions from `Open`
+    /// to `ResolutionPending(winning_outcome)`, a non-final state that opens a
+    /// time-bounded dispute window. The resolution becomes final (`Settled`)
+    /// once the dispute window elapses without a challenge — either via
+    /// [`finalize_resolution`](Self::finalize_resolution) or automatically when
+    /// a winner attempts to claim. During the window any authorised party may
+    /// challenge via [`dispute_pool`](Self::dispute_pool).
+    ///
+    /// Fixes the market's protocol fee (computed as `floor(bps × total volume)`),
+    /// records the settlement source, stores the resolution deadline (when a
+    /// window is active), and emits a `settle_pool` event. After finalization,
     /// winners call [`claim_winnings`](Self::claim_winnings). The caller must be
     /// the pool creator or a delegated settler assigned via
     /// [`assign_settler`](Self::assign_settler).
@@ -6171,6 +6335,103 @@ impl PredinexContract {
             results,
             truncated,
         }
+    }
+
+    /// #1416 — Finalize a pending resolution, transitioning the pool from
+    /// `ResolutionPending` to `Settled` after the dispute window has elapsed.
+    ///
+    /// Callable by **anyone** — no authorization required. The function verifies
+    /// that the pool is in `ResolutionPending` status and that the dispute window
+    /// deadline has passed. If a challenge was recorded (the pool is `Disputed`),
+    /// finalization is rejected.
+    ///
+    /// This is the explicit entry point for finalization. Claims also
+    /// auto-finalize expired pending resolutions via [`try_auto_finalize`](Self::try_auto_finalize),
+    /// so calling this function is only necessary when no winner is ready to claim.
+    ///
+    /// # Arguments
+    /// * `pool_id` – pool to finalize.
+    ///
+    /// # Errors
+    /// * `PoolNotFound` – pool does not exist.
+    /// * `ResolutionNotPending` – pool is not in `ResolutionPending` status.
+    /// * `ResolutionNotFinal` – dispute window has not yet elapsed.
+    ///
+    /// # Events
+    /// Emits `resolution_finalized` with `auto = false`.
+    pub fn finalize_resolution(env: Env, pool_id: u32) -> Result<(), ContractError> {
+        Self::finalize_resolution_internal(&env, pool_id, None, false)
+    }
+
+    /// #1416 — Internal finalization logic shared by the public
+    /// `finalize_resolution` entry point and the auto-finalize claim path.
+    ///
+    /// * `finalizer` – `Some(address)` when triggered by an explicit call,
+    ///   `None` when auto-triggered by a claim path.
+    /// * `auto` – `true` when triggered by a claim, `false` for explicit calls.
+    fn finalize_resolution_internal(
+        env: &Env,
+        pool_id: u32,
+        finalizer: Option<Address>,
+        auto: bool,
+    ) -> Result<(), ContractError> {
+        let mut pool = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+
+        let winning_outcome = match pool.status {
+            PoolStatus::ResolutionPending(o) => o,
+            _ => return Err(ContractError::ResolutionNotPending),
+        };
+
+        let deadline = env
+            .storage()
+            .persistent()
+            .get::<_, u64>(&DataKey::PoolResolutionDeadline(pool_id))
+            .ok_or(ContractError::ResolutionNotPending)?;
+
+        if env.ledger().timestamp() < deadline {
+            return Err(ContractError::ResolutionNotFinal);
+        }
+
+        pool.status = PoolStatus::Settled(winning_outcome);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Pool(pool_id), &pool);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Pool(pool_id),
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+
+        emit_resolution_finalized(env, pool_id, winning_outcome, finalizer, auto);
+        Ok(())
+    }
+
+    /// #1416 — Auto-finalize a pending resolution if the dispute window has
+    /// elapsed. Called by both claim paths (`claim_winnings_internal` and
+    /// `claim_multi_asset_winnings`) before reading the pool, so that claims
+    /// against an expired `ResolutionPending` pool proceed without requiring
+    /// a separate `finalize_resolution` transaction.
+    ///
+    /// If the pool is `ResolutionPending` and the deadline has passed, the pool
+    /// is finalized to `Settled` in storage. If the deadline has not passed,
+    /// returns `ResolutionNotFinal`. If the pool is in any other status, this
+    /// is a no-op.
+    fn try_auto_finalize(env: &Env, pool_id: u32) -> Result<(), ContractError> {
+        let pool = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+
+        if !matches!(pool.status, PoolStatus::ResolutionPending(_)) {
+            return Ok(());
+        }
+
+        Self::finalize_resolution_internal(env, pool_id, None, true)
     }
 
     /// #176 — Return the settlement source for a pool, or `None` if not yet settled.
@@ -6685,6 +6946,11 @@ impl PredinexContract {
         {
             return Err(ContractError::MultiAssetClaimRequired);
         }
+
+        // #1416 — Auto-finalize an expired ResolutionPending pool before
+        // proceeding with the claim. If the dispute window has not elapsed,
+        // this returns ResolutionNotFinal, blocking the claim.
+        Self::try_auto_finalize(env, pool_id)?;
 
         let pool = env
             .storage()
@@ -7929,7 +8195,7 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .get(&DataKey::DisputeWindow)
-            .unwrap_or(DISPUTE_WINDOW_SECS)
+            .unwrap_or(0)
     }
 
     /// #1407 — Return the outcome index that was under dispute when the pool
@@ -7940,6 +8206,39 @@ impl PredinexContract {
             .get(&DataKey::PoolDisputedOutcome(pool_id))
     }
 
+    /// #1416 — Return all recorded challenges against a pool's pending
+    /// resolution, or an empty vector if none have been recorded.
+    pub fn get_pool_challenges(env: Env, pool_id: u32) -> Vec<Challenge> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolChallenges(pool_id))
+            .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// #1416 — Return the resolution deadline (ledger timestamp) after which a
+    /// `ResolutionPending` pool can be finalized, or `None` if the pool has not
+    /// been settled.
+    pub fn get_resolution_deadline(env: Env, pool_id: u32) -> Option<u64> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolResolutionDeadline(pool_id))
+    }
+
+    /// #1416 — Configure the contract-wide dispute window in seconds.
+    ///
+    /// When set to **0** (the default if never configured), pool resolutions
+    /// are immediately final — `settle_pool` transitions directly to `Settled`
+    /// and winners may claim right away (no dispute window).
+    ///
+    /// When set to a **positive** value, `settle_pool` transitions to
+    /// `ResolutionPending` and the resolution is not final until the window
+    /// elapses without a challenge. During the window, authorised parties may
+    /// call `dispute_pool` to challenge the resolution. After the window,
+    /// `finalize_resolution` (or an auto-finalize on claim) transitions the
+    /// pool to `Settled`.
+    ///
+    /// Only the freeze admin may call this. The value applies to all future
+    /// `settle_pool` calls. Emits `dispute_window_set`.
     pub fn set_dispute_window(
         env: Env,
         caller: Address,
@@ -7954,8 +8253,14 @@ impl PredinexContract {
         Ok(())
     }
 
-    /// Mark a settled pool as disputed, blocking claim payouts pending review.
-    /// Callable only by the freeze admin.
+    /// Mark a settled or resolution-pending pool as disputed, blocking claim
+    /// payouts pending review. Callable only by the freeze admin.
+    ///
+    /// #1416 — When the pool is in `ResolutionPending` status, the dispute is
+    /// recorded as a **challenge** against the pending resolution. The
+    /// challenger address and timestamp are appended to `PoolChallenges` and a
+    /// `resolution_challenged` event is emitted alongside the legacy
+    /// `pool_disputed` event.
     pub fn dispute_pool(env: Env, caller: Address, pool_id: u32) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_freeze_admin(&env, &caller)?;
@@ -7970,7 +8275,7 @@ impl PredinexContract {
             return Err(ContractError::PoolIsFrozen);
         }
 
-        if !matches!(pool.status, PoolStatus::Settled(_)) {
+        if !matches!(pool.status, PoolStatus::Settled(_) | PoolStatus::ResolutionPending(_)) {
             return Err(ContractError::PoolMustBeSettledToDispute);
         }
 
@@ -7989,7 +8294,7 @@ impl PredinexContract {
                 .storage()
                 .persistent()
                 .get::<_, u64>(&DataKey::DisputeWindow)
-                .unwrap_or(DISPUTE_WINDOW_SECS);
+                .unwrap_or(0);
 
             if env.ledger().timestamp() > settlement_time + dispute_window {
                 return Err(ContractError::DisputeWindowExpired);
@@ -8000,11 +8305,12 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::PoolPreDisputeStatus(pool_id), &pool.status);
 
-        // #1407 — Extract and persist the settled outcome that is being disputed
-        // so the UI, indexers, and resolvers can identify which resolution is
-        // under review without having to reconstruct it from the pre-dispute status.
+        // #1407 — Extract and persist the outcome that is being disputed so the
+        // UI, indexers, and resolvers can identify which resolution is under
+        // review without having to reconstruct it from the pre-dispute status.
+        // #1416 — Now also handles ResolutionPending pools.
         let disputed_outcome: u32 = match pool.status {
-            PoolStatus::Settled(o) => o,
+            PoolStatus::Settled(o) | PoolStatus::ResolutionPending(o) => o,
             _ => 0,
         };
         env.storage()
@@ -8015,6 +8321,31 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+
+        // #1416 — Record the challenge if this is a ResolutionPending pool.
+        let was_resolution_pending = matches!(pool.status, PoolStatus::ResolutionPending(_));
+        if was_resolution_pending {
+            let timestamp = env.ledger().timestamp();
+            let mut challenges: Vec<Challenge> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::PoolChallenges(pool_id))
+                .unwrap_or_else(|| Vec::new(&env));
+            challenges.push_back(Challenge {
+                challenger: caller.clone(),
+                timestamp,
+                disputed_outcome,
+            });
+            env.storage()
+                .persistent()
+                .set(&DataKey::PoolChallenges(pool_id), &challenges);
+            env.storage().persistent().extend_ttl(
+                &DataKey::PoolChallenges(pool_id),
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
+            emit_resolution_challenged(&env, pool_id, caller.clone(), disputed_outcome, timestamp);
+        }
 
         pool.status = PoolStatus::Disputed;
         env.storage()
@@ -9263,18 +9594,20 @@ impl PredinexContract {
                 Some(_) => ClaimStatus::RefundClaimable,
                 None => ClaimStatus::AlreadyClaimed,
             },
-            PoolStatus::Settled(winning_outcome) => match bet {
-                None => ClaimStatus::AlreadyClaimed,
-                Some(b) => {
-                    let outcome_bets = Self::read_user_outcome_bets(&env, pool_id, user, &b);
-                    let winning_stake = outcome_bets.get(winning_outcome).unwrap_or(0);
-                    if winning_stake > 0 {
-                        ClaimStatus::Claimable
-                    } else {
-                        ClaimStatus::NotEligible
+            PoolStatus::Settled(winning_outcome) | PoolStatus::ResolutionPending(winning_outcome) => {
+                match bet {
+                    None => ClaimStatus::AlreadyClaimed,
+                    Some(b) => {
+                        let outcome_bets = Self::read_user_outcome_bets(&env, pool_id, user, &b);
+                        let winning_stake = outcome_bets.get(winning_outcome).unwrap_or(0);
+                        if winning_stake > 0 {
+                            ClaimStatus::Claimable
+                        } else {
+                            ClaimStatus::NotEligible
+                        }
                     }
                 }
-            },
+            }
             _ => match bet {
                 Some(_) => ClaimStatus::NotEligible,
                 None => ClaimStatus::NeverBet,
@@ -9412,7 +9745,7 @@ impl PredinexContract {
         };
 
         let winning_outcome = match pool.status {
-            PoolStatus::Settled(outcome) => outcome,
+            PoolStatus::Settled(outcome) | PoolStatus::ResolutionPending(outcome) => outcome,
             PoolStatus::Voided | PoolStatus::Cancelled => {
                 // For voided/cancelled pools, return the user's total bet as refund
                 let bet: UserBet = match env
@@ -10579,6 +10912,11 @@ impl PredinexContract {
         pool_id: u32,
     ) -> Result<MultiAssetClaimResult, ContractError> {
         Self::require_claim_auth(&env, &user)?;
+
+        // #1416 — Auto-finalize an expired ResolutionPending pool before
+        // proceeding with the claim. If the dispute window has not elapsed,
+        // this returns ResolutionNotFinal, blocking the claim.
+        Self::try_auto_finalize(&env, pool_id)?;
 
         let pool = env
             .storage()
