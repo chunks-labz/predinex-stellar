@@ -83,6 +83,9 @@ All three checks must pass before opening a PR. Run them from the `web/` directo
 # Lint
 npm run lint
 
+# Auto-fix linting issues
+npm run lint:fix
+
 # Unit tests (single run, matches CI)
 npm test -- --run
 
@@ -132,8 +135,14 @@ Run these from `contracts/predinex/`:
 # Format check
 cargo fmt --check
 
+# Auto-fix formatting
+cargo fmt
+
 # Lint
 cargo clippy -- -D warnings
+
+# Auto-fix clippy suggestions where possible
+cargo clippy --fix --allow-dirty
 
 # Unit tests
 cargo test
@@ -224,6 +233,7 @@ component suite.
 
 Before marking a PR ready for review:
 
+- [ ] Code is formatted and linted (`npm run lint:fix`, `cargo fmt`)
 - [ ] `npm run lint` passes
 - [ ] `npm test -- --run` passes (no new failures)
 - [ ] `npm run build` succeeds
@@ -261,6 +271,7 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every push and pull request
 
 | Job | Steps |
 |-----|-------|
+| **Lint & Format Gate** | Runs on every PR; checks `cargo fmt --all --check` (fails with diff), `cargo clippy --workspace -- -D warnings`, and `npm run lint`. Use auto-fix commands (`cargo fmt`, `npm run lint:fix`) to resolve violations. |
 | **Web Checks** | `npm ci` → `npm run lint` → `npm test -- --run` → `npm run build` |
 | **Bundle size budget** | Checked on PRs; fails if JS exceeds 350 KB, CSS exceeds 80 KB, or total static exceeds 500 KB |
 | **Contract Checks** | `cargo fmt --check` → `cargo clippy -- -D warnings` → `cargo test` |

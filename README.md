@@ -79,7 +79,7 @@ stateDiagram-v2
 - `web` — the Next.js frontend (App Router): markets, dashboard, analytics, admin, disputes, oracle management, portfolio.
 - `packages/widget` — the embeddable pool widget for third-party sites.
 - `bot` — automated off-chain workflows (oracle reporting, market upkeep).
-- `docs` — protocol, contract API, deployment, and development documentation.
+- `docs` — protocol, contract API, deployment, and development documentation (including the [Market Lifecycle State Machine](docs/MARKET_LIFECYCLE.md)).
 - `scripts` — bootstrap and CI/verification helpers.
 
 ## 🚀 Getting Started

@@ -7,7 +7,7 @@
 > **Source:** `contracts/predinex/src/lib.rs`
 
 Complete reference for every public entrypoint in `PredinexContract`.  
-Sections: [Pool Management](#pool-management) · [Betting](#betting) · [Settlement](#settlement) · [Claims](#claims) · [Pool Templates](#pool-templates) · [Admin](#admin) · [Queries](#queries)
+Sections: [Pool Management](#pool-management) · [Betting](#betting) · [Settlement](#settlement) · [Claims](#claims) · [Pool Templates](#pool-templates) · [Admin](#admin) · [Queries](#queries) · [Market Lifecycle](MARKET_LIFECYCLE.md)
 
 ---
 

@@ -9,7 +9,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    Address, Env, String,
+    Address, Env, String, Vec,
 };
 
 // ── Test harness ──────────────────────────────────────────────────────────────
@@ -594,4 +594,136 @@ fn test_pool_unfrozen_trigger_discriminates_the_two_paths() {
     // triggers, so a consumer keyed on "which admin unfroze this pool" would
     // otherwise return a random bettor.
     assert_ne!(UnfreezeTrigger::Admin, UnfreezeTrigger::AutoThaw);
+}
+
+// ── MarketPaused & MarketUnpaused event tests (#1449) ───────────────────────
+
+fn all_market_paused_events(env: &Env) -> Vec<(u32, MarketPausedEvent)> {
+    let events = env.events().all();
+    let mut matching = Vec::new(env);
+    for e in events.events().iter() {
+        let name: Symbol =
+            TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 0)).unwrap_or_else(|_| {
+                Symbol::new(env, "__none__")
+            });
+        if name == Symbol::new(env, "MarketPaused") {
+            let market_id: u32 =
+                TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 2)).unwrap();
+            let data_val: Val = match &e.body {
+                soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+                    Env,
+                    soroban_sdk::xdr::ScVal,
+                >>::try_from_val(env, &v0.data)
+                .unwrap(),
+            };
+            let payload: MarketPausedEvent = TryFromVal::try_from_val(env, &data_val).unwrap();
+            matching.push_back((market_id, payload));
+        }
+    }
+    matching
+}
+
+fn all_market_unpaused_events(env: &Env) -> Vec<(u32, MarketUnpausedEvent)> {
+    let events = env.events().all();
+    let mut matching = Vec::new(env);
+    for e in events.events().iter() {
+        let name: Symbol =
+            TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 0)).unwrap_or_else(|_| {
+                Symbol::new(env, "__none__")
+            });
+        if name == Symbol::new(env, "MarketUnpaused") {
+            let market_id: u32 =
+                TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 2)).unwrap();
+            let data_val: Val = match &e.body {
+                soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+                    Env,
+                    soroban_sdk::xdr::ScVal,
+                >>::try_from_val(env, &v0.data)
+                .unwrap(),
+            };
+            let payload: MarketUnpausedEvent = TryFromVal::try_from_val(env, &data_val).unwrap();
+            matching.push_back((market_id, payload));
+        }
+    }
+    matching
+}
+
+#[test]
+fn test_market_paused_and_unpaused_events_emitted_exactly_once() {
+    let ctx = TestCtx::new();
+    let pool_id = ctx.open_pool();
+
+    // Initial state: no pause/unpause events
+    assert_eq!(all_market_paused_events(&ctx.env).len(), 0);
+    assert_eq!(all_market_unpaused_events(&ctx.env).len(), 0);
+
+    // Freeze (pause) pool
+    ctx.client.freeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let paused_events = all_market_paused_events(&ctx.env);
+    assert_eq!(paused_events.len(), 1, "MarketPaused must be emitted exactly once");
+    let (topic_id, paused_payload) = paused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(paused_payload.market_id, pool_id);
+    assert_eq!(paused_payload.actor, ctx.freeze_admin);
+    assert_eq!(paused_payload.timestamp, ctx.env.ledger().timestamp());
+
+    // Attempting a second freeze must error and must NOT emit another event
+    let err = ctx.client.try_freeze_pool(&ctx.freeze_admin, &pool_id);
+    assert!(err.is_err());
+    assert_eq!(
+        all_market_paused_events(&ctx.env).len(),
+        1,
+        "second freeze must not emit another MarketPaused event"
+    );
+
+    // Unfreeze (unpause) pool
+    ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let unpaused_events = all_market_unpaused_events(&ctx.env);
+    assert_eq!(unpaused_events.len(), 1, "MarketUnpaused must be emitted exactly once");
+    let (unpause_topic_id, unpaused_payload) = unpaused_events.get(0).unwrap();
+    assert_eq!(unpause_topic_id, pool_id);
+    assert_eq!(unpaused_payload.market_id, pool_id);
+    assert_eq!(unpaused_payload.actor, ctx.freeze_admin);
+    assert_eq!(unpaused_payload.timestamp, ctx.env.ledger().timestamp());
+
+    // Attempting a second unfreeze must error and must NOT emit another event
+    let unfreeze_err = ctx.client.try_unfreeze_pool(&ctx.freeze_admin, &pool_id);
+    assert!(unfreeze_err.is_err());
+    assert_eq!(
+        all_market_unpaused_events(&ctx.env).len(),
+        1,
+        "second unfreeze must not emit another MarketUnpaused event"
+    );
+}
+
+#[test]
+fn test_pause_market_and_unpause_market_alias_methods() {
+    let ctx = TestCtx::new();
+    let pool_id = ctx.open_pool();
+
+    // Call pause_market entrypoint
+    ctx.client.pause_market(&ctx.freeze_admin, &pool_id);
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.status, PoolStatus::Frozen);
+
+    let paused_events = all_market_paused_events(&ctx.env);
+    assert_eq!(paused_events.len(), 1);
+    let (topic_id, paused_payload) = paused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(paused_payload.market_id, pool_id);
+    assert_eq!(paused_payload.actor, ctx.freeze_admin);
+
+    // Call unpause_market entrypoint
+    ctx.client.unpause_market(&ctx.freeze_admin, &pool_id);
+    let pool_after = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after.status, PoolStatus::Open);
+
+    let unpaused_events = all_market_unpaused_events(&ctx.env);
+    assert_eq!(unpaused_events.len(), 1);
+    let (topic_id, unpaused_payload) = unpaused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(unpaused_payload.market_id, pool_id);
+    assert_eq!(unpaused_payload.actor, ctx.freeze_admin);
 }
