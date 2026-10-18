@@ -267,7 +267,7 @@ export const predinexContract = {
     wallet: FreighterWalletClient;
     poolId: number;
     outcome: number;
-    amountStroops: number;
+    amountStroops: number | bigint;
     referrer?: string | null;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;

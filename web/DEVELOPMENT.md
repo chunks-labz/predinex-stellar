@@ -199,6 +199,13 @@ Cache keys are based on lockfile hashes:
    cargo build --offline
    ```
 
+5. **Seed demo markets and wagers** against a local/testnet deployment:
+   ```bash
+   ./scripts/seed-demo-markets.sh --contract-id C... --source-identity deployer
+   ```
+   The script is idempotent (re-running does not duplicate data) and refuses to
+   run against mainnet. See the [Local End-to-End Runbook](../docs/local-runbook.md#5b-seed-demo-markets-and-wagers-optional).
+
 ### Troubleshooting
 
 | Issue | Solution |

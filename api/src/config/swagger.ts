@@ -339,6 +339,115 @@ export const gasEstimateSchemas = {
 };
 
 /**
+ * Markets Module Schemas (Issues #1420, #1432, #1436, #1437)
+ */
+export const marketSchemas = {
+  MarketStatus: {
+    type: 'string',
+    enum: ['open', 'settled', 'voided', 'cancelled'],
+    description:
+      'Market lifecycle status. `cancelled` is a soft delete: the record, its data and its audit trail are retained.',
+  },
+
+  MarketSummary: {
+    type: 'object',
+    description: 'One market row, including soft-deleted (cancelled) markets for admins.',
+    properties: {
+      id: { type: 'integer', format: 'int32', example: 21 },
+      title: { type: 'string', example: 'Will BTC close above $150k?' },
+      outcomes: {
+        type: 'array',
+        items: { type: 'string' },
+        example: ['Yes', 'No'],
+      },
+      status: { $ref: '#/components/schemas/MarketStatus' },
+      expiry: {
+        type: 'integer',
+        format: 'int64',
+        description: 'Unix expiry timestamp in seconds',
+        example: 1700000021,
+      },
+      totalVolume: {
+        type: 'string',
+        description: 'Total volume in base token units (BigInt serialized as string)',
+        example: '21000',
+      },
+      cancelledAt: {
+        allOf: [{ $ref: '#/components/schemas/IsoTimestamp' }],
+        description: 'Set only on cancelled markets; ISO timestamp of the soft delete.',
+      },
+      cancelledBy: {
+        type: 'string',
+        description: 'Set only on cancelled markets; audit actor that cancelled the market.',
+      },
+      cancelReason: {
+        type: 'string',
+        description: 'Set only on cancelled markets; optional reason supplied at cancellation.',
+      },
+    },
+    required: ['id', 'title', 'outcomes', 'status', 'expiry', 'totalVolume'],
+    additionalProperties: false,
+  },
+
+  MarketAuditEntry: {
+    type: 'object',
+    description: 'One cancellation or restoration record from a market audit trail.',
+    properties: {
+      id: { type: 'integer', format: 'int32', example: 3 },
+      marketId: { type: 'integer', format: 'int32', example: 21 },
+      action: { type: 'string', enum: ['cancelled', 'restored'] },
+      actor: { type: 'string', example: 'admin' },
+      reason: { type: 'string' },
+      fromStatus: { $ref: '#/components/schemas/MarketStatus' },
+      toStatus: { $ref: '#/components/schemas/MarketStatus' },
+      timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['id', 'marketId', 'action', 'actor', 'fromStatus', 'toStatus', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  MarketPagination: {
+    type: 'object',
+    properties: {
+      total: { type: 'integer', format: 'int32', example: 45 },
+      limit: { type: 'integer', format: 'int32', example: 20 },
+      offset: { type: 'integer', format: 'int32', example: 0 },
+      count: { type: 'integer', format: 'int32', example: 20 },
+      hasMore: { type: 'boolean', example: true },
+      nextOffset: {
+        type: ['integer', 'null'],
+        format: 'int32',
+        example: 20,
+        description: 'Offset for the next page, or null on the last page',
+      },
+      prevOffset: {
+        type: ['integer', 'null'],
+        format: 'int32',
+        example: null,
+        description: 'Offset for the previous page, or null on the first page',
+      },
+    },
+    required: ['total', 'limit', 'offset', 'count', 'hasMore', 'nextOffset', 'prevOffset'],
+    additionalProperties: false,
+  },
+
+  MarketListResponse: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: true },
+      data: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/MarketSummary' },
+      },
+      pagination: { $ref: '#/components/schemas/MarketPagination' },
+      timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['success', 'data', 'pagination', 'timestamp'],
+    additionalProperties: false,
+  },
+};
+
+/**
  * Insurance Module Schemas
  */
 export const insuranceSchemas = {
@@ -520,6 +629,11 @@ export const openApiDoc = {
     '/api/markets': {
       get: {
         summary: 'List markets (paginated, ordered by ascending id)',
+        description:
+          'Cancelled (soft-deleted) markets are excluded by default. ' +
+          '`status` filters by one or more statuses and combines with `sort`, `order`, `limit` and `offset`; ' +
+          'pagination totals always reflect the filtered set. Requesting the `cancelled` status requires admin ' +
+          'credentials and is answered with 403 otherwise.',
         parameters: [
           {
             name: 'limit',
@@ -535,11 +649,211 @@ export const openApiDoc = {
             description: 'Zero-based index of the first market to return (default 0)',
             schema: { type: 'integer', minimum: 0, default: 0 },
           },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            description:
+              'One or more market statuses to include. Values may be comma-separated (?status=open,settled) ' +
+              'and/or repeated (?status=open&status=settled). When omitted, every non-cancelled market is ' +
+              'returned. Including "cancelled" requires admin credentials (x-api-key).',
+            style: 'form',
+            explode: false,
+            schema: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MarketStatus' },
+              example: ['open', 'settled'],
+            },
+          },
+          {
+            name: 'sort',
+            in: 'query',
+            required: false,
+            description: 'Field to sort by (default id)',
+            schema: { type: 'string', enum: ['id', 'expiry', 'volume', 'title'], default: 'id' },
+          },
+          {
+            name: 'order',
+            in: 'query',
+            required: false,
+            description: 'Sort direction (default asc)',
+            schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+          },
         ],
         responses: {
-          '200': { description: 'Page of markets with pagination metadata (total, nextOffset, hasMore)' },
-          '400': { description: 'Invalid pagination parameters' },
+          '200': {
+            description: 'Page of markets with pagination metadata (total, nextOffset, hasMore)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MarketListResponse' } },
+            },
+          },
+          '400': { description: 'Invalid pagination, status, sort, or order parameters' },
+          '403': { description: 'Cancelled markets requested without admin credentials' },
           '429': { description: 'Rate limited; see the Retry-After header' },
+        },
+      },
+    },
+    '/api/markets/admin/cancelled': {
+      get: {
+        summary: 'List soft-deleted (cancelled) markets (admin only)',
+        description:
+          'Returns cancelled markets with the same `limit`/`offset` pagination and `sort`/`order` controls as ' +
+          'GET /api/markets. Cancellation keeps every recorded field, so these rows remain linkable.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+          {
+            name: 'sort',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['id', 'expiry', 'volume', 'title'], default: 'id' },
+          },
+          {
+            name: 'order',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of cancelled markets',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MarketListResponse' } },
+            },
+          },
+          '400': { description: 'Invalid pagination parameters' },
+          '403': { description: 'Admin access required' },
+        },
+      },
+    },
+    '/api/markets/admin/audit': {
+      get: {
+        summary: 'Cancellation/restoration audit history (admin only)',
+        description:
+          'Newest-first audit entries for every market cancellation and restoration. Optionally filter to one ' +
+          'market with `marketId`.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'marketId',
+            in: 'query',
+            required: false,
+            description: 'Only return entries for this market id',
+            schema: { type: 'integer', minimum: 0 },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of audit entries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MarketAuditEntry' },
+                    },
+                    pagination: { $ref: '#/components/schemas/MarketPagination' },
+                    timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid pagination or marketId parameter' },
+          '403': { description: 'Admin access required' },
+        },
+      },
+    },
+    '/api/markets/{id}/cancel': {
+      post: {
+        summary: 'Soft-delete (cancel) a market (admin only)',
+        description:
+          'Marks the market with status `cancelled` instead of removing it, preserving the record and its ' +
+          'links, and appends an entry to the audit history. Cancelling an already-cancelled market is ' +
+          'idempotent and does not duplicate audit entries.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  reason: {
+                    type: 'string',
+                    maxLength: 256,
+                    description: 'Optional reason recorded on the market and in the audit trail',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The cancelled market (status `cancelled`, audit fields set)' },
+          '400': { description: 'Invalid market id or reason' },
+          '403': { description: 'Admin access required' },
+          '404': { description: 'Market not found' },
+        },
+      },
+    },
+    '/api/markets/{id}/restore': {
+      post: {
+        summary: 'Restore a soft-deleted market (admin only)',
+        description:
+          'Returns a cancelled market to the status it had before cancellation (recorded in the audit trail) ' +
+          'and clears the cancellation fields. Restoring a market that is not cancelled returns 409.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+        ],
+        responses: {
+          '200': { description: 'The restored market' },
+          '400': { description: 'Invalid market id' },
+          '403': { description: 'Admin access required' },
+          '404': { description: 'Market not found' },
+          '409': { description: 'Market is not cancelled' },
         },
       },
     },
@@ -576,6 +890,7 @@ export const openApiDoc = {
       ...baseSchemas,
       ...budgetSchemas,
       ...gasEstimateSchemas,
+      ...marketSchemas,
       ...insuranceSchemas,
       ...referralSchemas,
       ...reputationSchemas,

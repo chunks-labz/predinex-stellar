@@ -391,7 +391,7 @@ export class SorobanTransactionService {
    * @param contractId - Soroban contract ID to invoke
    * @param params.poolId - ID of the pool to bet on
    * @param params.outcome - Index of the outcome being backed
-   * @param params.amountStroops - Bet amount in stroops
+   * @param params.amountStroops - Bet amount in stroops (number or bigint)
    * @param params.referrer - Optional referrer address (encoded as `Option<Address>`)
    * @param onStageChange - Optional callback for transaction stage updates
    * @param onFeeEstimated - Optional callback to approve/reject the estimated fee
@@ -405,7 +405,7 @@ export class SorobanTransactionService {
   async placeBet(
     wallet: FreighterWalletClient,
     contractId: string,
-    params: { poolId: number; outcome: number; amountStroops: number; referrer?: string | null },
+    params: { poolId: number; outcome: number; amountStroops: number | bigint; referrer?: string | null },
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
