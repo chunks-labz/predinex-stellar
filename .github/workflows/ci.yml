@@ -336,6 +336,33 @@ jobs:
         working-directory: .
         run: cargo test --workspace
 
+      - name: Verify reproducible contract builds (#1431)
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          # Build the contract
+          stellar contract build --manifest-path contracts/predinex/Cargo.toml \
+            --out-dir "$RUNNER_TEMP/build1" --release
+
+          # Clean build artifacts to ensure a fresh build
+          cargo clean -p predinex_contract --release
+
+          # Build again
+          stellar contract build --manifest-path contracts/predinex/Cargo.toml \
+            --out-dir "$RUNNER_TEMP/build2" --release
+
+          # Compare checksums
+          HASH1=$(sha256sum "$RUNNER_TEMP/build1/predinex_contract.wasm" | cut -d' ' -f1)
+          HASH2=$(sha256sum "$RUNNER_TEMP/build2/predinex_contract.wasm" | cut -d' ' -f1)
+
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "::error::Contract builds are not reproducible. HASH1=$HASH1 HASH2=$HASH2"
+            exit 1
+          fi
+
+          echo "✓ Contract builds are reproducible (hash: $HASH1)"
+
       - name: Verify Rust module declarations
         # #1310 — a file in src/ with no `mod` declaration is never compiled, so
         # it can never break CI and quietly rots. Scoped to the crates that

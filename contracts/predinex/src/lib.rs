@@ -5036,18 +5036,62 @@ impl PredinexContract {
         );
 
         // #356 — emit referral_bet event alongside place_bet when referrer present.
+        // #1430 — Accrue referral fees at placement time.
         if let Some(ref_referrer) = referrer {
             emit_referral_bet(
                 &env,
                 pool_id,
                 ReferralBetEvent {
-                    referrer: ref_referrer,
+                    referrer: ref_referrer.clone(),
                     pool_id,
                     outcome,
                     // #1226 — net of fee, identical to `place_bet.amount`.
                     amount: net_amount,
                 },
             );
+
+            let bps = Self::get_referral_bps(env.clone());
+            if bps > 0 {
+                let reward = amount
+                    .checked_mul(bps as i128)
+                    .ok_or(ContractError::TreasuryOverflow)?
+                    / 10_000;
+                if reward > 0 {
+                    let key = DataKey::ReferralBalance(ref_referrer.clone());
+                    let current: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+                    let next = current
+                        .checked_add(reward)
+                        .ok_or(ContractError::TreasuryOverflow)?;
+                    env.storage().persistent().set(&key, &next);
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
+                    let pending_key = DataKey::TotalPendingReferralRewards;
+                    let pending: i128 = env
+                        .storage()
+                        .persistent()
+                        .get::<_, i128>(&pending_key)
+                        .unwrap_or(0);
+                    let next_pending = pending
+                        .checked_add(reward)
+                        .ok_or(ContractError::TreasuryOverflow)?;
+                    env.storage()
+                        .persistent()
+                        .set(&pending_key, &next_pending);
+
+                    let total: i128 = env
+                        .storage()
+                        .persistent()
+                        .get::<_, i128>(&DataKey::TotalReferralVolume)
+                        .unwrap_or(0)
+                        .checked_add(amount)
+                        .ok_or(ContractError::TreasuryOverflow)?;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::TotalReferralVolume, &total);
+                }
+            }
         }
 
         let large_pool_threshold: i128 = env
