@@ -1,7 +1,8 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { axe } from '@axe-core/react';
 import BettingSection from '@/components/BettingSection';
 import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
@@ -210,6 +211,54 @@ describe('BettingSection', () => {
         })
       );
     });
+  });
+
+  it('supports tab navigation and Enter/Space activation through the order controls', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockResolvedValue({ txHash: '0xkeyboard' });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.tab();
+    expect(document.activeElement).toBe(input);
+
+    const quickBetGroup = screen.getByRole('group', { name: /quick bet/i });
+    const quickBetButtons = within(quickBetGroup).getAllByRole('button');
+    for (const button of quickBetButtons) {
+      await user.tab();
+      expect(document.activeElement).toBe(button);
+    }
+
+    await user.type(input, '1');
+    for (let index = 0; index < quickBetButtons.length; index += 1) {
+      await user.tab();
+    }
+    const outcomeA = screen.getByRole('button', { name: /Bet on Outcome A/i });
+    await user.tab();
+    expect(document.activeElement).toBe(outcomeA);
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+
+    vi.mocked(predinexContract.placeBetSoroban).mockClear();
+    await user.type(input, '1');
+    for (let index = 0; index < quickBetButtons.length + 2; index += 1) {
+      await user.tab();
+    }
+    const outcomeB = screen.getByRole('button', { name: /Bet on Outcome B/i });
+    expect(document.activeElement).toBe(outcomeB);
+    await user.keyboard('{Space}');
+    await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+  });
+
+  it('has no axe accessibility violations in the connected trading form', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    const { container } = renderWithProviders(
+      <BettingSection pool={mockPool} poolId={0} />,
+    );
+
+    expect(await axe(container).run()).toHaveLength(0);
   });
 
   it('disables buttons while betting is in progress', async () => {

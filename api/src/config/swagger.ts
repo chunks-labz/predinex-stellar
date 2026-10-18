@@ -726,6 +726,67 @@ export const openApiDoc = {
         },
       },
     },
+    '/api/markets/{id}/trades/export': {
+      get: {
+        summary: 'Export the authenticated user’s market trades as CSV',
+        description:
+          'Returns only trades for the Stellar account bound to the caller’s USER_API_KEYS entry. ' +
+          'The deployment must inject a trade-history source; otherwise the endpoint returns 503.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'side',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['buy', 'sell'] },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Rows in this export page (default 100, maximum 1,000)',
+            schema: { type: 'integer', minimum: 1, maximum: 1000, default: 100 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'RFC 4180 CSV attachment',
+            content: { 'text/csv': { schema: { type: 'string', format: 'binary' } } },
+          },
+          '400': { description: 'Invalid market id or export filters' },
+          '401': { description: 'User API key with a bound Stellar address required' },
+          '404': { description: 'Market not found' },
+          '429': { description: 'Rate limited; see the Retry-After header' },
+          '503': { description: 'Trade-history source is not configured' },
+        },
+      },
+    },
     '/api/markets/admin/cancelled': {
       get: {
         summary: 'List soft-deleted (cancelled) markets (admin only)',

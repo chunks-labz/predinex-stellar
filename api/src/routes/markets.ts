@@ -83,6 +83,82 @@ export interface MarketSummary {
   archivedBy?: string;
 }
 
+export type MarketTradeSide = 'buy' | 'sell';
+
+export interface MarketTradeRecord {
+  tradeId: string;
+  marketId: number;
+  userAddress: string;
+  side: MarketTradeSide;
+  outcome: string;
+  amount: string;
+  price: string;
+  /** Unix timestamp in seconds. */
+  timestamp: number;
+  transactionHash: string;
+}
+
+export interface TradeExportFilters {
+  from?: number;
+  to?: number;
+  side?: MarketTradeSide;
+}
+
+/** Trade source must scope its query to both the requested market and caller, newest first. */
+export interface TradeHistorySource {
+  listTrades(
+    marketId: number,
+    userAddress: string,
+    filters: TradeExportFilters
+  ): Promise<MarketTradeRecord[]>;
+}
+
+export class TradeHistoryNotConfiguredError extends Error {
+  constructor() {
+    super('Market trade history source is not configured');
+    this.name = 'TradeHistoryNotConfiguredError';
+  }
+}
+
+/** Explicit unavailable source used until an indexer/store is wired by the deployment. */
+export class UnconfiguredTradeHistorySource implements TradeHistorySource {
+  async listTrades(): Promise<MarketTradeRecord[]> {
+    throw new TradeHistoryNotConfiguredError();
+  }
+}
+
+/** In-memory source for development and tests; production should inject an indexed source. */
+export class InMemoryTradeHistorySource implements TradeHistorySource {
+  private trades: MarketTradeRecord[];
+
+  constructor(trades: MarketTradeRecord[] = []) {
+    this.trades = [...trades];
+  }
+
+  setTrades(trades: MarketTradeRecord[]): void {
+    this.trades = [...trades];
+  }
+
+  async listTrades(
+    marketId: number,
+    userAddress: string,
+    filters: TradeExportFilters
+  ): Promise<MarketTradeRecord[]> {
+    return this.trades
+      .filter((trade) => {
+        const timestampMs = trade.timestamp * 1000;
+        return (
+          trade.marketId === marketId &&
+          trade.userAddress === userAddress &&
+          (!filters.side || trade.side === filters.side) &&
+          (filters.from === undefined || timestampMs >= filters.from) &&
+          (filters.to === undefined || timestampMs <= filters.to)
+        );
+      })
+      .sort((a, b) => b.timestamp - a.timestamp);
+  }
+}
+
 export interface MarketMetrics {
   totalMarkets: number;
   openMarkets: number;
@@ -412,13 +488,107 @@ export class InMemoryMarketSource implements MarketSource {
 export type MarketCreator = (req: CreateMarketRequest) => Promise<MarketSummary>;
 
 export const defaultMarketSource = new InMemoryMarketSource();
+export const defaultTradeHistorySource = new UnconfiguredTradeHistorySource();
 
 export function createMarketsRouter(
   source: MarketSource = defaultMarketSource,
-  creator?: MarketCreator
+  creator?: MarketCreator,
+  tradeHistory: TradeHistorySource = defaultTradeHistorySource
 ): Router {
   const router = Router();
   router.use(rateLimitMiddleware);
+
+  router.get('/:id/trades/export', async (req: Request, res: Response, next: NextFunction) => {
+    const auth = authenticate(req);
+    if (!auth.subjectAddress) {
+      sendError(res, 401, 'UNAUTHORIZED', 'A user API key bound to a Stellar address is required');
+      return;
+    }
+
+    const parsedId = parseMarketId(req.params.id);
+    if (!parsedId.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'id must be a positive integer');
+      return;
+    }
+
+    const parsedFilters = parseTradeExportFilters(req.query as Record<string, unknown>);
+    const parsedPage = parsePagination(req.query as Record<string, unknown>, {
+      limit: 100,
+      maxLimit: 1000,
+    });
+    if (!parsedFilters.ok || !parsedPage.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'Invalid trade export query parameters', [
+        ...(parsedFilters.ok ? [] : parsedFilters.errors),
+        ...(parsedPage.ok ? [] : parsedPage.errors),
+      ]);
+      return;
+    }
+
+    try {
+      if (source.get && !(await source.get(parsedId.id))) {
+        sendError(res, 404, 'NOT_FOUND', `Market ${parsedId.id} not found`);
+        return;
+      }
+
+      const trades = await tradeHistory.listTrades(
+        parsedId.id,
+        auth.subjectAddress,
+        parsedFilters.filters
+      );
+      const page = parsedPage.params;
+      const rows = trades
+        // Defense in depth: do not trust a data source to enforce caller scoping.
+        .filter(
+          (trade) =>
+            trade.marketId === parsedId.id &&
+            trade.userAddress === auth.subjectAddress &&
+            (!parsedFilters.filters.side || trade.side === parsedFilters.filters.side) &&
+            (parsedFilters.filters.from === undefined ||
+              trade.timestamp * 1000 >= parsedFilters.filters.from) &&
+            (parsedFilters.filters.to === undefined ||
+              trade.timestamp * 1000 <= parsedFilters.filters.to)
+        )
+        .slice(page.offset, page.offset + page.limit);
+      const timestampedRows = rows.map((trade) => {
+        const timestamp = new Date(trade.timestamp * 1000);
+        if (!Number.isFinite(timestamp.getTime())) {
+          throw new Error(`Trade source returned an invalid timestamp for trade ${trade.tradeId}`);
+        }
+        return { trade, timestamp: timestamp.toISOString() };
+      });
+
+      res.status(200);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="market-${parsedId.id}-trades.csv"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.write('trade_id,market_id,user_address,side,outcome,amount,price,timestamp,tx_hash\r\n');
+      for (const { trade, timestamp } of timestampedRows) {
+        const fields: Array<string | number> = [
+          trade.tradeId,
+          trade.marketId,
+          trade.userAddress,
+          trade.side,
+          trade.outcome,
+          trade.amount,
+          trade.price,
+          timestamp,
+          trade.transactionHash,
+        ];
+        res.write(`${fields.map(escapeCsvField).join(',')}\r\n`);
+      }
+      res.end();
+    } catch (err) {
+      if (err instanceof TradeHistoryNotConfiguredError) {
+        sendError(res, 503, 'TRADE_HISTORY_UNAVAILABLE', err.message);
+        return;
+      }
+      next(err);
+    }
+  });
 
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const parsedPage = parsePagination(req.query as Record<string, unknown>);
@@ -741,6 +911,55 @@ function sendError(
     },
     timestamp: new Date().toISOString(),
   });
+}
+
+function parseTradeExportFilters(
+  query: Record<string, unknown>
+): { ok: true; filters: TradeExportFilters } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const filters: TradeExportFilters = {};
+
+  for (const [name, endOfDate, key] of [
+    ['from', false, 'from'],
+    ['to', true, 'to'],
+  ] as const) {
+    const raw = query[name];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      errors.push(`${name} must be a valid ISO date or timestamp`);
+      continue;
+    }
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+    const timestamp = Date.parse(dateOnly && endOfDate ? `${raw}T23:59:59.999Z` : raw);
+    if (!Number.isFinite(timestamp)) {
+      errors.push(`${name} must be a valid ISO date or timestamp`);
+      continue;
+    }
+    filters[key] = timestamp;
+  }
+
+  if (query.side !== undefined) {
+    if (query.side !== 'buy' && query.side !== 'sell') {
+      errors.push('side must be "buy" or "sell"');
+    } else {
+      filters.side = query.side;
+    }
+  }
+
+  if (
+    filters.from !== undefined &&
+    filters.to !== undefined &&
+    filters.from > filters.to
+  ) {
+    errors.push('from must be earlier than or equal to to');
+  }
+
+  return errors.length ? { ok: false, errors } : { ok: true, filters };
+}
+
+function escapeCsvField(value: string | number): string {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function authenticate(req: Request): AuthContext {

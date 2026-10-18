@@ -19,7 +19,8 @@ net_pool  = total_pool_balance − fee
 winnings  = floor(user_winning_bet × net_pool / winning_side_total)
 ```
 
-- Default fee: **200 bps (2%)** — configurable via `set_protocol_fee` (0–1 000 bps).  
+- Default fee: **200 bps (2%)** — configurable via `set_protocol_fee`, bounded by
+  the on-chain cap (defaults to 1,000 bps and cannot exceed that hard ceiling).
 - Fee is credited to the treasury once, on the **first** winner claim.  
 - Rounding dust is swept to treasury on the **final** claim.  
 - Conservation: `treasury_credit + Σ(payouts) == total_pool_balance`.
@@ -556,7 +557,22 @@ pub fn update_pool_template(
 pub fn set_protocol_fee(env: Env, caller: Address, fee_bps: u32) -> Result<(), ContractError>
 ```
 
-**Auth:** treasury recipient. Range: 0–1 000 bps.
+**Auth:** treasury recipient. Range: 0–`get_max_protocol_fee_bps()`.
+
+Configure the upper bound with `set_max_protocol_fee_bps(caller, cap_bps)`;
+the admin or treasury recipient may set it up to the 1,000 bps hard ceiling.
+The current flat fee and every volume-tier fee must fit under a proposed cap.
+Successful cap changes emit `protocol_fee_cap_set`. Over-cap fee updates
+revert with `FeeOutOfBounds`; reverted Soroban transactions do not preserve
+events, so the contract error is the rejection signal.
+
+```rust
+pub fn set_max_protocol_fee_bps(
+    env: Env,
+    caller: Address,
+    cap_bps: u32,
+) -> Result<(), ContractError>
+```
 
 ---
 
@@ -656,6 +672,7 @@ pub fn rotate_treasury_recipient(
 | `get_withdrawable_treasury` | `() → i128` | Withdrawable treasury (after rate-limit cap) |
 | `get_config` | `() → Result<ContractConfig, ContractError>` | Full contract configuration |
 | `get_protocol_fee` | `() → u32` | Current fee in basis points |
+| `get_max_protocol_fee_bps` | `() → u32` | Configured maximum settlement fee in basis points |
 | `get_creation_fee` | `() → i128` | Current pool creation fee |
 | `is_creation_fee_exempt` | `(account: Address) → bool` | Whether an account is fee-exempt |
 | `get_delegated_settler` | `(pool_id: u32) → Option<Address>` | Delegated settler for a pool |
@@ -1961,4 +1978,3 @@ pub fn distribute_lp_rewards(env: Env, caller: Address, pool_id: u32, amount: i1
 **Description:** TBD
 
 ---
-

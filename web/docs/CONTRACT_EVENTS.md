@@ -351,6 +351,17 @@ Emitted when protocol fee in basis points is updated.
   - `fee_bps: u32` — Fee in basis points (10000 = 100%)
 - **Indexer Use:** Update fee display, recalculate fees
 
+### protocol_fee_cap_set
+Emitted when the maximum settlement protocol fee is configured.
+
+- **Topics:** `(Symbol("protocol_fee_cap_set"), event_version())`
+- **Data:** `(caller: Address, old_cap_bps: u32, cap_bps: u32)`
+- **Indexer Use:** Track the active settlement-fee ceiling
+
+Over-cap fee changes revert with `FeeOutOfBounds`. Since failed Soroban
+transactions do not retain emitted events, indexers should use the transaction
+error for rejected updates; only successful cap changes emit this event.
+
 ### fee_tiers_updated
 Emitted when volume-based protocol fee tiers are configured.
 
@@ -521,4 +532,3 @@ Lower-volume operational events (batch daily):
   canonical `contract_paused` / `contract_unpaused` with `event_version()` via
   a single code path in `set_paused`. Off-chain indexers need only subscribe to
   `contract_paused` / `contract_unpaused`.
-

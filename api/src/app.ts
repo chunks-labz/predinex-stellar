@@ -33,7 +33,12 @@ import { complianceRouter } from './routes/compliance.js';
 import { emergencyRouter } from './routes/emergency.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
-import { marketsRouter } from './routes/markets.js';
+import {
+  createMarketsRouter,
+  defaultMarketSource,
+  marketsRouter,
+} from './routes/markets.js';
+import type { TradeHistorySource } from './routes/markets.js';
 import { createReferralRouter, defaultReferralService } from './routes/referral.js';
 import { reputationRouter } from './routes/reputation.js';
 import { simulationRouter } from './routes/simulation.js';
@@ -86,7 +91,7 @@ contractService.setBalanceProvider(getStellarBalance);
  * Creates and configures the Express application instance.
  * Installs CORS ahead of routes with explicit configuration.
  */
-export function createApp(): Express {
+export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -131,7 +136,12 @@ export function createApp(): Express {
   app.use('/api/emergency', emergencyRouter);
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
-  app.use('/api/markets', marketsRouter);
+  app.use(
+    '/api/markets',
+    tradeHistorySource
+      ? createMarketsRouter(defaultMarketSource, undefined, tradeHistorySource)
+      : marketsRouter
+  );
   app.use('/api/referral', createReferralRouter(defaultReferralService));
   app.use('/api/reputation', reputationRouter);
   app.use('/api/simulation', simulationRouter);
