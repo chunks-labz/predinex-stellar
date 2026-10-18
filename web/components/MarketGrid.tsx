@@ -1,10 +1,10 @@
 'use client';
 
-import { RefreshCw, AlertCircle, Search } from 'lucide-react';
+import { RefreshCw, AlertCircle, Search, Sparkles } from 'lucide-react';
 import MarketCard from '@/components/MarketCard';
 import MarketCardSkeleton from '@/components/MarketCardSkeleton';
+import EmptyState from '@/components/EmptyState';
 import { ProcessedMarket } from '@/app/lib/market-types';
-import Link from 'next/link';
 
 interface MarketGridProps {
   markets: ProcessedMarket[];
@@ -45,23 +45,24 @@ export default function MarketGrid({
     );
   }
 
-  // Error state
+  // Error state - visually distinct from empty state (danger/red tone, retry CTA)
   if (error) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4 max-w-md text-center">
-            <div className="p-4 rounded-full bg-red-500/10">
+      <div className="space-y-6" role="alert">
+        <div className="flex items-center justify-center py-16">
+          <div className="flex flex-col items-center gap-4 max-w-md text-center p-8 rounded-2xl border border-red-500/20 bg-red-500/5 backdrop-blur-sm">
+            <div className="p-4 rounded-full bg-red-500/10 text-red-500 ring-1 ring-red-500/20">
               <AlertCircle className="w-8 h-8 text-red-500" />
             </div>
             <div className="space-y-2">
-              <h3 className="text-lg font-semibold">Failed to Load Markets</h3>
-              <p className="text-muted-foreground">{error}</p>
+              <h3 className="text-xl font-bold text-red-500">Failed to Load Markets</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">{error}</p>
             </div>
             <button
+              type="button"
               onClick={onRetry}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground
-                       rounded-lg hover:bg-primary/90 transition-colors duration-200"
+              className="flex items-center gap-2 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium
+                       rounded-xl transition-all duration-200 shadow-sm hover:shadow cursor-pointer mt-2"
             >
               <RefreshCw className="w-4 h-4" />
               Try Again
@@ -72,30 +73,17 @@ export default function MarketGrid({
     );
   }
 
-  // Empty state - no markets at all
+  // Empty state - no markets at all in the protocol
   if (markets.length === 0 && !searchQuery && !hasFilters) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4 max-w-md text-center">
-            <div className="p-4 rounded-full bg-muted/50">
-              <Search className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">No Markets Found</h3>
-              <p className="text-muted-foreground">
-                There are no prediction markets available yet. Be the first to create one!
-              </p>
-            </div>
-            <Link
-              href="/create"
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg
-                       hover:bg-primary/90 transition-colors duration-200"
-            >
-              Create Market
-            </Link>
-          </div>
-        </div>
+      <div className="space-y-6 py-6">
+        <EmptyState
+          title="No Markets Found"
+          description="There are no prediction markets available yet. Be the first to create one and earn creator fees!"
+          icon={Sparkles}
+          actionLabel="Create Market"
+          actionHref="/create"
+        />
       </div>
     );
   }
@@ -103,39 +91,20 @@ export default function MarketGrid({
   // Empty state - no results for search/filters
   if (markets.length === 0 && (searchQuery || hasFilters)) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="flex flex-col items-center gap-4 max-w-md text-center">
-            <div className="p-4 rounded-full bg-muted/50">
-              <Search className="w-8 h-8 text-muted-foreground" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-lg font-semibold">No Results Found</h3>
-              <p className="text-muted-foreground">
-                {searchQuery
-                  ? `No markets match "${searchQuery}". Try adjusting your search terms or filters.`
-                  : 'No markets match your current filters. Try adjusting your filter criteria.'
-                }
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={onResetFilters}
-                className="px-4 py-2 border border-muted/50 rounded-lg hover:bg-muted/50
-                         transition-colors duration-200"
-              >
-                Clear Filters
-              </button>
-              <Link
-                href="/create"
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg
-                         hover:bg-primary/90 transition-colors duration-200"
-              >
-                Create Market
-              </Link>
-            </div>
-          </div>
-        </div>
+      <div className="space-y-6 py-6">
+        <EmptyState
+          title="No Matching Markets"
+          description={
+            searchQuery
+              ? `No markets match "${searchQuery}". Try adjusting your search query or relaxing your filter criteria.`
+              : 'No markets match your current filter settings. Try adjusting your status, asset, or volume filters.'
+          }
+          icon={Search}
+          secondaryActionLabel="Clear Filters"
+          onSecondaryAction={onResetFilters}
+          actionLabel="Create Market"
+          actionHref="/create"
+        />
       </div>
     );
   }
