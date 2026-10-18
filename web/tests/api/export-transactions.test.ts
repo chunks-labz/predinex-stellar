@@ -1,6 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET } from '../../app/api/export/transactions/route';
 import { NextRequest } from 'next/server';
+import type { ActivityItem } from '../../app/lib/market-types';
+
+const mockGetUserActivity = vi.fn();
+
+vi.mock('../../app/lib/adapters/predinex-read-api', () => ({
+  predinexReadApi: {
+    getUserActivity: (...args: unknown[]) => mockGetUserActivity(...args),
+  },
+}));
 
 const WALLET_HEADER = 'x-predinex-wallet-address';
 
@@ -17,6 +26,10 @@ function makeRequest(
 }
 
 describe('/api/export/transactions', () => {
+  beforeEach(() => {
+    mockGetUserActivity.mockReset();
+  });
+
   it('returns 400 when address is missing', async () => {
     const res = await GET(makeRequest({}));
     expect(res.status).toBe(400);
@@ -42,6 +55,7 @@ describe('/api/export/transactions', () => {
   });
 
   it('accepts the caller exporting its own address', async () => {
+    mockGetUserActivity.mockResolvedValue([]);
     const res = await GET(makeRequest({ address: 'GTEST123' }, { wallet: 'GTEST123' }));
     expect(res.status).not.toBe(401);
     expect(res.status).not.toBe(429);
@@ -49,6 +63,7 @@ describe('/api/export/transactions', () => {
 
   // #1177 — rate-limit bucketing
   it('rate limits repeated exports for the same wallet', async () => {
+    mockGetUserActivity.mockResolvedValue([]);
     const params = { address: 'GWALLETREPEAT' };
     let last: Response | null = null;
     for (let i = 0; i < 11; i += 1) {
@@ -63,6 +78,7 @@ describe('/api/export/transactions', () => {
   it('throttles address enumeration from a single caller IP', async () => {
     // Each address is a distinct (and authenticated) wallet, so the per-wallet
     // bucket is fresh every time — only the per-IP bucket can stop the sweep.
+    mockGetUserActivity.mockResolvedValue([]);
     let limited = 0;
     for (let i = 0; i < 31; i += 1) {
       const address = `GENUM${i}`;
@@ -73,15 +89,43 @@ describe('/api/export/transactions', () => {
   });
 
   it('returns CSV with correct headers for a valid address', async () => {
+    mockGetUserActivity.mockResolvedValue([
+      {
+        txId: 'tx-1',
+        type: 'bet-placed',
+        functionName: 'Yes',
+        timestamp: 1_700_000_000,
+        status: 'success',
+        amount: 10_000_000,
+        poolId: 7,
+        poolTitle: 'Will BTC hit $100k?',
+        explorerUrl: '',
+        address: 'GTEST123',
+      } satisfies ActivityItem,
+    ]);
     const res = await GET(makeRequest({ address: 'GTEST123' }, { wallet: 'GTEST123' }));
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toContain('text/csv');
     const text = await res.text();
-    expect(text.startsWith('Date,Pool ID,Question,Outcome,Amount,Result,Payout')).toBe(true);
+    expect(text.startsWith('Timestamp,Market ID,Market,Outcome,Amount,Status,Transaction ID')).toBe(true);
   });
 
   it('returns header-only CSV when date filter excludes all rows', async () => {
     // Use a date range far in the past so no mock rows match
+    mockGetUserActivity.mockResolvedValue([
+      {
+        txId: 'tx-1',
+        type: 'bet-placed',
+        functionName: 'Yes',
+        timestamp: 1_700_000_000,
+        status: 'success',
+        amount: 10_000_000,
+        poolId: 7,
+        poolTitle: 'Will BTC hit $100k?',
+        explorerUrl: '',
+        address: 'GTEST123',
+      } satisfies ActivityItem,
+    ]);
     const res = await GET(
       makeRequest(
         { address: 'GTEST123', from: '2000-01-01', to: '2000-01-02' },
@@ -90,10 +134,24 @@ describe('/api/export/transactions', () => {
     );
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text.trim()).toBe('Date,Pool ID,Question,Outcome,Amount,Result,Payout');
+    expect(text.trim()).toBe('Timestamp,Market ID,Market,Outcome,Amount,Status,Transaction ID');
   });
 
   it('respects date filter — recent range returns rows', async () => {
+    mockGetUserActivity.mockResolvedValue([
+      {
+        txId: 'tx-1',
+        type: 'bet-placed',
+        functionName: 'Yes',
+        timestamp: Math.floor(Date.now() / 1000) - 86_400,
+        status: 'success',
+        amount: 10_000_000,
+        poolId: 7,
+        poolTitle: 'Will BTC hit $100k?',
+        explorerUrl: '',
+        address: 'GTEST123',
+      } satisfies ActivityItem,
+    ]);
     const today = new Date().toISOString().slice(0, 10);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
     const res = await GET(
@@ -109,11 +167,38 @@ describe('/api/export/transactions', () => {
   });
 
   it('sets Content-Disposition attachment header', async () => {
+    mockGetUserActivity.mockResolvedValue([]);
     const res = await GET(makeRequest({ address: 'GTEST123' }, { wallet: 'GTEST123' }));
     expect(res.headers.get('Content-Disposition')).toContain('attachment');
   });
 
   it('paginates results — page 2 with pageSize 1 returns different row than page 1', async () => {
+    mockGetUserActivity.mockResolvedValue([
+      {
+        txId: 'tx-1',
+        type: 'bet-placed',
+        functionName: 'Yes',
+        timestamp: Math.floor(Date.now() / 1000) - 86_400,
+        status: 'success',
+        amount: 10_000_000,
+        poolId: 7,
+        poolTitle: 'Will BTC hit $100k?',
+        explorerUrl: '',
+        address: 'GTEST123',
+      } satisfies ActivityItem,
+      {
+        txId: 'tx-2',
+        type: 'winnings-claimed',
+        functionName: 'Yes',
+        timestamp: Math.floor(Date.now() / 1000) - 43_200,
+        status: 'success',
+        amount: 1_900_000,
+        poolId: 7,
+        poolTitle: 'Will BTC hit $100k?',
+        explorerUrl: '',
+        address: 'GTEST123',
+      } satisfies ActivityItem,
+    ]);
     const today = new Date().toISOString().slice(0, 10);
     const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
     const p1 = await GET(

@@ -8,6 +8,7 @@ import {
 import { resolveExportWindow, filterActivitiesForExport, toExportRecords } from '@/app/lib/activity-export';
 import type { ActivityItem } from '@/app/lib/market-types';
 import { stroopsToUnits } from '@/app/lib/formatting';
+import { predinexReadApi } from '@/app/lib/adapters/predinex-read-api';
 
 export const runtime = 'nodejs';
 
@@ -19,54 +20,10 @@ const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const IP_RATE_LIMIT_MAX = 30;
 
 const WALLET_HEADER = 'x-predinex-wallet-address';
-const CSV_HEADER = 'Date,Pool ID,Question,Outcome,Amount,Result,Payout';
+const CSV_HEADER = 'Timestamp,Market ID,Market,Outcome,Amount,Status,Transaction ID';
 
-function toResult(type: ActivityItem['type']): string {
-  if (type === 'winnings-claimed') return 'Won';
-  if (type === 'bet-placed') return 'Pending';
-  return type;
-}
-
-function getMockActivities(address: string): ActivityItem[] {
-  const now = Math.floor(Date.now() / 1000);
-  return [
-    {
-      txId: 'tx1',
-      type: 'bet-placed',
-      functionName: 'Yes',
-      timestamp: now - 86400,
-      status: 'success',
-      amount: 10_000_000,
-      poolId: 1,
-      poolTitle: 'Will BTC hit $100k?',
-      explorerUrl: '',
-      address,
-    },
-    {
-      txId: 'tx2',
-      type: 'winnings-claimed',
-      functionName: 'Yes',
-      timestamp: now - 43200,
-      status: 'success',
-      amount: 1_900_000,
-      poolId: 1,
-      poolTitle: 'Will BTC hit $100k?',
-      explorerUrl: '',
-      address,
-    },
-    {
-      txId: 'tx3',
-      type: 'bet-placed',
-      functionName: 'No',
-      timestamp: now - 3600,
-      status: 'success',
-      amount: 500_000,
-      poolId: 2,
-      poolTitle: 'ETH merge success?',
-      explorerUrl: '',
-      address,
-    },
-  ];
+function escapeCsvCell(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
 function itemsToCsv(items: ActivityItem[]): string {
@@ -74,20 +31,16 @@ function itemsToCsv(items: ActivityItem[]): string {
     return CSV_HEADER;
   }
   const rows = items.map((item) => {
-    const date = new Date(item.timestamp * 1000).toISOString().slice(0, 10);
-    // #1285 — 1 XLM = 10_000_000 stroops.
+    const timestamp = new Date(item.timestamp * 1000).toISOString();
     const amount = item.amount !== undefined && item.amount !== null ? stroopsToUnits(item.amount).toFixed(2) : '';
-    const payout = item.type === 'winnings-claimed' && item.amount !== undefined && item.amount !== null ? stroopsToUnits(item.amount).toFixed(2) : '';
-    const rawTitle = item.poolTitle ?? '';
-    const title = `"${rawTitle.replace(/"/g, '""')}"`;
     return [
-      date,
+      timestamp,
       item.poolId ?? '',
-      title,
+      escapeCsvCell(item.poolTitle ?? ''),
       item.functionName ?? '',
       amount,
-      toResult(item.type),
-      payout,
+      item.status,
+      item.txId,
     ].join(',');
   });
   return [CSV_HEADER, ...rows].join('\n');
@@ -151,7 +104,7 @@ export async function GET(req: NextRequest) {
   const pageSize = parseLimitParam(searchParams.get('pageSize') ?? searchParams.get('limit'), 20, 100);
 
   const window = resolveExportWindow(from, to);
-  const allActivities = getMockActivities(address);
+  const allActivities = await predinexReadApi.getUserActivity(address, 1000);
   const filtered = filterActivitiesForExport(allActivities, window);
 
   const start = (page - 1) * pageSize;

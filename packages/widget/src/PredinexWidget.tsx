@@ -40,23 +40,54 @@ interface PoolCardProps {
   contractId: string;
 }
 
+function formatAmount(amount: number): string {
+  return amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function estimatePayout(pool: WidgetPool, outcome: 0 | 1, amount: number): number {
+  const totalPool = pool.totalA + pool.totalB;
+  const selectedPool = outcome === 0 ? pool.totalA : pool.totalB;
+  const postBetPool = totalPool + amount;
+  const postBetSelected = selectedPool + amount;
+
+  if (postBetSelected <= 0) return amount;
+  return (amount / postBetSelected) * postBetPool;
+}
+
 function PoolCard({ pool, onBet, placeBet, contractId }: PoolCardProps) {
   const [selected, setSelected] = useState<0 | 1 | null>(null);
   const [amount, setAmount] = useState('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'err'>('idle');
   const [message, setMessage] = useState('');
+  const [isConfirming, setIsConfirming] = useState(false);
 
   const isSettled = pool.status === 'settled';
   const isBettable = pool.status === 'open';
 
-  const handleBet = useCallback(async () => {
+  const parsedAmount = parseFloat(amount);
+  const hasValidAmount = amount !== '' && !Number.isNaN(parsedAmount) && parsedAmount > 0;
+  const expectedPayout = selected === null || !hasValidAmount ? 0 : estimatePayout(pool, selected, parsedAmount);
+
+  const handleOpenConfirm = useCallback(() => {
     if (selected === null) return;
-    const amt = parseFloat(amount);
-    if (!amount || isNaN(amt) || amt <= 0) {
+    if (!hasValidAmount) {
       setStatus('err');
       setMessage('Enter a valid amount.');
       return;
     }
+    setStatus('idle');
+    setMessage('');
+    setIsConfirming(true);
+  }, [selected, hasValidAmount]);
+
+  const handleCancelConfirm = useCallback(() => {
+    setIsConfirming(false);
+  }, []);
+
+  const handleBet = useCallback(async () => {
+    if (selected === null || !hasValidAmount) return;
+    const amt = parsedAmount;
+    setIsConfirming(false);
     setStatus('loading');
     setMessage('');
     try {
@@ -68,7 +99,7 @@ function PoolCard({ pool, onBet, placeBet, contractId }: PoolCardProps) {
       setStatus('err');
       setMessage(e instanceof Error ? e.message : 'Bet failed.');
     }
-  }, [selected, amount, contractId, pool.id, placeBet, onBet]);
+  }, [selected, hasValidAmount, parsedAmount, contractId, pool.id, placeBet, onBet]);
 
   const winnerLabel =
     isSettled && pool.winningOutcome !== undefined
@@ -127,7 +158,7 @@ function PoolCard({ pool, onBet, placeBet, contractId }: PoolCardProps) {
             />
             <button
               className="pdx-bet-btn"
-              onClick={handleBet}
+              onClick={handleOpenConfirm}
               disabled={selected === null || status === 'loading'}
               aria-busy={status === 'loading'}
             >
@@ -136,6 +167,43 @@ function PoolCard({ pool, onBet, placeBet, contractId }: PoolCardProps) {
           </div>
           {status === 'err' && <p className="pdx-error" role="alert">{message}</p>}
           {status === 'ok'  && <p className="pdx-success" role="status">{message}</p>}
+          {isConfirming && selected !== null && hasValidAmount && (
+            <div className="pdx-confirm-backdrop" role="presentation">
+              <div className="pdx-confirm-modal" role="dialog" aria-modal="true" aria-label="Confirm wager">
+                <h3 className="pdx-confirm-title">Confirm your wager</h3>
+                <div className="pdx-confirm-grid">
+                  <div>
+                    <span className="pdx-confirm-label">Outcome</span>
+                    <p className="pdx-confirm-value">{selected === 0 ? pool.outcomeA : pool.outcomeB}</p>
+                  </div>
+                  <div>
+                    <span className="pdx-confirm-label">Amount</span>
+                    <p className="pdx-confirm-value">{formatAmount(parsedAmount)} XLM</p>
+                  </div>
+                  <div>
+                    <span className="pdx-confirm-label">Expected payout</span>
+                    <p className="pdx-confirm-value">{formatAmount(expectedPayout)} XLM</p>
+                  </div>
+                </div>
+                <p className="pdx-confirm-note">
+                  Review the numbers carefully. Confirming will submit the wager immediately.
+                </p>
+                <div className="pdx-confirm-actions">
+                  <button type="button" className="pdx-cancel-btn" onClick={handleCancelConfirm}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="pdx-confirm-btn"
+                    onClick={() => void handleBet()}
+                    disabled={status === 'loading'}
+                  >
+                    {status === 'loading' ? 'Submitting…' : 'Confirm wager'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

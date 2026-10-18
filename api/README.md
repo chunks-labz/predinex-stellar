@@ -62,14 +62,31 @@ request gets HTTP `429` with a `Retry-After` header (seconds).
 
 Values that are missing or not positive integers fall back to the default.
 
+The market archive job also reads `MARKET_ARCHIVE_WINDOW_DAYS` for the number
+of days resolved markets stay in the default listing before being archived.
+When unset, the archive window defaults to 30 days.
+
 ## API Endpoints
 
 ### GET /api/markets
-List markets one page at a time, ordered by ascending market id.
+List markets one page at a time, ordered by ascending market id by default.
 
-Query parameters: `limit` (1-100, default 20; larger values are capped at 100)
-and `offset` (default 0). Invalid values return `400 VALIDATION_ERROR`. An
-offset past the end returns an empty `data` array.
+Query parameters:
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `limit` | `20` | Page size, 1-100; larger values are capped at 100 |
+| `offset` | `0` | Zero-based index of the first market to return |
+| `status` | *(all non-cancelled)* | One or more statuses: comma-separated (`status=open,settled`) and/or repeated (`status=open&status=settled`). Valid values: `open`, `settled`, `voided`, `cancelled` |
+| `sort` | `id` | Sort field: `id`, `expiry`, `volume`, or `title` |
+| `order` | `asc` | Sort direction: `asc` or `desc` |
+
+Invalid values return `400 VALIDATION_ERROR` with every offending parameter
+reported at once. An offset past the end returns an empty `data` array.
+Cancelled (soft-deleted) markets are excluded unless the `status` filter
+explicitly includes `cancelled`, which requires admin credentials
+(`x-api-key`); other callers get `403 FORBIDDEN`. Pagination totals always
+reflect the filtered set.
 
 **Response:**
 ```json
@@ -80,6 +97,22 @@ offset past the end returns an empty `data` array.
   "timestamp": "2026-01-01T00:00:00.000Z"
 }
 ```
+
+### Market soft-delete (admin only)
+
+Cancelling a market marks it with status `cancelled` instead of deleting the
+record: every field and the audit trail survive, so existing links keep
+working. Cancelled markets leave the default listing and can be restored.
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/markets/:id/cancel` | Soft-delete a market; optional JSON body `{ "reason": "..." }` (≤ 256 chars). Idempotent. |
+| `POST /api/markets/:id/restore` | Restore a cancelled market to the status it had before cancellation. `409 NOT_CANCELLED` otherwise. |
+| `GET /api/markets/admin/cancelled` | Paginated list of cancelled markets (`limit`, `offset`, `sort`, `order`). |
+| `GET /api/markets/admin/audit` | Cancellation/restoration history, newest first; optional `marketId` filter. |
+
+All four endpoints require an admin `x-api-key` and return `403 FORBIDDEN`
+otherwise.
 
 ### POST /api/budget/plan
 Create a budget plan

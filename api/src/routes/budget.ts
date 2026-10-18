@@ -23,7 +23,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { authMiddleware } from '../middleware/auth.js';
-import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
 
 // ============================================================================
 // Types & Interfaces
@@ -347,6 +347,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
    */
   router.post(
     '/plan',
+    strictRateLimitMiddleware,
     [
       validateAddress(),
       validateAmount('totalBudget'),
@@ -498,6 +499,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
    */
   router.post(
     '/optimize-fees',
+    strictRateLimitMiddleware,
     [
       body('currentFeeBps')
         .isInt({ min: 0, max: 10000 })
@@ -540,6 +542,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
    */
   router.post(
     '/risk-assessment',
+    strictRateLimitMiddleware,
     [
       body('poolIds')
         .isArray({ min: 1 })
