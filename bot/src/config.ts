@@ -34,6 +34,11 @@ export interface BotConfig {
   pollIntervalMs: number;
   batchSize: number;
 
+  /** Default budget for every outbound upstream call. */
+  upstreamTimeoutMs?: number;
+  /** Optional RPC-specific override. */
+  rpcTimeoutMs?: number;
+
   /** Max pools per settle_pools transaction (1-–50). */
   settleBatchSize: number;
 
@@ -184,6 +189,8 @@ export function loadConfig(): BotConfig {
 
   const pollIntervalMs = parsePositiveInt(optionalEnv("POLL_INTERVAL_MS", "300000"), "POLL_INTERVAL_MS", errors);
   const batchSize = parsePositiveInt(optionalEnv("BATCH_SIZE", "100"), "BATCH_SIZE", errors);
+  const upstreamTimeoutMs = parsePositiveInt(optionalEnv("UPSTREAM_TIMEOUT_MS", "15000"), "UPSTREAM_TIMEOUT_MS", errors);
+  const rpcTimeoutMs = parsePositiveInt(optionalEnv("RPC_TIMEOUT_MS", String(upstreamTimeoutMs)), "RPC_TIMEOUT_MS", errors);
   if (batchSize > 100) {
     console.warn(
       `[config] BATCH_SIZE=${batchSize} exceeds contract maximum of 100, clamping to 100`,
@@ -316,6 +323,8 @@ export function loadConfig(): BotConfig {
     botPublicKey,
     pollIntervalMs,
     batchSize: Math.min(batchSize, 100),
+    upstreamTimeoutMs,
+    rpcTimeoutMs,
     settleBatchSize,
     dryRun,
     autoSettleEnabled,

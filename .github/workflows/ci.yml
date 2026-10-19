@@ -14,6 +14,26 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  migration-rollback:
+    name: Migration Rollback Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: predinex_ci
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d predinex_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations up and down, then verify schema identity
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_ci
+        run: bash scripts/verify-migrations.sh
+
   lint-and-format:
     name: Lint & Format Gate
     runs-on: ubuntu-latest

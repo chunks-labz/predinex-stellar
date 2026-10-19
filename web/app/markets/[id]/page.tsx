@@ -23,6 +23,7 @@ import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
+import DepthChart from '@/components/DepthChart';
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -370,6 +371,13 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                             <span className="text-green-400">{pool.outcomeA}: {oddsA}%</span>
                             <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
                         </div>
+                    </div>
+
+                    <div className="mb-8">
+                        <DepthChart
+                            bids={pool.totalA > 0 ? [{ price: Number(oddsA), quantity: pool.totalA }] : []}
+                            asks={pool.totalB > 0 ? [{ price: Number(oddsB), quantity: pool.totalB }] : []}
+                        />
                     </div>
 
                     {/* User Bet Summary Card */}

@@ -30,6 +30,7 @@ import type { BotConfig } from "./config.js";
 import type { SettlementAttempt, SettlementCycleContext } from "./types.js";
 import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
+import { withUpstreamTimeout } from "./upstream.js";
 import { injectWorkerTraceHeaders, withWorkerSpan } from "./tracing.js";
 
 export interface WebhookPayload {
@@ -189,12 +190,12 @@ export async function notify(
   try {
     await withRetry(
       async () => {
-        const response = await fetch(webhookUrl, {
+        const response = await withUpstreamTimeout(fetch(webhookUrl, {
           method: "POST",
           headers,
           body,
           signal: AbortSignal.timeout(config.webhookTimeoutMs),
-        });
+        }), new URL(webhookUrl).origin, config.webhookTimeoutMs);
 
         if (!response.ok) {
           throw new Error(`Webhook returned ${response.status}`);

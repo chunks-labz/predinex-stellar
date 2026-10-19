@@ -49,6 +49,7 @@ import { logger } from "./logger.js";
 import { injectWorkerTraceHeaders, withWorkerSpan } from "./tracing.js";
 import { notify } from "./webhook.js";
 import { fetchOracleWithRetry } from "./oracle-client.js";
+import { getUpstreamTimeoutMetrics } from "./upstream-metrics.js";
 
 // ─── Oracle hook ─────────────────────────────────────────────────────────────
 
@@ -649,6 +650,7 @@ export class Poller {
       pendingPoolsCount: this.pendingPoolsCount,
       errorCount: this.errorCount,
       trackedFailurePools: this.persistentFailures.size,
+      upstreamTimeouts: getUpstreamTimeoutMetrics(),
     };
   }
 }
