@@ -347,3 +347,15 @@ npm run schema:update
 ```
 
 Use `npm run schema:check` to verify the snapshot without changing files.
+
+## ADR workflow
+
+We use Architecture Decision Records (ADRs) to document significant design decisions. See [`docs/adr/`](docs/adr/) for existing ADRs and the [template](docs/adr/0000-adr-template.md).
+
+When proposing a significant architectural change:
+1. Check existing ADRs to avoid duplication.
+2. Create a new ADR in `docs/adr/` using the template (numbered sequentially).
+3. Start with status `Proposed` and open a PR for discussion.
+4. After consensus, update the status to `Accepted` and merge.
+
+ADR contents should include context, the decision made, and clear consequences (positive and negative).
