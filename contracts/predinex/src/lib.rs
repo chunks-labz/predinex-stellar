@@ -13,6 +13,7 @@ mod benchmark_tests;
 mod benchmarks;
 mod bet_management_tests;
 mod budget_planner;
+pub mod audit_log;
 // #1234 — The planner types are re-exported at the crate root so they are part
 // of the contract's public interface. While the module was gated behind
 // `#![cfg(test)]` these were unreachable from any build of the contract.
@@ -1305,6 +1306,11 @@ pub enum DataKey {
     /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
     /// called on a `ResolutionPending` pool.
     PoolChallenges(u32),
+    /// #1463 — Monotonic counter for the audit log. The value is the next
+    /// sequence number to be written (i.e. the total number of records so far).
+    AuditSeq,
+    /// #1463 — A single immutable audit record keyed by its sequence number.
+    AuditRecord(u64),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -2632,11 +2638,21 @@ impl PredinexContract {
         env.storage().persistent().set(&DataKey::Treasury, &0i128);
         env.storage().persistent().set(&DataKey::TreasuryToken(token.clone()), &0i128);
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        emit_admin_set(&env, None, admin);
+        emit_admin_set(&env, None, admin.clone());
         // #191 — persist the contract state schema version on initialization.
         env.storage().persistent().set(
             &DataKey::ContractVersion,
             &Symbol::new(&env, CONTRACT_STATE_VERSION),
+        );
+        audit_log::append(
+            &env,
+            admin.clone(),
+            Symbol::new(&env, "initialize"),
+            audit_log::AdminActionDetail::Initialize(audit_log::AuditInitialize {
+                token,
+                treasury_recipient,
+                admin,
+            }),
         );
         Ok(())
     }
@@ -2685,6 +2701,16 @@ impl PredinexContract {
             fee_rate.into(),
             fee_recipient.clone(),
         );
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_fee_config"),
+            audit_log::AdminActionDetail::SetFeeConfig(audit_log::AuditSetFeeConfig {
+                old_fee_rate,
+                new_fee_rate: fee_rate,
+                fee_recipient,
+            }),
+        );
         Ok(())
     }
 
@@ -2725,6 +2751,12 @@ impl PredinexContract {
             .unwrap_or(0);
         env.storage().persistent().set(&DataKey::CreationFee, &fee);
         emit_creation_fee_set(&env, old_fee, fee);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_creation_fee"),
+            audit_log::AdminActionDetail::SetCreationFee(audit_log::AuditSetCreationFee { before: old_fee, after: fee }),
+        );
         Ok(())
     }
 
@@ -2767,7 +2799,13 @@ impl PredinexContract {
             env.storage().persistent().remove(&key);
         }
 
-        emit_creation_fee_exemption_set(&env, account, exempt);
+        emit_creation_fee_exemption_set(&env, account.clone(), exempt);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_creation_fee_exemption"),
+            audit_log::AdminActionDetail::SetCreationFeeExemption(audit_log::AuditSetCreationFeeExemption { account, exempt }),
+        );
         Ok(())
     }
 
@@ -2808,7 +2846,13 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::ProtocolFee, &fee_bps);
 
-        emit_protocol_fee_set(&env, caller, old_fee_bps, fee_bps);
+        emit_protocol_fee_set(&env, caller.clone(), old_fee_bps, fee_bps);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_protocol_fee"),
+            audit_log::AdminActionDetail::SetProtocolFee(audit_log::AuditSetProtocolFee { before: old_fee_bps, after: fee_bps }),
+        );
         Ok(())
     }
 
@@ -2888,7 +2932,13 @@ impl PredinexContract {
             );
         }
 
-        emit_volume_fee_tiers_set(&env, caller, tiers);
+        emit_volume_fee_tiers_set(&env, caller.clone(), tiers.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_volume_fee_tiers"),
+            audit_log::AdminActionDetail::SetVolumeFeeTiers(audit_log::AuditSetVolumeFeeTiers { tier_count: tiers.len() }),
+        );
         Ok(())
     }
 
@@ -3095,6 +3145,18 @@ impl PredinexContract {
         );
 
         emit_pool_bet_limits_set(&env, pool_id, old_min_bet, old_max_bet, min_bet, max_bet);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_pool_bet_limits"),
+            audit_log::AdminActionDetail::SetPoolBetLimits(audit_log::AuditSetPoolBetLimits {
+                pool_id,
+                old_min: old_min_bet,
+                old_max: old_max_bet,
+                new_min: min_bet,
+                new_max: max_bet,
+            }),
+        );
         Ok(())
     }
 
@@ -3158,6 +3220,16 @@ impl PredinexContract {
             max_pool_size,
             large_pool_threshold,
             cooling_period_secs,
+        );
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_circuit_breaker_config"),
+            audit_log::AdminActionDetail::SetCircuitBreakerConfig(audit_log::AuditSetCircuitBreakerConfig {
+                max_pool_size,
+                large_pool_threshold,
+                cooling_period_secs,
+            }),
         );
         Ok(())
     }
@@ -3226,6 +3298,15 @@ impl PredinexContract {
             old_window_secs,
             max_bets_per_window,
             window_secs,
+        );
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_rate_limit_config"),
+            audit_log::AdminActionDetail::SetRateLimitConfig(audit_log::AuditSetRateLimitConfig {
+                max_bets_per_window,
+                window_secs,
+            }),
         );
         Ok(())
     }
@@ -3366,6 +3447,17 @@ impl PredinexContract {
             weekly_loss_limit,
             large_bet_cooldown_secs,
             large_bet_threshold,
+        );
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_user_exposure_config"),
+            audit_log::AdminActionDetail::SetUserExposureConfig(audit_log::AuditSetUserExposureConfig {
+                max_exposure_per_pool_bps,
+                max_bet_per_tx: max_bet_per_transaction,
+                daily_loss_limit,
+                weekly_loss_limit,
+            }),
         );
         Ok(())
     }
@@ -6039,6 +6131,15 @@ impl PredinexContract {
             .set(&DataKey::MinSettlementParticipants, &min_participants);
 
         emit_min_settlement_participants_set(&env, old_min, min_participants);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_min_settlement_participants"),
+            audit_log::AdminActionDetail::SetMinSettlementParticipants(audit_log::AuditSetMinSettlementParticipants {
+                before: old_min,
+                after: min_participants,
+            }),
+        );
         Ok(())
     }
 
@@ -6476,7 +6577,13 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_void_pool(&env, pool_id, caller);
+        emit_void_pool(&env, pool_id, caller.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "void_pool"),
+            audit_log::AdminActionDetail::VoidPool(audit_log::AuditVoidPool { pool_id }),
+        );
         Ok(())
     }
 
@@ -7884,6 +7991,16 @@ impl PredinexContract {
         {
             return Err(ContractError::InvalidRateLimitConfig);
         }
+        let before_max: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TreasuryWithdrawalMaxPerWindow)
+            .unwrap_or(0);
+        let before_window: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::TreasuryWithdrawalWindowSecs)
+            .unwrap_or(0);
         env.storage().persistent().set(
             &DataKey::TreasuryWithdrawalMaxPerWindow,
             &max_withdrawal_per_window,
@@ -7896,6 +8013,17 @@ impl PredinexContract {
             .persistent()
             .remove(&DataKey::TreasuryWithdrawalState);
         emit_treasury_withdraw_limit_set(&env, max_withdrawal_per_window, withdrawal_window_secs);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_treasury_withdraw_limit"),
+            audit_log::AdminActionDetail::SetTreasuryWithdrawLimit(audit_log::AuditSetTreasuryWithdrawLimit {
+                before_max,
+                before_window_secs: before_window,
+                after_max: max_withdrawal_per_window,
+                after_window_secs: withdrawal_window_secs,
+            }),
+        );
         Ok(())
     }
 
@@ -7939,7 +8067,16 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::TreasuryRecipient, &new_recipient);
 
-        emit_treasury_recipient_rotated(&env, current_recipient, new_recipient);
+        emit_treasury_recipient_rotated(&env, current_recipient.clone(), new_recipient.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "rotate_treasury_recipient"),
+            audit_log::AdminActionDetail::RotateTreasuryRecipient(audit_log::AuditRotateTreasuryRecipient {
+                old_recipient: current_recipient,
+                new_recipient,
+            }),
+        );
         Ok(())
     }
 
@@ -8049,6 +8186,12 @@ impl PredinexContract {
             .set(&DataKey::TreasuryToken(token_address), &(current_main_treasury - amount));
 
         emit_treasury_withdrawn(&env, caller.clone(), treasury_recipient, amount);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "withdraw_treasury"),
+            audit_log::AdminActionDetail::WithdrawTreasury(audit_log::AuditWithdrawTreasury { amount }),
+        );
         Ok(())
     }
 
@@ -8067,7 +8210,16 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::FreezeAdmin, &freeze_admin);
 
-        emit_freeze_admin_set(&env, old_freeze_admin, freeze_admin);
+        emit_freeze_admin_set(&env, old_freeze_admin.clone(), freeze_admin.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_freeze_admin"),
+            audit_log::AdminActionDetail::SetFreezeAdmin(audit_log::AuditSetFreezeAdmin {
+                old_freeze_admin,
+                new_freeze_admin: freeze_admin,
+            }),
+        );
         Ok(())
     }
 
@@ -8084,7 +8236,13 @@ impl PredinexContract {
         let old_admin: Option<Address> = env.storage().persistent().get(&DataKey::Admin);
         env.storage().persistent().set(&DataKey::Admin, &admin);
 
-        emit_admin_set(&env, old_admin, admin);
+        emit_admin_set(&env, old_admin.clone(), admin.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_admin"),
+            audit_log::AdminActionDetail::SetAdmin(audit_log::AuditSetAdmin { old_admin, new_admin: admin }),
+        );
         Ok(())
     }
 
@@ -8108,7 +8266,13 @@ impl PredinexContract {
             .persistent()
             .set(&DataKey::PendingAdmin, &new_admin);
 
-        emit_admin_proposed(&env, caller, new_admin);
+        emit_admin_proposed(&env, caller.clone(), new_admin.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "propose_admin"),
+            audit_log::AdminActionDetail::ProposeAdmin(audit_log::AuditProposeAdmin { proposed: new_admin }),
+        );
         Ok(())
     }
 
@@ -8138,7 +8302,13 @@ impl PredinexContract {
         env.storage().persistent().set(&DataKey::Admin, &caller);
         env.storage().persistent().remove(&DataKey::PendingAdmin);
 
-        emit_admin_set(&env, old_admin, caller);
+        emit_admin_set(&env, old_admin.clone(), caller.clone());
+        audit_log::append(
+            &env,
+            caller.clone(),
+            Symbol::new(&env, "accept_admin"),
+            audit_log::AdminActionDetail::AcceptAdmin(audit_log::AuditAcceptAdmin { old_admin, new_admin: caller }),
+        );
         Ok(())
     }
 
@@ -8187,7 +8357,13 @@ impl PredinexContract {
         );
 
         emit_pool_frozen(&env, pool_id, caller.clone());
-        emit_market_paused(&env, pool_id, caller, env.ledger().timestamp());
+        emit_market_paused(&env, pool_id, caller.clone(), env.ledger().timestamp());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "freeze_pool"),
+            audit_log::AdminActionDetail::FreezePool(audit_log::AuditFreezePool { pool_id }),
+        );
         Ok(())
     }
 
@@ -8246,10 +8422,21 @@ impl PredinexContract {
     ) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_freeze_admin(&env, &caller)?;
+        let before: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::DisputeWindow)
+            .unwrap_or(0);
         env.storage()
             .persistent()
             .set(&DataKey::DisputeWindow, &window_secs);
         emit_dispute_window_set(&env, window_secs);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_dispute_window"),
+            audit_log::AdminActionDetail::SetDisputeWindow(audit_log::AuditSetDisputeWindow { before, after: window_secs }),
+        );
         Ok(())
     }
 
@@ -8357,7 +8544,13 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_pool_disputed(&env, pool_id, caller, disputed_outcome);
+        emit_pool_disputed(&env, pool_id, caller.clone(), disputed_outcome);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "dispute_pool"),
+            audit_log::AdminActionDetail::DisputePool(audit_log::AuditDisputePool { pool_id }),
+        );
         Ok(())
     }
 
@@ -8411,11 +8604,15 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        // #1309 — tagged Admin so consumers can distinguish this from a bettor's
-        // bet auto-thawing a pool whose cooling period had elapsed.
         emit_pool_unfrozen(&env, pool_id, caller.clone(), UnfreezeTrigger::Admin, had_cooling_deadline);
         // #1449 — emit MarketUnpaused domain event for market resumption
-        emit_market_unpaused(&env, pool_id, caller, env.ledger().timestamp());
+        emit_market_unpaused(&env, pool_id, caller.clone(), env.ledger().timestamp());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "unfreeze_pool"),
+            audit_log::AdminActionDetail::UnfreezePool(audit_log::AuditUnfreezePool { pool_id }),
+        );
         Ok(())
     }
 
@@ -8478,7 +8675,13 @@ impl PredinexContract {
             .persistent()
             .remove(&DataKey::PoolCoolingUntil(pool_id));
 
-        emit_pool_cooling_overridden(&env, pool_id, caller);
+        emit_pool_cooling_overridden(&env, pool_id, caller.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "override_pool_cooling"),
+            audit_log::AdminActionDetail::OverridePoolCooling(audit_log::AuditOverridePoolCooling { pool_id }),
+        );
         Ok(())
     }
 
@@ -9501,10 +9704,16 @@ impl PredinexContract {
         env.storage().persistent().set(&DataKey::Paused, &paused);
 
         if paused {
-            emit_contract_paused(&env, caller);
+            emit_contract_paused(&env, caller.clone());
         } else {
-            emit_contract_unpaused(&env, caller);
+            emit_contract_unpaused(&env, caller.clone());
         }
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_paused"),
+            audit_log::AdminActionDetail::SetPaused(audit_log::AuditSetPaused { paused }),
+        );
         Ok(())
     }
 
@@ -9516,7 +9725,13 @@ impl PredinexContract {
         Self::require_admin_or_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &true);
         emit_contract_paused(&env, caller.clone());
-        emit_pool_paused(&env, caller);
+        emit_pool_paused(&env, caller.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "pause_contract"),
+            audit_log::AdminActionDetail::SetPaused(audit_log::AuditSetPaused { paused: true }),
+        );
         Ok(())
     }
 
@@ -9528,7 +9743,13 @@ impl PredinexContract {
         Self::require_admin_or_treasury_recipient(&env, &caller)?;
         env.storage().persistent().set(&DataKey::Paused, &false);
         emit_contract_unpaused(&env, caller.clone());
-        emit_pool_unpaused(&env, caller);
+        emit_pool_unpaused(&env, caller.clone());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "unpause_contract"),
+            audit_log::AdminActionDetail::SetPaused(audit_log::AuditSetPaused { paused: false }),
+        );
         Ok(())
     }
 
@@ -9877,7 +10098,13 @@ impl PredinexContract {
             .get(&DataKey::ReferralBps)
             .unwrap_or(0);
         env.storage().persistent().set(&DataKey::ReferralBps, &bps);
-        emit_referral_bps_set(&env, caller, old_bps, bps);
+        emit_referral_bps_set(&env, caller.clone(), old_bps, bps);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_referral_bps"),
+            audit_log::AdminActionDetail::SetReferralBps(audit_log::AuditSetReferralBps { before: old_bps, after: bps }),
+        );
         Ok(())
     }
 
@@ -10115,6 +10342,14 @@ impl PredinexContract {
         );
 
         emit_webhook_registered(&env, url, event_types.len());
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "register_webhook"),
+            audit_log::AdminActionDetail::RegisterWebhook(audit_log::AuditRegisterWebhook {
+                url_redacted: audit_log::redacted(&env),
+            }),
+        );
         Ok(())
     }
 
@@ -11379,8 +11614,13 @@ impl PredinexContract {
 
         token::Client::new(&env, &token).transfer(&env.current_contract_address(), &to, &amount);
 
-        emit_tokens_rescued(&env, token, to, amount);
-
+        emit_tokens_rescued(&env, token.clone(), to.clone(), amount);
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "rescue_tokens"),
+            audit_log::AdminActionDetail::RescueTokens(audit_log::AuditRescueTokens { token, to, amount }),
+        );
         Ok(())
     }
 
