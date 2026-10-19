@@ -18,7 +18,7 @@
  *
  * CORS uses the explicit allowlist in `config/cors.ts` (see #1200, no
  * wildcard origins). Health:
- *   GET /health      liveness probe (200 when the process is up)
+ *   GET /health      dependency readiness probe (200 healthy / 503 degraded)
  *   GET /api/health  same payload under the API prefix
  *   GET /api/openapi.json  OpenAPI document served from config/swagger
  *
@@ -44,17 +44,21 @@ import { sharedAuthValidator } from './middleware/auth.js';
 import { tracingMiddleware } from './middleware/tracing.js';
 import { versioningMiddleware } from './middleware/versioning.js';
 import { openApiDoc } from './config/swagger.js';
+import { getHealthReport } from './services/health.js';
 
 export const API_VERSION = '1.0.0';
 
-function healthPayload() {
+async function healthPayload() {
+  const report = await getHealthReport();
   return {
-    success: true,
-    status: 'ok',
+    success: report.status === 'healthy',
+    status: report.status,
     service: 'predinex-api',
     version: API_VERSION,
     uptimeSecs: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
+    dependencies: report.dependencies,
+    healthCachedAt: report.cachedAt,
   };
 }
 
@@ -116,11 +120,13 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   app.use(rateLimitMiddleware);
 
   // 3. Health checks.
-  app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json(healthPayload());
+  app.get('/health', async (_req: Request, res: Response) => {
+    const payload = await healthPayload();
+    res.status(payload.status === 'healthy' ? 200 : 503).json(payload);
   });
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.status(200).json(healthPayload());
+  app.get('/api/health', async (_req: Request, res: Response) => {
+    const payload = await healthPayload();
+    res.status(payload.status === 'healthy' ? 200 : 503).json(payload);
   });
   app.get('/api/openapi.json', (_req: Request, res: Response) => {
     res.json(openApiDoc);

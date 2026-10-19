@@ -251,6 +251,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check API schema snapshot
+        run: npm run schema:check
+
   oracle-checks:
     name: Oracle Checks
     runs-on: ubuntu-latest

@@ -490,7 +490,7 @@ export const openApiDoc = {
   info: {
     title: 'PrediNx Budget Planner API',
     version: '1.0.0',
-    description: 'RESTful API for PrediNx prediction market protocol - budget, compliance, emergency, gas estimation, insurance, referral, reputation, and simulation modules',
+    description: 'RESTful API for PrediNx prediction market protocol. Public routes are rate limited per IP or registered API key. Configure RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, and RATE_LIMIT_STRICT_MAX_REQUESTS; throttled requests return 429 with Retry-After.',
     contact: {
       name: 'PrediNx Dev Team',
       email: 'predinex-dev@stellar.org',
@@ -514,14 +514,20 @@ export const openApiDoc = {
   paths: {
     '/health': {
       get: {
-        summary: 'Liveness probe',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/health': {
       get: {
-        summary: 'Liveness probe under the API prefix',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe under the API prefix',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/openapi.json': {

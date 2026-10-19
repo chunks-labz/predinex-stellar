@@ -7725,10 +7725,10 @@ impl PredinexContract {
     ///
     /// Delegates each pool to `claim_winnings_internal` so that all safety
     /// invariants, CEI ordering, analytics updates (UserTotalClaimed /
-    /// UserClaimHistory), multi-asset guards, and fee/dust accounting are
-    /// handled in one canonical place. Pools that are ineligible (not settled,
-    /// no winning bet, already claimed, multi-asset) are silently skipped so a
-    /// partial batch never reverts the whole transaction.
+    /// UserClaimHistory), fee/dust accounting, and single-/multi-asset payout
+    /// handling are kept in their canonical paths. Pools that are ineligible
+    /// (not settled, no winning bet, or already claimed) are recorded as
+    /// skipped errors so a partial batch never reverts the whole transaction.
     ///
     /// Returns a vec of `ClaimAllEntry` (pool_id + amount transferred) for every
     /// pool from which tokens were actually sent. An empty vec means nothing was
@@ -7755,22 +7755,20 @@ impl PredinexContract {
                 None => continue,
             };
 
-            // Skip multi-asset pools — callers must use claim_multi_asset_winnings.
-            if env
+            let is_multi_asset = env
                 .storage()
                 .persistent()
                 .get::<_, bool>(&DataKey::PoolIsMultiAsset(pool_id))
-                .unwrap_or(false)
-            {
-                results.push_back(ClaimAllEntry {
-                    pool_id,
-                    amount: 0,
-                    error_code: ContractError::MultiAssetClaimRequired as u32,
-                });
-                continue;
-            }
+                .unwrap_or(false);
 
-            match Self::claim_winnings_internal(&env, user.clone(), pool_id) {
+            let result = if is_multi_asset {
+                Self::claim_multi_asset_winnings(env.clone(), user.clone(), pool_id)
+                    .map(|claim| claim.total_normalized)
+            } else {
+                Self::claim_winnings_internal(&env, user.clone(), pool_id)
+            };
+
+            match result {
                 Ok(amount) => {
                     results.push_back(ClaimAllEntry {
                         pool_id,

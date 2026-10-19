@@ -8,8 +8,8 @@
  *   npm run dev    -> ts-node-dev src/server.ts (development with reload)
  *
  * Endpoints:
- *   GET /health         200 liveness probe
- *   GET /api/health     200 liveness probe under the API prefix
+ *   GET /health         dependency readiness probe (200/503)
+ *   GET /api/health     dependency readiness probe under the API prefix
  *   /api/budget/*, /api/compliance/*, /api/emergency/*, /api/gas-estimate/*,
  *   /api/insurance/*, /api/referral/*, /api/reputation/*, /api/simulation/*
  *
@@ -22,6 +22,8 @@
  *   ASSESSOR_API_KEYS    comma-separated Assessor keys
  *   OTEL_TRACING_ENABLED set to "true" to export OpenTelemetry traces
  *                        (disabled by default; see src/middleware/tracing.ts)
+ *   HEALTH_*_URL        optional database, RPC, and queue health URLs
+ *   HEALTH_CACHE_MS     dependency probe cache duration (default 5000)
  */
 
 import 'dotenv/config';
