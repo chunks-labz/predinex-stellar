@@ -9,6 +9,8 @@
 Complete reference for every public entrypoint in `PredinexContract`.  
 Sections: [HTTP API Versioning Policy](#http-api-versioning-policy) · [Pool Management](#pool-management) · [Betting](#betting) · [Settlement](#settlement) · [Claims](#claims) · [Pool Templates](#pool-templates) · [Admin](#admin) · [Queries](#queries)
 
+> **Market lifecycle:** every state a market can be in, the transitions between them, the roles that may trigger them, and the on-chain/off-chain split are documented in [MARKET_LIFECYCLE.md](MARKET_LIFECYCLE.md).
+
 ---
 
 ## HTTP API Versioning Policy

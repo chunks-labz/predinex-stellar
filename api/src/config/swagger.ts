@@ -694,6 +694,20 @@ export const openApiDoc = {
       },
       post: {
         summary: 'Create a market (validated; on-chain submission not yet implemented)',
+        description:
+          'Optional `Idempotency-Key` header (#1466): retries with the same key and payload replay the ' +
+          'stored response (`Idempotency-Replayed: true`); a different payload under the same key returns ' +
+          '409 `IDEMPOTENCY_KEY_CONFLICT`.',
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', maxLength: 255 },
+            description:
+              'Optional caller-chosen key that makes market creation safe to retry within the TTL window.',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -722,6 +736,11 @@ export const openApiDoc = {
         responses: {
           '201': { description: 'Market created' },
           '400': { description: 'Invalid market parameters; error.details lists each offending field' },
+          '409': {
+            description:
+              'IDEMPOTENCY_KEY_CONFLICT (key reused with a different payload) or ' +
+              'IDEMPOTENCY_REQUEST_IN_PROGRESS (concurrent duplicate)',
+          },
           '501': { description: 'On-chain market creation is not yet implemented' },
         },
       },

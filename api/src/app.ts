@@ -11,6 +11,7 @@
  *   /api/gas-estimate gas estimation + optimization suggestions
  *   /api/insurance    insurance pools, quotes, purchases, claims
  *   /api/markets      paginated market list (limit/offset, see #1420)
+ *   /api/positions    indexed place_bet positions (see #1425)
  *   /api/referral     validated, authenticated referral registration
  *   /api/reputation   reputation profiles, simulation, leaderboard
  *   /api/simulation   position-health simulation
@@ -33,12 +34,8 @@ import { complianceRouter } from './routes/compliance.js';
 import { emergencyRouter } from './routes/emergency.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
-import {
-  createMarketsRouter,
-  defaultMarketSource,
-  marketsRouter,
-} from './routes/markets.js';
-import type { TradeHistorySource } from './routes/markets.js';
+import { marketsRouter } from './routes/markets.js';
+import { positionsRouter } from './routes/positions.js';
 import { createReferralRouter, defaultReferralService } from './routes/referral.js';
 import { reputationRouter } from './routes/reputation.js';
 import { simulationRouter } from './routes/simulation.js';
@@ -136,12 +133,8 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   app.use('/api/emergency', emergencyRouter);
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
-  app.use(
-    '/api/markets',
-    tradeHistorySource
-      ? createMarketsRouter(defaultMarketSource, undefined, tradeHistorySource)
-      : marketsRouter
-  );
+  app.use('/api/markets', marketsRouter);
+  app.use('/api/positions', positionsRouter);
   app.use('/api/referral', createReferralRouter(defaultReferralService));
   app.use('/api/reputation', reputationRouter);
   app.use('/api/simulation', simulationRouter);

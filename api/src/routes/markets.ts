@@ -31,6 +31,16 @@
  * field-level `details`. Until an on-chain creator is wired in, valid
  * payloads receive 501, mirroring the referral route.
  *
+ * Idempotency (#1466):
+ *   POST /api/markets accepts an optional `Idempotency-Key` header. The first
+ *   request with a key executes normally and its response is stored keyed by
+ *   `key + caller` for a TTL window; retries with the same key and payload
+ *   replay the stored response (`Idempotency-Replayed: true`), a different
+ *   payload under the same key is rejected with 409
+ *   `IDEMPOTENCY_KEY_CONFLICT`, and concurrent duplicates get 409
+ *   `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Requests without the header are
+ *   unaffected.
+ *
  * Response envelope:
  *   {
  *     success: true,
@@ -50,6 +60,10 @@ import {
 } from '../services/market-query.js';
 import { AuthContext, sharedAuthValidator } from '../middleware/auth.js';
 import { withSpan } from '../middleware/tracing.js';
+import {
+  createIdempotencyMiddleware,
+  IdempotencyStore,
+} from '../middleware/idempotency.js';
 import {
   CreateMarketRequest,
   validateCreateMarket,
@@ -490,12 +504,20 @@ export type MarketCreator = (req: CreateMarketRequest) => Promise<MarketSummary>
 export const defaultMarketSource = new InMemoryMarketSource();
 export const defaultTradeHistorySource = new UnconfiguredTradeHistorySource();
 
+export interface MarketsRouterOptions {
+  /** Store backing the optional `Idempotency-Key` header on POST /. */
+  idempotencyStore?: IdempotencyStore;
+}
+
 export function createMarketsRouter(
   source: MarketSource = defaultMarketSource,
   creator?: MarketCreator,
-  tradeHistory: TradeHistorySource = defaultTradeHistorySource
+  options: MarketsRouterOptions = {}
 ): Router {
   const router = Router();
+  const idempotency = createIdempotencyMiddleware({
+    store: options.idempotencyStore,
+  });
   router.use(rateLimitMiddleware);
 
   router.get('/:id/trades/export', async (req: Request, res: Response, next: NextFunction) => {
@@ -868,7 +890,7 @@ export function createMarketsRouter(
     }
   });
 
-  router.post('/', strictRateLimitMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/', strictRateLimitMiddleware, idempotency, async (req: Request, res: Response, next: NextFunction) => {
     const validation = validateCreateMarket(req.body);
     if (!validation.ok) {
       sendError(res, 400, 'VALIDATION_ERROR', 'Invalid market creation request', validation.errors);
