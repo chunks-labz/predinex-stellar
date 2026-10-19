@@ -36,7 +36,7 @@ curl http://localhost:3001/api/openapi.json
 ```
 
 Configuration (`PORT`, `AUTH_SECRET`, `ADMIN_API_KEYS`, `OFFICER_API_KEYS`,
-`ASSESSOR_API_KEYS`) is read from the environment; see `.env.example`.
+`ASSESSOR_API_KEYS`, `USER_API_KEYS`) is read from the environment; see `.env.example`.
 `AUTH_SECRET` is required: the HMAC secret has no built-in default, so the
 server refuses to start when it is missing or blank, and `AuthValidator`
 rejects the publicly known value that older releases fell back to. Use a
@@ -44,6 +44,9 @@ fresh random value per deployment. The test suite generates a random
 `AUTH_SECRET` per run in `vitest.config.ts`. Mutating emergency and
 compliance routes require an `x-api-key` header with the matching role and
 are rate-limited; all routes apply shared auth + rate-limit middleware.
+`USER_API_KEYS` binds individual API keys to Stellar account addresses using
+comma-separated `apiKey=G...` entries; it is required for per-user trade
+exports.
 
 ### Rate limiting
 
@@ -120,6 +123,24 @@ Invalid payloads return `400 VALIDATION_ERROR` with one `error.details` entry
 (`{ field, message }`) per violated field. Valid payloads are passed unchanged
 to the configured market creator and return `201`; until on-chain creation is
 wired in they return `501`.
+
+### GET /api/markets/:id/trades/export
+
+Download the caller's market trades as an RFC 4180 CSV attachment. Requests
+must include an `x-api-key` configured in `USER_API_KEYS` as
+`apiKey=STELLAR_ADDRESS` (comma-separated for multiple users); admin/operator
+keys do not implicitly identify a user. Query filters are `from`, `to`
+(inclusive ISO dates/timestamps), `side` (`buy` or `sell`), `limit` (default
+100, maximum 1,000), and `offset`. CSV columns are stable:
+`trade_id,market_id,user_address,side,outcome,amount,price,timestamp,tx_hash`.
+
+The API currently has no built-in transaction indexer. Inject a
+`TradeHistorySource` into `createApp(tradeHistorySource)` or
+`createMarketsRouter(..., ..., tradeHistorySource)` to connect indexed records.
+Until that source is configured, the endpoint returns an explicit
+`503 TRADE_HISTORY_UNAVAILABLE`; it does not report a fabricated empty result.
+The source receives both the market id and authenticated account, and the route
+rechecks ownership before exporting.
 
 ### POST /api/budget/plan
 Create a budget plan

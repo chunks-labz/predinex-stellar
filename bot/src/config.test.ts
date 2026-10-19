@@ -34,6 +34,17 @@ describe("loadConfig", () => {
     delete process.env["MAX_RETRIES"];
     delete process.env["RETRY_BASE_DELAY_MS"];
     delete process.env["DEFAULT_WINNING_OUTCOME"];
+    delete process.env["ORACLE_URL"];
+    delete process.env["ORACLE_SECRET"];
+    delete process.env["ORACLE_FALLBACK_TO_DEFAULT"];
+    delete process.env["ORACLE_REQUESTS_PER_SECOND"];
+    delete process.env["ORACLE_RATE_LIMIT_BURST"];
+    delete process.env["ORACLE_MAX_CONCURRENCY"];
+    delete process.env["ORACLE_RATE_LIMIT_MODE"];
+    delete process.env["ORACLE_RETRY_MAX_ATTEMPTS"];
+    delete process.env["ORACLE_RETRY_BASE_DELAY_MS"];
+    delete process.env["ORACLE_RETRY_MAX_DELAY_MS"];
+    delete process.env["ORACLE_REQUEST_TIMEOUT_MS"];
     delete process.env["HEALTH_CHECK_ENABLED"];
     delete process.env["HEALTH_CHECK_PORT"];
     delete process.env["ALLOW_HTTP"];
@@ -197,6 +208,14 @@ describe("loadConfig", () => {
     expect(config.oracleUrl).toBeNull();
     expect(config.oracleSecret).toBeNull();
     expect(config.oracleFallbackToDefault).toBe(false);
+    expect(config.oracleRequestsPerSecond).toBe(5);
+    expect(config.oracleRateLimitBurst).toBe(5);
+    expect(config.oracleMaxConcurrency).toBe(2);
+    expect(config.oracleRateLimitMode).toBe("wait");
+    expect(config.oracleRetryMaxAttempts).toBe(3);
+    expect(config.oracleRetryBaseDelayMs).toBe(500);
+    expect(config.oracleRetryMaxDelayMs).toBe(10_000);
+    expect(config.oracleRequestTimeoutMs).toBe(10_000);
   });
 
   it("reads ORACLE_URL correctly", async () => {
@@ -253,5 +272,30 @@ describe("loadConfig", () => {
     const { loadConfig } = await import("./config.js");
     const config = loadConfig();
     expect(config.oracleFallbackToDefault).toBe(false);
+  });
+
+  it("parses oracle rate limiting and retry settings", async () => {
+    process.env["ORACLE_REQUESTS_PER_SECOND"] = "12";
+    process.env["ORACLE_RATE_LIMIT_BURST"] = "4";
+    process.env["ORACLE_MAX_CONCURRENCY"] = "3";
+    process.env["ORACLE_RATE_LIMIT_MODE"] = "reject";
+    process.env["ORACLE_RETRY_MAX_ATTEMPTS"] = "4";
+    process.env["ORACLE_RETRY_BASE_DELAY_MS"] = "250";
+    process.env["ORACLE_RETRY_MAX_DELAY_MS"] = "5000";
+    process.env["ORACLE_REQUEST_TIMEOUT_MS"] = "8000";
+    vi.resetModules();
+
+    const { loadConfig } = await import("./config.js");
+    const loaded = loadConfig();
+    expect(loaded).toMatchObject({
+      oracleRequestsPerSecond: 12,
+      oracleRateLimitBurst: 4,
+      oracleMaxConcurrency: 3,
+      oracleRateLimitMode: "reject",
+      oracleRetryMaxAttempts: 4,
+      oracleRetryBaseDelayMs: 250,
+      oracleRetryMaxDelayMs: 5000,
+      oracleRequestTimeoutMs: 8000,
+    });
   });
 });

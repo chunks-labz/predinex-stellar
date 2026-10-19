@@ -130,6 +130,13 @@ fn emit_protocol_fee_set(env: &Env, caller: Address, old_fee_bps: u32, fee_bps: 
     );
 }
 
+fn emit_protocol_fee_cap_set(env: &Env, caller: Address, old_cap_bps: u32, cap_bps: u32) {
+    env.events().publish(
+        (Symbol::new(env, "protocol_fee_cap_set"), event_version(env)),
+        (caller, old_cap_bps, cap_bps),
+    );
+}
+
 fn emit_volume_fee_tiers_set(env: &Env, caller: Address, tiers: Vec<FeeTier>) {
     env.events().publish(
         (Symbol::new(env, "volume_fee_tiers_set"), event_version(env)),
@@ -1087,6 +1094,9 @@ pub enum DataKey {
     /// #167 — protocol fee in basis points. Set by the treasury recipient via
     /// `set_protocol_fee`; defaults to 200 (2%) when absent.
     ProtocolFee,
+    /// Maximum protocol fee accepted by governance setters. Missing values
+    /// retain the 1,000 bps compatibility ceiling for existing deployments.
+    ProtocolFeeCap,
     /// #158 — per-pool claim / payout progress for winner claims.
     PoolPayoutState(u32),
     /// #195 — floor(bps × pool volume) protocol fee for this market (set at settlement).
@@ -1306,11 +1316,6 @@ pub enum DataKey {
     /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
     /// called on a `ResolutionPending` pool.
     PoolChallenges(u32),
-    /// #1463 — Monotonic counter for the audit log. The value is the next
-    /// sequence number to be written (i.e. the total number of records so far).
-    AuditSeq,
-    /// #1463 — A single immutable audit record keyed by its sequence number.
-    AuditRecord(u64),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1333,6 +1338,20 @@ const POOL_BUMP_THRESHOLD: u32 = LEDGERS_PER_DAY * 25; // trigger bump when < 25
 const PROTOCOL_FEE_MIN_BPS: u32 = 0;
 const PROTOCOL_FEE_MAX_BPS: u32 = 1000;
 const PROTOCOL_FEE_DEFAULT_BPS: u32 = 200;
+
+fn protocol_fee_cap_bps(env: &Env) -> u32 {
+    let persistent = env.storage().persistent();
+    if persistent.has(&DataKey::ProtocolFeeCap) {
+        persistent.extend_ttl(
+            &DataKey::ProtocolFeeCap,
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+    }
+    persistent
+        .get::<_, u32>(&DataKey::ProtocolFeeCap)
+        .unwrap_or(PROTOCOL_FEE_MAX_BPS)
+}
 
 /// Maximum bet fee rate in basis points. Matches the protocol fee cap so that
 /// a privileged key cannot silently confiscate an outsized share of bets.
@@ -2638,7 +2657,15 @@ impl PredinexContract {
         env.storage().persistent().set(&DataKey::Treasury, &0i128);
         env.storage().persistent().set(&DataKey::TreasuryToken(token.clone()), &0i128);
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        emit_admin_set(&env, None, admin.clone());
+        env.storage()
+            .persistent()
+            .set(&DataKey::ProtocolFeeCap, &PROTOCOL_FEE_MAX_BPS);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ProtocolFeeCap,
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+        emit_admin_set(&env, None, admin);
         // #191 — persist the contract state schema version on initialization.
         env.storage().persistent().set(
             &DataKey::ContractVersion,
@@ -2820,7 +2847,7 @@ impl PredinexContract {
     /// #167 — Set the protocol fee in basis points.
     ///
     /// Only the treasury recipient may call this. The fee must be within
-    /// [PROTOCOL_FEE_MIN_BPS, PROTOCOL_FEE_MAX_BPS] (0–1000 basis points, i.e., 0–10%).
+    /// [PROTOCOL_FEE_MIN_BPS, get_max_protocol_fee_bps()].
     /// The fee applies to future settlements and claims; existing settled pools
     /// are not affected.
     ///
@@ -2830,11 +2857,11 @@ impl PredinexContract {
     ///
     /// # Panics
     /// * "Unauthorized" – if caller is not the treasury recipient
-    /// * "Fee out of bounds" – if fee_bps is outside [0, 1000]
+    /// * `FeeOutOfBounds` – if fee_bps is outside the configured range
     pub fn set_protocol_fee(env: Env, caller: Address, fee_bps: u32) -> Result<(), ContractError> {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
-        if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&fee_bps) {
+        if !(PROTOCOL_FEE_MIN_BPS..=protocol_fee_cap_bps(&env)).contains(&fee_bps) {
             return Err(ContractError::FeeOutOfBounds);
         }
         let old_fee_bps: u32 = env
@@ -2871,6 +2898,61 @@ impl PredinexContract {
             .unwrap_or(PROTOCOL_FEE_DEFAULT_BPS)
     }
 
+    /// Set the maximum protocol settlement fee accepted by fee governance.
+    ///
+    /// The cap cannot exceed the protocol hard ceiling of 1,000 bps. Existing
+    /// flat and volume-tier fees must fit under the new cap. Only the admin or
+    /// treasury recipient may change this setting.
+    pub fn set_max_protocol_fee_bps(
+        env: Env,
+        caller: Address,
+        cap_bps: u32,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_admin_or_treasury_recipient(&env, &caller)?;
+        if cap_bps > PROTOCOL_FEE_MAX_BPS {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+
+        let current_fee = env
+            .storage()
+            .persistent()
+            .get::<_, u32>(&DataKey::ProtocolFee)
+            .unwrap_or(PROTOCOL_FEE_DEFAULT_BPS);
+        if current_fee > cap_bps {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+        let tiers: Option<Vec<FeeTier>> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VolumeFeeTiers);
+        if tiers
+            .map(|configured| configured.iter().any(|tier| tier.fee_bps > cap_bps))
+            .unwrap_or(false)
+        {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+
+        let old_cap_bps = protocol_fee_cap_bps(&env);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ProtocolFeeCap, &cap_bps);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ProtocolFeeCap,
+            POOL_BUMP_THRESHOLD,
+            POOL_BUMP_TARGET,
+        );
+        emit_protocol_fee_cap_set(&env, caller, old_cap_bps, cap_bps);
+        Ok(())
+    }
+
+    /// Return the configured maximum settlement fee in basis points.
+    ///
+    /// Older contract instances retain the historic 1,000 bps hard ceiling.
+    pub fn get_max_protocol_fee_bps(env: Env) -> u32 {
+        protocol_fee_cap_bps(&env)
+    }
+
     /// Configure volume-based protocol fee tiers.
     ///
     /// Tiers let larger markets pay a reduced (or otherwise different) fee than
@@ -2887,7 +2969,7 @@ impl PredinexContract {
     /// * at most `MAX_FEE_TIERS` (5) tiers
     /// * every `volume_threshold >= 0`
     /// * strictly ascending `volume_threshold` (no duplicates, defined order)
-    /// * every `fee_bps` within `[PROTOCOL_FEE_MIN_BPS, PROTOCOL_FEE_MAX_BPS]`
+    /// * every `fee_bps` within `[PROTOCOL_FEE_MIN_BPS, get_max_protocol_fee_bps()]`
     ///
     /// Emits `volume_fee_tiers_set` with the caller and the full set of tiers
     /// now configured (empty when tiers were cleared).
@@ -2908,7 +2990,7 @@ impl PredinexContract {
             if tier.volume_threshold < 0 {
                 return Err(ContractError::FeeOutOfBounds);
             }
-            if !(PROTOCOL_FEE_MIN_BPS..=PROTOCOL_FEE_MAX_BPS).contains(&tier.fee_bps) {
+            if !(PROTOCOL_FEE_MIN_BPS..=protocol_fee_cap_bps(&env)).contains(&tier.fee_bps) {
                 return Err(ContractError::FeeOutOfBounds);
             }
             if let Some(prev) = prev_threshold {
@@ -2957,6 +3039,7 @@ impl PredinexContract {
     /// volume is below the first tier; otherwise the `fee_bps` of the highest
     /// tier whose threshold is `<= volume`.
     fn resolve_fee_bps_for_volume(env: &Env, volume: i128) -> u32 {
+        let _ = protocol_fee_cap_bps(env);
         let tiers = env
             .storage()
             .persistent()

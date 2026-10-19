@@ -51,6 +51,19 @@ export interface BotConfig {
   oracleUrl: string | null;
   /** Bearer token sent as Authorization header to the oracle. Null = no auth. */
   oracleSecret: string | null;
+  /** Tokens refilled per second for each oracle provider origin. */
+  oracleRequestsPerSecond: number;
+  /** Initial token bucket capacity for each oracle provider origin. */
+  oracleRateLimitBurst: number;
+  /** Maximum simultaneous requests to one oracle provider origin. */
+  oracleMaxConcurrency: number;
+  /** Whether requests over the current provider budget wait or fail immediately. */
+  oracleRateLimitMode: "wait" | "reject";
+  /** Total attempts for transient oracle failures, including the first attempt. */
+  oracleRetryMaxAttempts: number;
+  oracleRetryBaseDelayMs: number;
+  oracleRetryMaxDelayMs: number;
+  oracleRequestTimeoutMs: number;
   /**
    * When true, pools whose outcome could not be resolved by the oracle or
    * on-chain data fall back to defaultWinningOutcome.
@@ -204,6 +217,49 @@ export function loadConfig(): BotConfig {
   const oracleFallbackToDefault =
     optionalEnv("ORACLE_FALLBACK_TO_DEFAULT", "false").toLowerCase() ===
     "true";
+  const oracleRequestsPerSecond = parsePositiveInt(
+    optionalEnv("ORACLE_REQUESTS_PER_SECOND", "5"),
+    "ORACLE_REQUESTS_PER_SECOND",
+    errors,
+  );
+  const oracleRateLimitBurst = parsePositiveInt(
+    optionalEnv("ORACLE_RATE_LIMIT_BURST", "5"),
+    "ORACLE_RATE_LIMIT_BURST",
+    errors,
+  );
+  const oracleMaxConcurrency = parsePositiveInt(
+    optionalEnv("ORACLE_MAX_CONCURRENCY", "2"),
+    "ORACLE_MAX_CONCURRENCY",
+    errors,
+  );
+  const rawOracleRateLimitMode = optionalEnv("ORACLE_RATE_LIMIT_MODE", "wait").toLowerCase();
+  if (rawOracleRateLimitMode !== "wait" && rawOracleRateLimitMode !== "reject") {
+    errors.push('ORACLE_RATE_LIMIT_MODE must be "wait" or "reject"');
+  }
+  const oracleRateLimitMode = rawOracleRateLimitMode === "reject" ? "reject" : "wait";
+  const oracleRetryMaxAttempts = parsePositiveInt(
+    optionalEnv("ORACLE_RETRY_MAX_ATTEMPTS", "3"),
+    "ORACLE_RETRY_MAX_ATTEMPTS",
+    errors,
+  );
+  const oracleRetryBaseDelayMs = parsePositiveInt(
+    optionalEnv("ORACLE_RETRY_BASE_DELAY_MS", "500"),
+    "ORACLE_RETRY_BASE_DELAY_MS",
+    errors,
+  );
+  const oracleRetryMaxDelayMs = parsePositiveInt(
+    optionalEnv("ORACLE_RETRY_MAX_DELAY_MS", "10000"),
+    "ORACLE_RETRY_MAX_DELAY_MS",
+    errors,
+  );
+  if (oracleRetryMaxDelayMs < oracleRetryBaseDelayMs) {
+    errors.push("ORACLE_RETRY_MAX_DELAY_MS must be greater than or equal to ORACLE_RETRY_BASE_DELAY_MS");
+  }
+  const oracleRequestTimeoutMs = parsePositiveInt(
+    optionalEnv("ORACLE_REQUEST_TIMEOUT_MS", "10000"),
+    "ORACLE_REQUEST_TIMEOUT_MS",
+    errors,
+  );
 
   const txPollIntervalMs = parsePositiveInt(optionalEnv("TX_POLL_INTERVAL_MS", "3000"), "TX_POLL_INTERVAL_MS", errors);
   const txPollMaxAttempts = parsePositiveInt(optionalEnv("TX_POLL_MAX_ATTEMPTS", "30"), "TX_POLL_MAX_ATTEMPTS", errors);
@@ -268,6 +324,14 @@ export function loadConfig(): BotConfig {
     oracleUrl,
     oracleSecret,
     oracleFallbackToDefault,
+    oracleRequestsPerSecond,
+    oracleRateLimitBurst,
+    oracleMaxConcurrency,
+    oracleRateLimitMode,
+    oracleRetryMaxAttempts,
+    oracleRetryBaseDelayMs,
+    oracleRetryMaxDelayMs,
+    oracleRequestTimeoutMs,
     txPollIntervalMs,
     txPollMaxAttempts,
     maxRetries,

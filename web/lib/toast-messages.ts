@@ -68,6 +68,16 @@ export const toastMessages = {
       type: "error",
     }),
   },
+  positions: {
+    rollbackBet: {
+      message: "Bet not placed — your positions view was restored.",
+      type: "error" as const,
+    },
+    rollbackClaim: {
+      message: "Claim not confirmed — your positions view was restored.",
+      type: "error" as const,
+    },
+  },
   network: {
     /** Shown when the wallet prompt is slow to appear. */
     slowConfirmation: {

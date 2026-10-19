@@ -32,6 +32,7 @@ export class AuthValidator {
   private adminKeys = new Set<string>();
   private officerKeys = new Set<string>();
   private assessorKeys = new Set<string>();
+  private userKeys = new Map<string, string>();
   private secretKey: string;
 
   /**
@@ -56,10 +57,30 @@ export class AuthValidator {
     if (role === 'Assessor') this.assessorKeys.add(apiKey);
   }
 
+  /** Register a user API key bound to exactly one Stellar account address. */
+  public registerUserKey(apiKey: string, subjectAddress: string): void {
+    const normalizedKey = apiKey.trim();
+    if (!normalizedKey || !/^G[A-Z2-7]{55}$/.test(subjectAddress)) {
+      throw new Error('User API keys require a non-empty key and a valid Stellar account address');
+    }
+    if (
+      this.adminKeys.has(normalizedKey) ||
+      this.officerKeys.has(normalizedKey) ||
+      this.assessorKeys.has(normalizedKey) ||
+      this.userKeys.has(normalizedKey)
+    ) {
+      throw new Error('API key is already registered');
+    }
+    this.userKeys.set(normalizedKey, subjectAddress);
+  }
+
   /** True when `apiKey` was registered for any role (a verified identity). */
   public isRegisteredKey(apiKey: string): boolean {
     return (
-      this.adminKeys.has(apiKey) || this.officerKeys.has(apiKey) || this.assessorKeys.has(apiKey)
+      this.adminKeys.has(apiKey) ||
+      this.officerKeys.has(apiKey) ||
+      this.assessorKeys.has(apiKey) ||
+      this.userKeys.has(apiKey)
     );
   }
 
@@ -77,6 +98,10 @@ export class AuthValidator {
     }
     if (this.assessorKeys.has(apiKey)) {
       return { apiKey, role: 'Assessor' };
+    }
+    const subjectAddress = this.userKeys.get(apiKey);
+    if (subjectAddress) {
+      return { apiKey, role: 'User', subjectAddress };
     }
 
     return { apiKey, role: 'User' };
@@ -138,6 +163,16 @@ for (const key of loadKeysFromEnv(process.env.OFFICER_API_KEYS)) {
 }
 for (const key of loadKeysFromEnv(process.env.ASSESSOR_API_KEYS)) {
   sharedAuthValidator.registerKey(key, 'Assessor');
+}
+for (const entry of loadKeysFromEnv(process.env.USER_API_KEYS)) {
+  const separator = entry.indexOf('=');
+  if (separator <= 0 || separator === entry.length - 1) {
+    throw new Error('USER_API_KEYS entries must use the format apiKey=STELLAR_ADDRESS');
+  }
+  sharedAuthValidator.registerUserKey(
+    entry.slice(0, separator).trim(),
+    entry.slice(separator + 1).trim()
+  );
 }
 
 /**

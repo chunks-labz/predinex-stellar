@@ -11,6 +11,7 @@
  *   /api/gas-estimate gas estimation + optimization suggestions
  *   /api/insurance    insurance pools, quotes, purchases, claims
  *   /api/markets      paginated market list (limit/offset, see #1420)
+ *   /api/positions    indexed place_bet positions (see #1425)
  *   /api/referral     validated, authenticated referral registration
  *   /api/reputation   reputation profiles, simulation, leaderboard
  *   /api/simulation   position-health simulation
@@ -34,6 +35,7 @@ import { emergencyRouter } from './routes/emergency.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
 import { marketsRouter } from './routes/markets.js';
+import { positionsRouter } from './routes/positions.js';
 import { createReferralRouter, defaultReferralService } from './routes/referral.js';
 import { reputationRouter } from './routes/reputation.js';
 import { simulationRouter } from './routes/simulation.js';
@@ -86,7 +88,7 @@ contractService.setBalanceProvider(getStellarBalance);
  * Creates and configures the Express application instance.
  * Installs CORS ahead of routes with explicit configuration.
  */
-export function createApp(): Express {
+export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   const app = express();
 
   app.disable('x-powered-by');
@@ -132,6 +134,7 @@ export function createApp(): Express {
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
   app.use('/api/markets', marketsRouter);
+  app.use('/api/positions', positionsRouter);
   app.use('/api/referral', createReferralRouter(defaultReferralService));
   app.use('/api/reputation', reputationRouter);
   app.use('/api/simulation', simulationRouter);

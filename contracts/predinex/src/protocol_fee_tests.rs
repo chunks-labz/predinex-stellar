@@ -50,6 +50,62 @@ fn test_get_protocol_fee_returns_default() {
 }
 
 #[test]
+fn test_fee_cap_defaults_to_hard_safety_ceiling() {
+    let (_env, client, _, _) = setup_contract();
+    assert_eq!(client.get_max_protocol_fee_bps(), 1000);
+}
+
+#[test]
+fn test_configured_fee_cap_allows_updates_within_and_at_cap() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+    client.set_protocol_fee(&admin, &500);
+    client.set_protocol_fee(&admin, &600);
+
+    assert_eq!(client.get_max_protocol_fee_bps(), 600);
+    assert_eq!(client.get_protocol_fee(), 600);
+}
+
+#[test]
+fn test_configured_fee_cap_rejects_over_cap_updates() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+
+    let result = client.try_set_protocol_fee(&admin, &601);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
+    assert_eq!(client.get_protocol_fee(), 200);
+}
+
+#[test]
+fn test_fee_cap_cannot_be_lowered_below_current_fee() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_protocol_fee(&admin, &500);
+
+    let result = client.try_set_max_protocol_fee_bps(&admin, &499);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
+    assert_eq!(client.get_max_protocol_fee_bps(), 1000);
+}
+
+#[test]
+fn test_fee_tiers_cannot_exceed_configured_fee_cap() {
+    let (env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+    let tiers = vec![
+        &env,
+        FeeTier {
+            volume_threshold: 1_000,
+            fee_bps: 601,
+        },
+    ];
+
+    let result = client.try_set_volume_fee_tiers(&admin, &tiers);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
+}
+
+#[test]
 fn test_set_protocol_fee_within_bounds() {
     let (_env, client, admin, _) = setup_contract();
     client.set_protocol_fee(&admin, &500);

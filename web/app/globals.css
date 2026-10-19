@@ -10,6 +10,7 @@
     --muted-foreground: #d1d5db;
     --accent: #22d3ee;
     --border: #2b2b2b;
+    --focus-ring-color: #c4b5fd;
 
     /* Transitions */
     --transition-fast: 150ms;
@@ -168,14 +169,14 @@ body {
 /* ── #458 A11y: Visible focus indicators (WCAG 2.1 AA) ─────────────────────── */
 /* Provide a 2px solid ring that meets 3:1 contrast against any background.    */
 :focus-visible {
-    outline: 2px solid var(--primary);
+    outline: 3px solid var(--focus-ring-color, var(--primary)) !important;
     outline-offset: 2px;
     border-radius: 4px;
 }
 
-/* Ensure focus-visible outlines also meet 3:1 contrast for non-text icons */
-:focus-visible::-webkit-focus-ring-color {
-    outline-color: var(--primary);
+:root[data-theme="light"],
+.light {
+    --focus-ring-color: #5b21b6;
 }
 
 /* Remove default outline only when :focus-visible is supported */
