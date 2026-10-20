@@ -37,6 +37,7 @@ mod pause_tests;
 mod pool_categories_tests;
 mod protocol_fee_tests;
 mod settlement_tests;
+mod stale_oracle_tests;
 mod test;
 mod validation_hardening_tests;
 mod validation_prop_tests;
@@ -222,6 +223,21 @@ fn emit_user_exposure_config_set(
             large_bet_cooldown_secs,
             large_bet_threshold,
         ),
+    );
+}
+
+/// #1444 — Emitted when the oracle staleness threshold is updated.
+fn emit_stale_oracle_threshold_set(
+    env: &Env,
+    old_threshold_secs: u64,
+    new_threshold_secs: u64,
+) {
+    env.events().publish(
+        (
+            Symbol::new(env, "stale_oracle_threshold_set"),
+            event_version(env),
+        ),
+        (old_threshold_secs, new_threshold_secs),
     );
 }
 
@@ -1248,6 +1264,13 @@ pub enum DataKey {
     /// `get_user_claim_history` page by a stable absolute sequence offset
     /// instead of a raw storage index that shifts when old entries are trimmed.
     UserClaimHistorySeq(Address),
+    /// #1444 — Global threshold (seconds) for oracle price staleness. When a
+    /// market's oracle has not been updated within this window, wagers and
+    /// resolutions are rejected. 0 disables the check (default).
+    StaleOracleThresholdSecs,
+    /// #1444 — Ledger timestamp of the last oracle price update for a pool.
+    /// Written by `update_twap` and checked by `place_bet` / `settle_pool`.
+    OracleLastUpdated(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1353,6 +1376,10 @@ const DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS: u64 = 0;
 pub const DEFAULT_TWAP_PERIOD_SECS: u64 = 3_600;
 /// Minimum time between TWAP snapshots for a given pool/outcome.
 pub const MIN_UPDATE_INTERVAL: u64 = 60;
+
+/// #1444 — Default oracle staleness threshold: 0 (disabled). Set via
+/// `set_stale_oracle_threshold` by the treasury recipient.
+const DEFAULT_STALE_ORACLE_THRESHOLD_SECS: u64 = 0;
 
 pub const GRACE_PERIOD_SECS: u64 = 7 * 24 * 60 * 60; // 7 days grace period for refunds
 
@@ -1507,6 +1534,9 @@ pub enum ContractError {
     TransferBalanceMismatch = 92,
     /// TWAP lookback period must be greater than zero.
     InvalidTwapPeriod = 93,
+    /// #1444 — Oracle price feed for a pool is stale: the last update exceeds
+    /// the configured staleness threshold (`StaleOracleThresholdSecs`).
+    StaleOraclePrice = 94,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -3065,6 +3095,51 @@ impl PredinexContract {
                 .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
                 .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS),
         }
+    }
+
+    /// #1444 — Configure the oracle staleness threshold.
+    ///
+    /// Only treasury recipient may call this. When `threshold_secs > 0`,
+    /// `place_bet` and `settle_pool` reject operations on any pool whose last
+    /// oracle (`update_twap`) update is older than the threshold. A value of
+    /// `0` disables the check entirely (default).
+    pub fn set_stale_oracle_threshold(
+        env: Env,
+        caller: Address,
+        threshold_secs: u64,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+
+        let old_threshold: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::StaleOracleThresholdSecs, &threshold_secs);
+
+        emit_stale_oracle_threshold_set(&env, old_threshold, threshold_secs);
+        Ok(())
+    }
+
+    /// #1444 — Read the current oracle staleness threshold (seconds).
+    ///
+    /// Returns `0` when the check is disabled (default).
+    pub fn get_stale_oracle_threshold(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS)
+    }
+
+    /// #1444 — Returns `true` when the pool's oracle feed is considered fresh
+    /// (staleness check is disabled or last update is within the threshold).
+    /// Returns `false` when the feed is stale.
+    pub fn is_oracle_fresh(env: Env, pool_id: u32) -> bool {
+        Self::check_oracle_freshness(&env, pool_id).is_ok()
     }
 
     /// Configure per-wallet rate limiting.
@@ -4785,6 +4860,9 @@ impl PredinexContract {
             return Err(ContractError::InvalidOutcome);
         }
 
+        // #1444 — Reject wagers against a stale oracle price feed.
+        Self::check_oracle_freshness(&env, pool_id)?;
+
         // Per-wallet rate limiting for abuse prevention.
         let max_bets_per_window: u32 = env
             .storage()
@@ -5267,6 +5345,13 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+
+        // #1444 — Record the last oracle update timestamp for this pool so
+        // `check_oracle_freshness` can compare it against the staleness threshold.
+        env.storage()
+            .persistent()
+            .set(&DataKey::OracleLastUpdated(pool_id), &now);
+
         emit_twap_updated(
             &env,
             pool_id,
@@ -5982,6 +6067,9 @@ impl PredinexContract {
         if pool.participant_count < min_participants {
             return Err(ContractError::InsufficientParticipants);
         }
+
+        // #1444 — Reject resolution against a stale oracle price feed.
+        Self::check_oracle_freshness(env, pool_id)?;
 
         let outcomes = Self::read_outcomes(env, pool_id, &pool);
         // #1415 — Settlement validates `winning_outcome` against the label set
@@ -12151,6 +12239,34 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
         emit_lp_rewards_distributed(&env, pool_id, amount);
+        Ok(())
+    }
+
+    /// #1444 — Internal staleness check. Returns `Ok(())` when the staleness
+    /// check is disabled (threshold == 0). Returns `Err(StaleOraclePrice)`
+    /// when the last `update_twap` exceeds the configured threshold.
+    fn check_oracle_freshness(env: &Env, pool_id: u32) -> Result<(), ContractError> {
+        let threshold: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS);
+
+        if threshold == 0 {
+            return Ok(());
+        }
+
+        let last_updated: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OracleLastUpdated(pool_id))
+            .unwrap_or(0);
+
+        let now = env.ledger().timestamp();
+        if last_updated == 0 || now.saturating_sub(last_updated) > threshold {
+            return Err(ContractError::StaleOraclePrice);
+        }
+
         Ok(())
     }
 }
