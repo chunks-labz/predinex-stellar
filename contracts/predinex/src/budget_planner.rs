@@ -255,7 +255,8 @@ impl BudgetPlanner {
                             active_pools += 1;
                             current_value += bet.total_bet;
                         }
-                        PoolStatus::Settled(winning_outcome) => {
+                        PoolStatus::Settled(winning_outcome)
+                        | PoolStatus::ResolutionPending(winning_outcome) => {
                             settled_pools += 1;
                             let user_outcome_bets = PredinexContract::read_user_outcome_bets(
                                 env,

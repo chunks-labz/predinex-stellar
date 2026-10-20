@@ -28,6 +28,7 @@ async function main(): Promise<void> {
     autoSettleEnabled: config.autoSettleEnabled,
     pollIntervalMs: config.pollIntervalMs,
     batchSize: config.batchSize,
+    upstreamTimeoutMs: config.upstreamTimeoutMs,
     maxRetries: config.maxRetries,
     webhook: config.webhookUrl ? "configured" : "disabled",
     healthCheck: config.healthCheckEnabled

@@ -5005,6 +5005,10 @@ fn g1_dispute_within_window_succeeds() {
 
     client.set_freeze_admin(&admin, &admin);
 
+    // #1427 — Set a 7-day dispute window so the resolution enters
+    // ResolutionPending and the dispute path is exercisable.
+    client.set_dispute_window(&admin, &(7 * 24 * 3600));
+
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
     let bettor = Address::generate(&env);
     token_admin_client.mint(&bettor, &10_000);
@@ -5013,7 +5017,7 @@ fn g1_dispute_within_window_succeeds() {
     env.ledger().with_mut(|l| l.timestamp = 3601);
     client.settle_pool(&admin, &pool_id, &0);
 
-    // Default window is 7 days (604800 secs).
+    // Window is 7 days (604800 secs).
     // Dispute at settlement_time + 100 should succeed.
     env.ledger().with_mut(|l| l.timestamp = 3601 + 100);
     client.dispute_pool(&admin, &pool_id);
@@ -5102,6 +5106,203 @@ fn g6_unauthorized_resolve_rejected() {
 #[ignore]
 fn g7_get_pool_dispute_returns_none_when_no_dispute() {
     panic!("get_pool_dispute not yet implemented in contract");
+}
+
+// ============================================================================
+// Issue #1427: Dispute window for market resolution
+// ============================================================================
+//
+// After resolution, a time-bounded dispute window opens during which
+// challenges can be submitted and payouts are paused. The resolution
+// becomes final once the window elapses without a challenge — either via
+// `finalize_resolution` or automatically when a winner claims. If a
+// challenge is filed, the pool enters Disputed status pending review.
+
+/// Test fixture for dispute-window lifecycle tests.
+struct DisputeEnv<'a> {
+    env: Env,
+    client: PredinexContractClient<'a>,
+    admin: Address,
+    bettor: Address,
+    pool_id: u32,
+    token: Address,
+}
+
+/// Create a pool with one bet on outcome 0, set the freeze admin and a
+/// dispute window of `window_secs`, expire, and settle to outcome 0.
+fn dispute_setup(window_secs: u64) -> DisputeEnv<'static> {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(PredinexContract, ());
+    let client: PredinexContractClient<'static> =
+        PredinexContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
+
+    let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Pool"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Yes"),
+        &String::from_str(&env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    client.set_freeze_admin(&admin, &admin);
+    client.set_dispute_window(&admin, &window_secs);
+
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+    let bettor = Address::generate(&env);
+    token_admin_client.mint(&bettor, &10_000);
+    client.place_bet(&bettor, &pool_id, &0, &1_000, &None::<Address>);
+
+    env.ledger().with_mut(|l| l.timestamp = 3601);
+    client.settle_pool(&admin, &pool_id, &0);
+
+    DisputeEnv {
+        env,
+        client,
+        admin,
+        bettor,
+        pool_id,
+        token: token_id.address(),
+    }
+}
+
+/// D1: With a zero dispute window, settle_pool transitions directly to Settled —
+/// the resolution is immediately final and no deadline is stored.
+#[test]
+fn d1_zero_window_settles_directly_to_settled() {
+    let d = dispute_setup(0);
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+    assert_eq!(d.client.get_resolution_deadline(&d.pool_id), None);
+}
+
+/// D2: With a positive dispute window, settle_pool enters ResolutionPending
+/// and stores the resolution deadline.
+#[test]
+fn d2_positive_window_enters_resolution_pending() {
+    let d = dispute_setup(3600);
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::ResolutionPending(0));
+    // Deadline = settlement_time (3601) + window (3600) = 7201.
+    assert_eq!(d.client.get_resolution_deadline(&d.pool_id), Some(7201));
+}
+
+/// D3: A winner cannot claim while the dispute window is still open — the
+/// resolution is not final until the window closes.
+#[test]
+#[should_panic]
+fn d3_claim_blocked_during_dispute_window() {
+    let d = dispute_setup(3600);
+    // Still within the 3600-second window (settlement at 3601, deadline 7201).
+    d.client.claim_winnings(&d.bettor, &d.pool_id);
+}
+
+/// D4: finalize_resolution before the dispute window elapses is rejected.
+#[test]
+#[should_panic]
+fn d4_finalize_before_window_rejected() {
+    let d = dispute_setup(3600);
+    // Still within the window.
+    d.client.finalize_resolution(&d.pool_id);
+}
+
+/// D5: Unchallenged resolution — claiming after the window elapses
+/// auto-finalizes the pool and pays the winner.
+#[test]
+fn d5_auto_finalize_on_claim_after_window() {
+    let d = dispute_setup(3600);
+    let token = token::Client::new(&d.env, &d.token);
+
+    // Advance past the dispute window (deadline = 7201).
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    let winnings = d.client.claim_winnings(&d.bettor, &d.pool_id);
+    assert!(winnings > 0, "winner must receive a payout");
+
+    // Pool is now Settled (auto-finalized by the claim path).
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+
+    // Balance: 10_000 (minted) − 1_000 (bet) + winnings.
+    assert_eq!(token.balance(&d.bettor), 9_000 + winnings);
+}
+
+/// D6: Unchallenged resolution — explicit finalize_resolution after the
+/// window elapses transitions the pool to Settled, after which claims work.
+#[test]
+fn d6_explicit_finalize_after_window() {
+    let d = dispute_setup(3600);
+
+    // Advance past the dispute window.
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    d.client.finalize_resolution(&d.pool_id);
+
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+
+    // Claim now succeeds.
+    let token = token::Client::new(&d.env, &d.token);
+    let winnings = d.client.claim_winnings(&d.bettor, &d.pool_id);
+    assert!(winnings > 0);
+    assert_eq!(token.balance(&d.bettor), 9_000 + winnings);
+}
+
+/// D7: Challenged resolution — a challenge during the window is recorded,
+/// the pool enters Disputed status, and the challenge data is queryable.
+#[test]
+fn d7_challenge_recorded_during_window() {
+    let d = dispute_setup(3600);
+
+    // Challenge at settlement_time + 100 (within the 3600-second window).
+    d.env.ledger().with_mut(|l| l.timestamp = 3701);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Disputed);
+
+    // The challenge is recorded with the challenger and disputed outcome.
+    let challenges = d.client.get_pool_challenges(&d.pool_id);
+    assert_eq!(challenges.len(), 1);
+    let challenge = challenges.get(0).unwrap();
+    assert_eq!(challenge.challenger, d.admin);
+    assert_eq!(challenge.disputed_outcome, 0);
+    assert_eq!(challenge.timestamp, 3701);
+}
+
+/// D8: A challenge filed after the dispute window has elapsed is rejected.
+#[test]
+#[should_panic]
+fn d8_challenge_after_window_rejected() {
+    let d = dispute_setup(100);
+
+    // Advance past the 100-second window (settlement at 3601, deadline 3701).
+    d.env.ledger().with_mut(|l| l.timestamp = 3800);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+}
+
+/// D9: finalize_resolution on a pool that was challenged (Disputed) is
+/// rejected — the pool is not in ResolutionPending status.
+#[test]
+#[should_panic]
+fn d9_finalize_disputed_pool_rejected() {
+    let d = dispute_setup(3600);
+
+    // Challenge within the window.
+    d.env.ledger().with_mut(|l| l.timestamp = 3701);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+
+    // Advance past the window.
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    // Pool is Disputed, not ResolutionPending — finalize must fail.
+    d.client.finalize_resolution(&d.pool_id);
 }
 
 // ============================================================================

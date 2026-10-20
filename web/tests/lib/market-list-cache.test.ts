@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   clearMarketListCache,
   readMarketListCache,
@@ -7,6 +7,10 @@ import {
   MARKET_LIST_CACHE_TTL_MS,
   MARKET_LIST_CACHE_VERSION
 } from '../../app/lib/market-list-cache';
+import {
+  getCachedPoolExtMetadata,
+  invalidatePoolExtMetadataCache,
+} from '../../app/lib/soroban-read-api';
 import type { ProcessedMarket } from '../../app/lib/market-types';
 
 const sampleMarket: ProcessedMarket = {
@@ -66,6 +70,27 @@ describe('market-list-cache', () => {
     expect(res.isFresh).toBe(false);
     expect(res.markets).toEqual([]);
     expect(localStorage.getItem(MARKET_LIST_CACHE_KEY)).toBeNull();
+  });
+
+  it('caches pool metadata and invalidates it on demand', async () => {
+    const readSpy = vi.fn().mockResolvedValue({
+      resolutionCriteria: 'Resolved by oracle',
+      externalLinks: 'https://example.com',
+      coverImage: 'https://cdn.example.com/cover.png',
+    });
+
+    const cfg = { rpcUrl: 'https://example-rpc.test', contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC' };
+
+    const first = await getCachedPoolExtMetadata(42, cfg, readSpy);
+    const second = await getCachedPoolExtMetadata(42, cfg, readSpy);
+
+    expect(first).toMatchObject({ resolutionCriteria: 'Resolved by oracle' });
+    expect(second).toEqual(first);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+
+    invalidatePoolExtMetadataCache(42);
+    await getCachedPoolExtMetadata(42, cfg, readSpy);
+    expect(readSpy).toHaveBeenCalledTimes(2);
   });
 });
 

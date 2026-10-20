@@ -21,6 +21,7 @@ import type { Pool, PoolStatus } from "./types.js";
 import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
 import { withWorkerSpan } from "./tracing.js";
+import { withUpstreamTimeout } from "./upstream.js";
 
 /** Maximum ledger sequence validity window for simulation txns (5 min at ~5s/ledger) */
 const SIMULATE_TIMEOUT_SECS = 60;
@@ -39,12 +40,13 @@ async function simulateContractCall(
   args: xdr.ScVal[],
   config: BotConfig,
 ): Promise<unknown> {
+  const rpcTimeoutMs = config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000;
   return withWorkerSpan(
     `contract.call.${functionName}`,
     () =>
       withRetry(
         async () => {
-          const sourceAccount = await server.getAccount(sourcePublicKey);
+          const sourceAccount = await withUpstreamTimeout(server.getAccount(sourcePublicKey), "stellar-rpc", rpcTimeoutMs);
 
           const contract = new Contract(contractId);
           const tx = new TransactionBuilder(sourceAccount, {
@@ -55,7 +57,7 @@ async function simulateContractCall(
             .setTimeout(SIMULATE_TIMEOUT_SECS)
             .build();
 
-          const result = await server.simulateTransaction(tx);
+          const result = await withUpstreamTimeout(server.simulateTransaction(tx), "stellar-rpc", rpcTimeoutMs);
 
           if (rpc.Api.isSimulationError(result)) {
             throw new Error(
@@ -280,7 +282,7 @@ export class ContractClient {
     { healthy: true; latestLedger: number } | { healthy: false; error: string }
   > {
     try {
-      const health = await this.server.getHealth();
+      const health = await withUpstreamTimeout(this.server.getHealth(), "stellar-rpc", this.config.rpcTimeoutMs ?? this.config.upstreamTimeoutMs ?? 15_000);
       return { healthy: true, latestLedger: health.latestLedger };
     } catch (err) {
       return { healthy: false, error: String(err) };

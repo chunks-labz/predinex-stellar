@@ -1,21 +1,24 @@
 ﻿/**
  * Health check HTTP server for orchestrator monitoring.
  *
- * Exposes three JSON endpoints over Node's built-in `http` module (no
- * framework dependency needed for three small routes):
+ * Exposes five JSON endpoints over Node's built-in `http` module (no
+ * framework dependency needed for these small routes):
  *
- *   GET /health/live     - liveness probe. Always 200 while the process is
- *                           responding to requests. Use this for
- *                           container/orchestrator restart decisions.
+ *   GET /healthz         - liveness probe (canonical Kubernetes path, #1429).
+ *                           Always 200 while the process is responding to
+ *                           requests. Use this for container/orchestrator
+ *                           restart decisions.
  *
- *   GET /health/ready     - readiness probe. 200 if the bot can currently
- *                           reach the configured Stellar RPC endpoint,
- *                           503 otherwise. Use this to gate traffic /
- *                           mark the pod "not ready".
+ *   GET /readyz          - readiness probe (canonical Kubernetes path, #1429).
+ *                           200 if the bot can reach the Stellar RPC, 503
+ *                           otherwise. Use this to gate traffic / mark the
+ *                           pod "not ready".
  *
- *   GET /health/metrics    - basic operational metrics as JSON: last
- *                           settlement time, pending pool count, error
- *                           count, and poll-loop status.
+ *   GET /health/live     - legacy liveness alias (kept for backwards compat).
+ *   GET /health/ready    - legacy readiness alias (kept for backwards compat).
+ *   GET /health/metrics  - basic operational metrics as JSON: last settlement
+ *                           time, pending pool count, error count, and
+ *                           poll-loop status.
  *
  * The port is configurable via HEALTH_CHECK_PORT (default 3000). The whole
  * server can be disabled via HEALTH_CHECK_ENABLED=false.
@@ -102,10 +105,18 @@ export class HealthServer {
 
     try {
       switch (url.pathname) {
+        // ── Liveness ───────────────────────────────────────────────────────
+        // /healthz is the canonical Kubernetes liveness path (#1429).
+        // /health/live is kept for backwards compatibility.
+        case "/healthz":
         case "/health/live":
           sendJson(res, 200, { status: "ok" });
           return;
 
+        // ── Readiness ──────────────────────────────────────────────────────
+        // /readyz is the canonical Kubernetes readiness path (#1429).
+        // /health/ready is kept for backwards compatibility.
+        case "/readyz":
         case "/health/ready": {
           const health = await this.poller.checkReadiness();
           if (health.healthy) {

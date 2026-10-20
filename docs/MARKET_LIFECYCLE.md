@@ -107,3 +107,37 @@ The table below details every valid state transition, what triggers it, whether 
 4. **Terminal States**:
    - `Cancelled` and `Voided` are strictly terminal. No subsequent transition can reactivate the market.
    - In a `Voided` market, winnings cannot be claimed; instead, all bettors can call `claim_refund` to receive 100% of their deposited principal.
+
+---
+
+## 6. On-Chain vs Off-Chain Responsibilities
+
+The market lifecycle is **owned by the Soroban contract**; everything off-chain is a projection of it.
+
+| Concern | On-chain (`contracts/predinex`) | Off-chain (`api/`, `web/`) |
+|---|---|---|
+| State ownership | The `PoolStatus` enum is the single source of truth. Only contract entrypoints may transition a pool. | Never mutates status. Reads are served from indexed projections and refreshed after each transaction confirms. |
+| Transitions | `create_pool`, `activate_scheduled_pool`, `freeze_pool` / `unfreeze_pool`, `settle_pool`, `dispute_pool`, `void_pool`, `cancel_pool` / `cancel_scheduled_pool`. | Submits transactions on behalf of the wallet holder, then polls/re-indexes until the emitted event is observed. |
+| Authorization | Enforced by the roles in §4 (creator, freeze admin, treasury admin, assigned settler). | Surfaces only the actions the connected wallet may take; the contract remains the enforcement point. |
+| Events | Emits the events listed in §3 (`create_pool`, `pool_frozen`, `settle_pool`, …). | The HTTP indexer (`api/src/routes/markets.ts`) consumes these events to maintain the read model (`open` / `settled` / `voided` / `cancelled` / `archived` in `api/src/services/market-query.ts`). |
+| Terminality & refunds | `claim_refund` / `claim_winnings` move funds; terminal states are enforced in the contract. | Displays claim eligibility; a claim is only shown as available once the projected status allows it. |
+| Soft deletes | Not represented on-chain. | The API supports archiving resolved markets (soft delete); archived markets are hidden from default listings but never alter the on-chain status. |
+
+**Rule of thumb:** if a transition moves funds or changes who may act, it happens on-chain; if it only changes what users see, it happens off-chain.
+
+---
+
+## 7. HTTP API Status Mapping
+
+The REST read model uses a smaller vocabulary than the contract (`MarketStatus` in `api/src/services/market-query.ts`). When projecting on-chain `PoolStatus` into API records, use this mapping:
+
+| Contract `PoolStatus` | API `MarketStatus` | Notes |
+|---|---|---|
+| `Scheduled(open_at)` | `open` | Scheduled markets are listed as `open`; the contract rejects bets until `open_at`. |
+| `Open` | `open` | Accepting bets. |
+| `Frozen` | `open` | Frozen markets stay listed as `open`; the contract blocks bets/claims while frozen. |
+| `Settled(_)` | `settled` | |
+| `Disputed` | `settled` | Projections are refreshed once the dispute resolves. |
+| `Voided` | `voided` | Refund-eligible. |
+| `Cancelled` | `cancelled` | |
+| *(any terminal state)* | `archived` | Off-chain soft delete via `POST /api/markets/admin/archive-resolved`; never mutates on-chain state. |

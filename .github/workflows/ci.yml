@@ -14,6 +14,26 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  migration-rollback:
+    name: Migration Rollback Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: predinex_ci
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d predinex_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations up and down, then verify schema identity
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_ci
+        run: bash scripts/verify-migrations.sh
+
   lint-and-format:
     name: Lint & Format Gate
     runs-on: ubuntu-latest
@@ -110,9 +130,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           # Budget definitions (KB). Update intentionally with a comment explaining the reason.
-          # Mainline bundle increased after recent UI + data-surface additions (dashboard cards,
-          # transactions page, favorites hook, and related adapters). Keep a small buffer over the
-          # current baseline so PR checks stay stable; tighten again once we do chunk splitting.
+          # We start from the current build baseline and fail on regression so route-level growth remains visible.
           BUDGET_TOTAL_KB=5800
           BUDGET_JS_KB=5000
           BUDGET_CSS_KB=80
@@ -146,6 +164,20 @@ jobs:
           check_budget "Total static" "$TOTAL_SIZE" "$BUDGET_TOTAL_KB"
           check_budget "JavaScript"   "$JS_SIZE"    "$BUDGET_JS_KB"
           check_budget "CSS"          "$CSS_SIZE"   "$BUDGET_CSS_KB"
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Per-route bundle sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Route | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|------|" >> "$GITHUB_STEP_SUMMARY"
+          if [ -d ".next/server/app" ]; then
+            find .next/server/app -mindepth 1 -maxdepth 2 -type d 2>/dev/null | sort | while read -r dir; do
+              size=$(find "$dir" -type f -exec du -k {} + 2>/dev/null | awk '{s+=$1} END {printf "%d", s + 0}')
+              if [ -n "$size" ] && [ "$size" -gt 0 ]; then
+                route="${dir#./.next/server/app/}"
+                printf "| %s | %sKB |\n" "$route" "$size" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+          fi
 
           if [ "$FAILED" -eq 1 ]; then
             echo ""
@@ -250,6 +282,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check API schema snapshot
+        run: npm run schema:check
 
   oracle-checks:
     name: Oracle Checks

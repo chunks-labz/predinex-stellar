@@ -48,6 +48,8 @@ import { Executor } from "./executor.js";
 import { logger } from "./logger.js";
 import { injectWorkerTraceHeaders, withWorkerSpan } from "./tracing.js";
 import { notify } from "./webhook.js";
+import { fetchOracleWithRetry } from "./oracle-client.js";
+import { getUpstreamTimeoutMetrics } from "./upstream-metrics.js";
 
 // ─── Oracle hook ─────────────────────────────────────────────────────────────
 
@@ -89,6 +91,7 @@ async function queryOracle(
   oracleSecret: string | null,
   poolId: number,
   pool: Pool,
+  config: BotConfig,
   signal?: AbortSignal,
 ): Promise<number | null | undefined> {
   return withWorkerSpan(
@@ -106,10 +109,9 @@ async function queryOracle(
 
       let response: Response;
       try {
-        response = await fetch(url, {
+        response = await fetchOracleWithRetry(url, {
           headers,
-          signal: signal ?? AbortSignal.timeout(10_000),
-        });
+        }, config, { signal });
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
           logger.info("Oracle request cancelled (cycle shutdown) — will try fallback", {
@@ -230,6 +232,7 @@ export async function resolveWinningOutcome(
       config.oracleSecret,
       poolId,
       pool,
+      config,
       signal,
     );
 
@@ -647,6 +650,7 @@ export class Poller {
       pendingPoolsCount: this.pendingPoolsCount,
       errorCount: this.errorCount,
       trackedFailurePools: this.persistentFailures.size,
+      upstreamTimeouts: getUpstreamTimeoutMetrics(),
     };
   }
 }

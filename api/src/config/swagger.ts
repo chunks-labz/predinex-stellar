@@ -490,7 +490,7 @@ export const openApiDoc = {
   info: {
     title: 'PrediNx Budget Planner API',
     version: '1.0.0',
-    description: 'RESTful API for PrediNx prediction market protocol - budget, compliance, emergency, gas estimation, insurance, referral, reputation, and simulation modules',
+    description: 'RESTful API for PrediNx prediction market protocol. Public routes are rate limited per IP or registered API key. Configure RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, and RATE_LIMIT_STRICT_MAX_REQUESTS; throttled requests return 429 with Retry-After.',
     contact: {
       name: 'PrediNx Dev Team',
       email: 'predinex-dev@stellar.org',
@@ -514,14 +514,20 @@ export const openApiDoc = {
   paths: {
     '/health': {
       get: {
-        summary: 'Liveness probe',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/health': {
       get: {
-        summary: 'Liveness probe under the API prefix',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe under the API prefix',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/openapi.json': {
@@ -694,6 +700,20 @@ export const openApiDoc = {
       },
       post: {
         summary: 'Create a market (validated; on-chain submission not yet implemented)',
+        description:
+          'Optional `Idempotency-Key` header (#1466): retries with the same key and payload replay the ' +
+          'stored response (`Idempotency-Replayed: true`); a different payload under the same key returns ' +
+          '409 `IDEMPOTENCY_KEY_CONFLICT`.',
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', maxLength: 255 },
+            description:
+              'Optional caller-chosen key that makes market creation safe to retry within the TTL window.',
+          },
+        ],
         requestBody: {
           required: true,
           content: {
@@ -722,7 +742,73 @@ export const openApiDoc = {
         responses: {
           '201': { description: 'Market created' },
           '400': { description: 'Invalid market parameters; error.details lists each offending field' },
+          '409': {
+            description:
+              'IDEMPOTENCY_KEY_CONFLICT (key reused with a different payload) or ' +
+              'IDEMPOTENCY_REQUEST_IN_PROGRESS (concurrent duplicate)',
+          },
           '501': { description: 'On-chain market creation is not yet implemented' },
+        },
+      },
+    },
+    '/api/markets/{id}/trades/export': {
+      get: {
+        summary: 'Export the authenticated user’s market trades as CSV',
+        description:
+          'Returns only trades for the Stellar account bound to the caller’s USER_API_KEYS entry. ' +
+          'The deployment must inject a trade-history source; otherwise the endpoint returns 503.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'side',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['buy', 'sell'] },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Rows in this export page (default 100, maximum 1,000)',
+            schema: { type: 'integer', minimum: 1, maximum: 1000, default: 100 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'RFC 4180 CSV attachment',
+            content: { 'text/csv': { schema: { type: 'string', format: 'binary' } } },
+          },
+          '400': { description: 'Invalid market id or export filters' },
+          '401': { description: 'User API key with a bound Stellar address required' },
+          '404': { description: 'Market not found' },
+          '429': { description: 'Rate limited; see the Retry-After header' },
+          '503': { description: 'Trade-history source is not configured' },
         },
       },
     },
@@ -775,8 +861,8 @@ export const openApiDoc = {
       get: {
         summary: 'Cancellation/restoration audit history (admin only)',
         description:
-          'Newest-first audit entries for every market cancellation and restoration. Optionally filter to one ' +
-          'market with `marketId`.',
+          'Newest-first audit entries for every market cancellation and restoration. Supports cursor pagination + ' +
+          'filters for market, actor, action, and date range. Example: GET /api/markets/admin/audit?actor=admin&action=cancelled&from=2025-01-01T00:00:00.000Z&limit=50',
         security: [{ apiKey: [] }],
         parameters: [
           {
@@ -787,10 +873,46 @@ export const openApiDoc = {
             schema: { type: 'integer', minimum: 0 },
           },
           {
+            name: 'actor',
+            in: 'query',
+            required: false,
+            description: 'Case-insensitive substring filter on the actor address or admin name',
+            schema: { type: 'string', example: 'admin' },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            required: false,
+            description: 'Filter by audit action type',
+            schema: { type: 'string', enum: ['cancelled', 'restored'], example: 'cancelled' },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive lower bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-01-01T00:00:00.000Z' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive upper bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-12-31T23:59:59.999Z' },
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'Opaque cursor for the next page; use the previous response\'s nextCursor value',
+            schema: { type: 'string', example: '42' },
+          },
+          {
             name: 'limit',
             in: 'query',
             required: false,
-            schema: { type: 'integer', minimum: 1, default: 20 },
+            description: 'Maximum records to return; capped server-side at 100',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
           },
           {
             name: 'offset',
@@ -812,7 +934,23 @@ export const openApiDoc = {
                       type: 'array',
                       items: { $ref: '#/components/schemas/MarketAuditEntry' },
                     },
-                    pagination: { $ref: '#/components/schemas/MarketPagination' },
+                    pagination: {
+                      type: 'object',
+                      properties: {
+                        total: { type: 'integer', example: 42 },
+                        limit: { type: 'integer', example: 20 },
+                        offset: { type: 'integer', example: 0 },
+                        count: { type: 'integer', example: 20 },
+                        hasMore: { type: 'boolean', example: true },
+                        nextOffset: { type: 'integer', nullable: true, example: 20 },
+                        prevOffset: { type: 'integer', nullable: true, example: null },
+                        page: { type: 'integer', example: 1 },
+                        pageSize: { type: 'integer', example: 20 },
+                        nextCursor: { type: 'string', nullable: true, example: '42' },
+                        prevCursor: { type: 'string', nullable: true, example: null },
+                        cursor: { type: 'string', nullable: true, example: '12' },
+                      },
+                    },
                     timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
                   },
                 },

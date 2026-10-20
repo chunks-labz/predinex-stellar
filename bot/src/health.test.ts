@@ -43,7 +43,21 @@ describe("HealthServer", () => {
     await server?.stop();
   });
 
-  it("responds 200 on /health/live", async () => {
+  // ── Liveness probe (#1429) ─────────────────────────────────────────────────
+
+  it("responds 200 on /healthz (canonical liveness probe)", async () => {
+    server = new HealthServer(makeFakePoller(), 0);
+    await server.start();
+    baseUrl = `http://127.0.0.1:${server.boundPort}`;
+
+    const res = await fetch(`${baseUrl}/healthz`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("ok");
+  });
+
+  it("responds 200 on /health/live (legacy liveness alias)", async () => {
     server = new HealthServer(makeFakePoller(), 0);
     await server.start();
     baseUrl = `http://127.0.0.1:${server.boundPort}`;
@@ -55,7 +69,43 @@ describe("HealthServer", () => {
     expect(body.status).toBe("ok");
   });
 
-  it("responds 200 on /health/ready when RPC is healthy", async () => {
+  // ── Readiness probe (#1429) ────────────────────────────────────────────────
+
+  it("responds 200 on /readyz when RPC is healthy (canonical readiness probe)", async () => {
+    server = new HealthServer(
+      makeFakePoller({ readiness: { healthy: true, latestLedger: 999 } }),
+      0,
+    );
+    await server.start();
+    baseUrl = `http://127.0.0.1:${server.boundPort}`;
+
+    const res = await fetch(`${baseUrl}/readyz`);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.rpc.connected).toBe(true);
+    expect(body.rpc.latestLedger).toBe(999);
+  });
+
+  it("responds 503 on /readyz when RPC is unreachable", async () => {
+    server = new HealthServer(
+      makeFakePoller({
+        readiness: { healthy: false, error: "connection refused" },
+      }),
+      0,
+    );
+    await server.start();
+    baseUrl = `http://127.0.0.1:${server.boundPort}`;
+
+    const res = await fetch(`${baseUrl}/readyz`);
+    const body = await res.json();
+
+    expect(res.status).toBe(503);
+    expect(body.rpc.connected).toBe(false);
+    expect(body.rpc.error).toContain("connection refused");
+  });
+
+  it("responds 200 on /health/ready when RPC is healthy (legacy alias)", async () => {
     server = new HealthServer(
       makeFakePoller({ readiness: { healthy: true, latestLedger: 999 } }),
       0,
@@ -71,7 +121,7 @@ describe("HealthServer", () => {
     expect(body.rpc.latestLedger).toBe(999);
   });
 
-  it("responds 503 on /health/ready when RPC is unreachable", async () => {
+  it("responds 503 on /health/ready when RPC is unreachable (legacy alias)", async () => {
     server = new HealthServer(
       makeFakePoller({
         readiness: { healthy: false, error: "connection refused" },
@@ -88,6 +138,8 @@ describe("HealthServer", () => {
     expect(body.rpc.connected).toBe(false);
     expect(body.rpc.error).toContain("connection refused");
   });
+
+  // ── Metrics ────────────────────────────────────────────────────────────────
 
   it("returns metrics as JSON on /health/metrics", async () => {
     server = new HealthServer(
@@ -113,6 +165,8 @@ describe("HealthServer", () => {
     expect(body.pendingPoolsCount).toBe(7);
     expect(body.errorCount).toBe(2);
   });
+
+  // ── Unknown paths ──────────────────────────────────────────────────────────
 
   it("responds 404 for unknown paths", async () => {
     server = new HealthServer(makeFakePoller(), 0);

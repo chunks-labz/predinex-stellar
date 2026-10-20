@@ -31,6 +31,16 @@
  * field-level `details`. Until an on-chain creator is wired in, valid
  * payloads receive 501, mirroring the referral route.
  *
+ * Idempotency (#1466):
+ *   POST /api/markets accepts an optional `Idempotency-Key` header. The first
+ *   request with a key executes normally and its response is stored keyed by
+ *   `key + caller` for a TTL window; retries with the same key and payload
+ *   replay the stored response (`Idempotency-Replayed: true`), a different
+ *   payload under the same key is rejected with 409
+ *   `IDEMPOTENCY_KEY_CONFLICT`, and concurrent duplicates get 409
+ *   `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Requests without the header are
+ *   unaffected.
+ *
  * Response envelope:
  *   {
  *     success: true,
@@ -48,8 +58,25 @@ import {
   MarketStatus,
   parseMarketListQuery,
 } from '../services/market-query.js';
+
+const ADMIN_AUDIT_LOG_DEFAULT_LIMIT = 20;
+const ADMIN_AUDIT_LOG_MAX_LIMIT = 100;
+
+function parseDateFilter(value: unknown, name: string): Date | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${name} must be a valid ISO date string`);
+  }
+  return date;
+}
 import { AuthContext, sharedAuthValidator } from '../middleware/auth.js';
 import { withSpan } from '../middleware/tracing.js';
+import {
+  createIdempotencyMiddleware,
+  IdempotencyStore,
+} from '../middleware/idempotency.js';
 import {
   CreateMarketRequest,
   validateCreateMarket,
@@ -81,6 +108,82 @@ export interface MarketSummary {
   archivedAt?: string;
   /** Actor that archived the market; only present on archived markets. */
   archivedBy?: string;
+}
+
+export type MarketTradeSide = 'buy' | 'sell';
+
+export interface MarketTradeRecord {
+  tradeId: string;
+  marketId: number;
+  userAddress: string;
+  side: MarketTradeSide;
+  outcome: string;
+  amount: string;
+  price: string;
+  /** Unix timestamp in seconds. */
+  timestamp: number;
+  transactionHash: string;
+}
+
+export interface TradeExportFilters {
+  from?: number;
+  to?: number;
+  side?: MarketTradeSide;
+}
+
+/** Trade source must scope its query to both the requested market and caller, newest first. */
+export interface TradeHistorySource {
+  listTrades(
+    marketId: number,
+    userAddress: string,
+    filters: TradeExportFilters
+  ): Promise<MarketTradeRecord[]>;
+}
+
+export class TradeHistoryNotConfiguredError extends Error {
+  constructor() {
+    super('Market trade history source is not configured');
+    this.name = 'TradeHistoryNotConfiguredError';
+  }
+}
+
+/** Explicit unavailable source used until an indexer/store is wired by the deployment. */
+export class UnconfiguredTradeHistorySource implements TradeHistorySource {
+  async listTrades(): Promise<MarketTradeRecord[]> {
+    throw new TradeHistoryNotConfiguredError();
+  }
+}
+
+/** In-memory source for development and tests; production should inject an indexed source. */
+export class InMemoryTradeHistorySource implements TradeHistorySource {
+  private trades: MarketTradeRecord[];
+
+  constructor(trades: MarketTradeRecord[] = []) {
+    this.trades = [...trades];
+  }
+
+  setTrades(trades: MarketTradeRecord[]): void {
+    this.trades = [...trades];
+  }
+
+  async listTrades(
+    marketId: number,
+    userAddress: string,
+    filters: TradeExportFilters
+  ): Promise<MarketTradeRecord[]> {
+    return this.trades
+      .filter((trade) => {
+        const timestampMs = trade.timestamp * 1000;
+        return (
+          trade.marketId === marketId &&
+          trade.userAddress === userAddress &&
+          (!filters.side || trade.side === filters.side) &&
+          (filters.from === undefined || timestampMs >= filters.from) &&
+          (filters.to === undefined || timestampMs <= filters.to)
+        );
+      })
+      .sort((a, b) => b.timestamp - a.timestamp);
+  }
 }
 
 export interface MarketMetrics {
@@ -412,13 +515,115 @@ export class InMemoryMarketSource implements MarketSource {
 export type MarketCreator = (req: CreateMarketRequest) => Promise<MarketSummary>;
 
 export const defaultMarketSource = new InMemoryMarketSource();
+export const defaultTradeHistorySource = new UnconfiguredTradeHistorySource();
+
+export interface MarketsRouterOptions {
+  /** Store backing the optional `Idempotency-Key` header on POST /. */
+  idempotencyStore?: IdempotencyStore;
+}
 
 export function createMarketsRouter(
   source: MarketSource = defaultMarketSource,
-  creator?: MarketCreator
+  creator?: MarketCreator,
+  options: MarketsRouterOptions = {}
 ): Router {
   const router = Router();
+  const idempotency = createIdempotencyMiddleware({
+    store: options.idempotencyStore,
+  });
   router.use(rateLimitMiddleware);
+
+  router.get('/:id/trades/export', async (req: Request, res: Response, next: NextFunction) => {
+    const auth = authenticate(req);
+    if (!auth.subjectAddress) {
+      sendError(res, 401, 'UNAUTHORIZED', 'A user API key bound to a Stellar address is required');
+      return;
+    }
+
+    const parsedId = parseMarketId(req.params.id);
+    if (!parsedId.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'id must be a positive integer');
+      return;
+    }
+
+    const parsedFilters = parseTradeExportFilters(req.query as Record<string, unknown>);
+    const parsedPage = parsePagination(req.query as Record<string, unknown>, {
+      limit: 100,
+      maxLimit: 1000,
+    });
+    if (!parsedFilters.ok || !parsedPage.ok) {
+      sendError(res, 400, 'VALIDATION_ERROR', 'Invalid trade export query parameters', [
+        ...(parsedFilters.ok ? [] : parsedFilters.errors),
+        ...(parsedPage.ok ? [] : parsedPage.errors),
+      ]);
+      return;
+    }
+
+    try {
+      if (source.get && !(await source.get(parsedId.id))) {
+        sendError(res, 404, 'NOT_FOUND', `Market ${parsedId.id} not found`);
+        return;
+      }
+
+      const trades = await tradeHistory.listTrades(
+        parsedId.id,
+        auth.subjectAddress,
+        parsedFilters.filters
+      );
+      const page = parsedPage.params;
+      const rows = trades
+        // Defense in depth: do not trust a data source to enforce caller scoping.
+        .filter(
+          (trade) =>
+            trade.marketId === parsedId.id &&
+            trade.userAddress === auth.subjectAddress &&
+            (!parsedFilters.filters.side || trade.side === parsedFilters.filters.side) &&
+            (parsedFilters.filters.from === undefined ||
+              trade.timestamp * 1000 >= parsedFilters.filters.from) &&
+            (parsedFilters.filters.to === undefined ||
+              trade.timestamp * 1000 <= parsedFilters.filters.to)
+        )
+        .slice(page.offset, page.offset + page.limit);
+      const timestampedRows = rows.map((trade) => {
+        const timestamp = new Date(trade.timestamp * 1000);
+        if (!Number.isFinite(timestamp.getTime())) {
+          throw new Error(`Trade source returned an invalid timestamp for trade ${trade.tradeId}`);
+        }
+        return { trade, timestamp: timestamp.toISOString() };
+      });
+
+      res.status(200);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="market-${parsedId.id}-trades.csv"`
+      );
+      res.setHeader('Cache-Control', 'private, no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.write('trade_id,market_id,user_address,side,outcome,amount,price,timestamp,tx_hash\r\n');
+      for (const { trade, timestamp } of timestampedRows) {
+        const fields: Array<string | number> = [
+          trade.tradeId,
+          trade.marketId,
+          trade.userAddress,
+          trade.side,
+          trade.outcome,
+          trade.amount,
+          trade.price,
+          timestamp,
+          trade.transactionHash,
+        ];
+        res.write(`${fields.map(escapeCsvField).join(',')}\r\n`);
+      }
+      res.end();
+    } catch (err) {
+      if (err instanceof TradeHistoryNotConfiguredError) {
+        sendError(res, 503, 'TRADE_HISTORY_UNAVAILABLE', err.message);
+        return;
+      }
+      next(err);
+    }
+  });
 
   router.get('/', async (req: Request, res: Response, next: NextFunction) => {
     const parsedPage = parsePagination(req.query as Record<string, unknown>);
@@ -547,7 +752,10 @@ export function createMarketsRouter(
       return;
     }
 
-    const parsedPage = parsePagination(req.query as Record<string, unknown>);
+    const parsedPage = parsePagination(req.query as Record<string, unknown>, {
+      limit: ADMIN_AUDIT_LOG_DEFAULT_LIMIT,
+      maxLimit: ADMIN_AUDIT_LOG_MAX_LIMIT,
+    });
     if (!parsedPage.ok) {
       sendError(res, 400, 'VALIDATION_ERROR', 'Invalid pagination parameters', parsedPage.errors);
       return;
@@ -563,16 +771,79 @@ export function createMarketsRouter(
       marketId = Number(raw);
     }
 
+    let actor: string | undefined;
+    if (req.query.actor !== undefined) {
+      const raw = req.query.actor;
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'actor must be a non-empty string');
+        return;
+      }
+      actor = raw.trim();
+    }
+
+    let action: 'cancelled' | 'restored' | undefined;
+    if (req.query.action !== undefined) {
+      const raw = req.query.action;
+      if (typeof raw !== 'string') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'action must be cancelled or restored');
+        return;
+      }
+      const normalized = raw.toLowerCase();
+      if (normalized !== 'cancelled' && normalized !== 'restored') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'action must be cancelled or restored');
+        return;
+      }
+      action = normalized;
+    }
+
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
+    try {
+      fromDate = parseDateFilter(req.query.from, 'from');
+      toDate = parseDateFilter(req.query.to, 'to');
+    } catch (error: any) {
+      sendError(res, 400, 'VALIDATION_ERROR', error.message);
+      return;
+    }
+
+    let cursorId: number | undefined;
+    if (req.query.cursor !== undefined) {
+      const raw = req.query.cursor;
+      if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
+        sendError(res, 400, 'VALIDATION_ERROR', 'cursor must be a non-negative integer');
+        return;
+      }
+      cursorId = Number(raw);
+    }
+
     try {
       const { params } = parsedPage;
       const entries = source.getAuditLog
         ? await source.getAuditLog(marketId)
         : [];
-      const page = entries.slice(params.offset, params.offset + params.limit);
+
+      const filteredEntries = entries.filter((entry) => {
+        if (actor && !entry.actor.toLowerCase().includes(actor.toLowerCase())) return false;
+        if (action && entry.action !== action) return false;
+        if (fromDate && new Date(entry.timestamp).getTime() < fromDate.getTime()) return false;
+        if (toDate && new Date(entry.timestamp).getTime() > toDate.getTime()) return false;
+        return true;
+      });
+
+      const cursorOffset = cursorId === undefined ? 0 : filteredEntries.findIndex((entry) => entry.id === cursorId) + 1;
+      const page = filteredEntries.slice(cursorOffset, cursorOffset + params.limit);
+      const nextCursor = cursorOffset + page.length < filteredEntries.length ? String(page[page.length - 1]?.id ?? '') : null;
+      const prevCursor = cursorId === undefined ? null : String(filteredEntries[Math.max(0, cursorOffset - params.limit)]?.id ?? null);
+
       res.json({
         success: true,
         data: page,
-        pagination: buildPageMeta(entries.length, params, page.length),
+        pagination: {
+          ...buildPageMeta(filteredEntries.length, { ...params, offset: cursorOffset }, page.length),
+          nextCursor,
+          prevCursor,
+          cursor: cursorId !== undefined ? String(cursorId) : null,
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -698,7 +969,7 @@ export function createMarketsRouter(
     }
   });
 
-  router.post('/', strictRateLimitMiddleware, async (req: Request, res: Response, next: NextFunction) => {
+  router.post('/', strictRateLimitMiddleware, idempotency, async (req: Request, res: Response, next: NextFunction) => {
     const validation = validateCreateMarket(req.body);
     if (!validation.ok) {
       sendError(res, 400, 'VALIDATION_ERROR', 'Invalid market creation request', validation.errors);
@@ -741,6 +1012,55 @@ function sendError(
     },
     timestamp: new Date().toISOString(),
   });
+}
+
+function parseTradeExportFilters(
+  query: Record<string, unknown>
+): { ok: true; filters: TradeExportFilters } | { ok: false; errors: string[] } {
+  const errors: string[] = [];
+  const filters: TradeExportFilters = {};
+
+  for (const [name, endOfDate, key] of [
+    ['from', false, 'from'],
+    ['to', true, 'to'],
+  ] as const) {
+    const raw = query[name];
+    if (raw === undefined) continue;
+    if (typeof raw !== 'string') {
+      errors.push(`${name} must be a valid ISO date or timestamp`);
+      continue;
+    }
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(raw);
+    const timestamp = Date.parse(dateOnly && endOfDate ? `${raw}T23:59:59.999Z` : raw);
+    if (!Number.isFinite(timestamp)) {
+      errors.push(`${name} must be a valid ISO date or timestamp`);
+      continue;
+    }
+    filters[key] = timestamp;
+  }
+
+  if (query.side !== undefined) {
+    if (query.side !== 'buy' && query.side !== 'sell') {
+      errors.push('side must be "buy" or "sell"');
+    } else {
+      filters.side = query.side;
+    }
+  }
+
+  if (
+    filters.from !== undefined &&
+    filters.to !== undefined &&
+    filters.from > filters.to
+  ) {
+    errors.push('from must be earlier than or equal to to');
+  }
+
+  return errors.length ? { ok: false, errors } : { ok: true, filters };
+}
+
+function escapeCsvField(value: string | number): string {
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function authenticate(req: Request): AuthContext {

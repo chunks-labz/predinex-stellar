@@ -45,6 +45,17 @@ DRY_RUN=true npm start
 | `DEFAULT_WINNING_OUTCOME` | — | `0` | Winning outcome index used when `AUTO_SETTLE_ENABLED=true` |
 | `MAX_RETRIES` | — | `3` | Max transaction retry attempts |
 | `RETRY_BASE_DELAY_MS` | — | `1000` | Base delay for exponential back-off (ms) |
+| `ORACLE_URL` | — | — | Trusted resolution oracle base URL |
+| `ORACLE_SECRET` | — | — | Optional bearer credential sent to the oracle |
+| `ORACLE_FALLBACK_TO_DEFAULT` | — | `false` | Allow unresolved pools to use `DEFAULT_WINNING_OUTCOME` |
+| `ORACLE_REQUESTS_PER_SECOND` | — | `5` | Token refill rate per oracle provider origin |
+| `ORACLE_RATE_LIMIT_BURST` | — | `5` | Maximum initial token bucket capacity per provider |
+| `ORACLE_MAX_CONCURRENCY` | — | `2` | Maximum simultaneous requests to one provider |
+| `ORACLE_RATE_LIMIT_MODE` | — | `wait` | `wait` for budget or `reject` excess requests |
+| `ORACLE_RETRY_MAX_ATTEMPTS` | — | `3` | Total attempts for transient oracle errors, including the first |
+| `ORACLE_RETRY_BASE_DELAY_MS` | — | `500` | Exponential retry delay base (ms), with jitter |
+| `ORACLE_RETRY_MAX_DELAY_MS` | — | `10000` | Maximum retry delay (ms) |
+| `ORACLE_REQUEST_TIMEOUT_MS` | — | `10000` | Timeout for an individual oracle request |
 | `WEBHOOK_URL` | — | — | Optional POST endpoint for settlement notifications |
 | `WEBHOOK_SECRET` | — | — | HMAC-SHA256 secret for webhook signature header |
 | `LOG_LEVEL` | — | `info` | `debug`, `info`, `warn`, `error` |
@@ -65,23 +76,24 @@ submit any transactions. A human admin can review the output and call
 To enable automatic settlement, set `AUTO_SETTLE_ENABLED=true`. The bot will
 then settle every expired pool using `DEFAULT_WINNING_OUTCOME`.
 
-**For production markets with real funds you MUST integrate an oracle.** Edit
-`bot/src/poller.ts` and implement the `resolveWinningOutcome()` function:
-
-```typescript
-async function resolveWinningOutcome(
-  poolId: number,
-  pool: Pool,
-  config: BotConfig,
-): Promise<number | null> {
-  // Call your oracle or price feed here
-  const res = await fetch(`https://oracle.example.com/resolve/${poolId}`);
-  const { outcome } = await res.json() as { outcome: number };
-  return outcome; // 0 = outcome_a wins, 1 = outcome_b wins
-}
-```
+**For production markets with real funds you MUST configure a trusted oracle.**
+Set `ORACLE_URL` to its base URL; the bot requests
+`GET {ORACLE_URL}/resolve/{poolId}` and accepts `{ "outcome": 0 }` or
+`{ "outcome": 1 }`. Set `ORACLE_SECRET` if the provider requires an
+`Authorization` header. These requests use the built-in rate-limited,
+timeout-bounded retry client; do not replace them with an unprotected `fetch`.
 
 Return `null` to skip a pool (it will be logged as needing manual settlement).
+
+Oracle HTTP requests share a token bucket and concurrency cap per provider
+origin (scheme, host, and port). Requests wait for budget by default; set
+`ORACLE_RATE_LIMIT_MODE=reject` to skip a request immediately when its provider
+budget is unavailable. The fetcher retries network failures, timeouts, HTTP 429,
+and HTTP 5xx responses up to `ORACLE_RETRY_MAX_ATTEMPTS` total attempts. Delays
+use exponential backoff with jitter, honor `Retry-After` where supplied, and
+are bounded by `ORACLE_RETRY_MAX_DELAY_MS`. Retries, waits, and fail-fast
+rejections are written to the bot's structured logs. Other HTTP 4xx responses
+continue directly to the existing on-chain/default fallback chain.
 
 ---
 

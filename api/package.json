@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
-    "format": "prettier --write \"src/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\"",
+    "schema:update": "node --experimental-strip-types scripts/generate-schema-snapshot.mjs",
+    "schema:check": "node --experimental-strip-types scripts/generate-schema-snapshot.mjs --check"
   },
   "keywords": [
     "predinex",

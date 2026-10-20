@@ -1381,6 +1381,60 @@ export interface PoolExtendedMetadata {
   coverImage?: string;
 }
 
+const POOL_EXT_METADATA_CACHE_KEY_PREFIX = 'predinex_pool_ext_metadata_';
+const POOL_EXT_METADATA_TTL_MS = 5 * 60 * 1000;
+const POOL_EXT_METADATA_STALE_MS = 60 * 60 * 1000;
+
+function getPoolExtMetadataCacheKey(poolId: number): string {
+  return `${POOL_EXT_METADATA_CACHE_KEY_PREFIX}${poolId}`;
+}
+
+function readPoolExtMetadataCache(poolId: number): PoolExtendedMetadata | null {
+  if (typeof window === 'undefined') return null;
+  const key = getPoolExtMetadataCacheKey(poolId);
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data?: PoolExtendedMetadata; cachedAt?: number };
+    if (!parsed.data || typeof parsed.cachedAt !== 'number') {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    if (Date.now() - parsed.cachedAt > POOL_EXT_METADATA_STALE_MS) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writePoolExtMetadataCache(poolId: number, data: PoolExtendedMetadata | null): void {
+  if (typeof window === 'undefined' || !data) return;
+  const key = getPoolExtMetadataCacheKey(poolId);
+  try {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        cachedAt: Date.now(),
+        data,
+      })
+    );
+  } catch {
+    // Non-fatal best-effort cache.
+  }
+}
+
+export function invalidatePoolExtMetadataCache(poolId: number): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(getPoolExtMetadataCacheKey(poolId));
+  } catch {
+    // Non-fatal best-effort cache invalidation.
+  }
+}
+
 /**
  * Read optional extended metadata for a pool via `get_pool_ext_metadata`.
  * Returns null when no metadata is stored or the read fails.
@@ -1404,4 +1458,40 @@ export async function getPoolExtMetadataFromSoroban(
     log.error('Failed to fetch pool ext metadata from Soroban:', e);
     throw e;
   }
+}
+
+export async function getCachedPoolExtMetadata(
+  poolId: number,
+  config?: SorobanReadConfig,
+  fetcher: (poolId: number, config?: SorobanReadConfig) => Promise<PoolExtendedMetadata | null> = getPoolExtMetadataFromSoroban,
+): Promise<PoolExtendedMetadata | null> {
+  const cfg = config ?? getSorobanConfig();
+  const cached = readPoolExtMetadataCache(poolId);
+  const now = Date.now();
+  const cacheEntry = typeof window !== 'undefined'
+    ? window.localStorage.getItem(getPoolExtMetadataCacheKey(poolId))
+    : null;
+
+  if (cached && cacheEntry) {
+    try {
+      const parsed = JSON.parse(cacheEntry) as { cachedAt?: number };
+      if (typeof parsed.cachedAt === 'number' && now - parsed.cachedAt <= POOL_EXT_METADATA_TTL_MS) {
+        return cached;
+      }
+      if (typeof parsed.cachedAt === 'number' && now - parsed.cachedAt <= POOL_EXT_METADATA_STALE_MS) {
+        void fetcher(poolId, cfg)
+          .then((refreshed) => {
+            if (refreshed) writePoolExtMetadataCache(poolId, refreshed);
+          })
+          .catch(() => undefined);
+        return cached;
+      }
+    } catch {
+      // Fall through to a fresh read.
+    }
+  }
+
+  const fresh = await fetcher(poolId, cfg);
+  if (fresh) writePoolExtMetadataCache(poolId, fresh);
+  return fresh;
 }

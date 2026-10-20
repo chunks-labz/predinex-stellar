@@ -22,7 +22,8 @@ import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
-import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
+import DepthChart from '@/components/DepthChart';
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
@@ -31,6 +32,7 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     const { address: stxAddress } = useWallet();
     const { activities, refresh: refreshActivity } = useUserActivity(stxAddress ?? undefined, 50);
     const { isFavorite, toggleFavorite } = usePoolFavorites();
+    const { showError } = useTransactionToast();
     const favorite = isFavorite(poolId);
     const {
         events: disputeEvents,
@@ -39,10 +41,22 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     } = useDisputeHistory(Number.isNaN(poolId) ? undefined : poolId);
 
     const [pool, setPool] = useState<Pool | null>(null);
-        const [isLoading, setIsLoading] = useState(true);
+    const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
+    
+    const snapshotRef = useRef<{ pool: Pool; userBet: { amountA: number; amountB: number } } | null>(null);
+    const pendingBetsRef = useRef(0);
+    const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isRefreshingRef = useRef(false);
+    const rerunPendingRef = useRef(false);
+    
+    const snapshotRef = useRef<{ pool: Pool; userBet: { amountA: number; amountB: number } } | null>(null);
+    const pendingBetsRef = useRef(0);
+    const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isRefreshingRef = useRef(false);
+    const rerunPendingRef = useRef(false);
 
     useEffect(() => {
         const loadPool = async () => {
@@ -73,7 +87,11 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     }, [stxAddress, poolId]);
 
     const refreshPoolData = useCallback(async () => {
-        if (isRefreshing) return;
+        if (isRefreshingRef.current) {
+            rerunPendingRef.current = true;
+            return;
+        }
+        isRefreshingRef.current = true;
         setIsRefreshing(true);
         setError(null);
 
@@ -83,26 +101,55 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                 stxAddress ? predinexReadApi.getUserBet(poolId, stxAddress) : Promise.resolve(null)
             ]);
 
+            if (pendingBetsRef.current > 0) {
+                // Keep optimistic state; reconcile will retry
+                return;
+            }
+
             if (newPool) setPool(newPool);
             setUserBet(newBet);
             if (stxAddress) {
                 await refreshActivity();
             }
+            snapshotRef.current = null;
+            pendingBetsRef.current = 0;
             // Clear error if refresh succeeds
             setError(null);
         } catch (err) {
             const msg = err instanceof Error ? err.message : 'Failed to refresh pool data';
             log.error("Failed to refresh pool data:", err);
-            // Don't overwrite existing pool data on refresh error
-            setError(msg);
+            if (pendingBetsRef.current > 0 && snapshotRef.current) {
+                setPool(snapshotRef.current.pool);
+                setUserBet(snapshotRef.current.userBet);
+                snapshotRef.current = null;
+                pendingBetsRef.current = 0;
+                showError('Bet could not be confirmed. Your position has been restored.');
+                setError(null);
+            } else {
+                // Don't overwrite existing pool data on refresh error
+                setError(msg);
+            }
         } finally {
+            isRefreshingRef.current = false;
             setIsRefreshing(false);
+            if (rerunPendingRef.current) {
+                rerunPendingRef.current = false;
+                setTimeout(() => void refreshPoolData(), 0);
+            }
         }
-    }, [poolId, refreshActivity, stxAddress, isRefreshing]);
+    }, [poolId, refreshActivity, stxAddress, showError]);
 
     const handleBetSuccess = (outcome: number, amountMicroSTX: number) => {
-        // Optimistic update
-        const amount = amountMicroSTX; // Since pool totals are in microSTX as well (verified in stacks-api.ts)
+        const amount = amountMicroSTX;
+        if (pool && userBet) {
+            if (!snapshotRef.current) {
+                snapshotRef.current = {
+                    pool,
+                    userBet: { amountA: userBet.amountA, amountB: userBet.amountB }
+                };
+            }
+        }
+        pendingBetsRef.current += 1;
         setPool(prev => {
             if (!prev) return prev;
             return {
@@ -111,12 +158,20 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                 totalB: outcome === 1 ? prev.totalB + amount : prev.totalB,
             };
         });
-
-        // Trigger real refresh after a small delay to allow on-chain propagation
-        // and handle potential backend indexing delays.
-        setTimeout(refreshPoolData, 3000);
-        // Also refresh immediately to catch any mempool updates if supported by the node
-        refreshPoolData();
+        setUserBet(prev => {
+            const base = prev || { amountA: 0, amountB: 0 };
+            return {
+                amountA: outcome === 0 ? base.amountA + amount : base.amountA,
+                amountB: outcome === 1 ? base.amountB + amount : base.amountB,
+            };
+        });
+        if (reconcileTimerRef.current) {
+            clearTimeout(reconcileTimerRef.current);
+        }
+        reconcileTimerRef.current = setTimeout(() => {
+            reconcileTimerRef.current = null;
+            void refreshPoolData();
+        }, 3000);
     };
 
     const hasClaimedWinnings = activities.some(
@@ -318,6 +373,13 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                         </div>
                     </div>
 
+                    <div className="mb-8">
+                        <DepthChart
+                            bids={pool.totalA > 0 ? [{ price: Number(oddsA), quantity: pool.totalA }] : []}
+                            asks={pool.totalB > 0 ? [{ price: Number(oddsB), quantity: pool.totalB }] : []}
+                        />
+                    </div>
+
                     {/* User Bet Summary Card */}
                     {userBet && (userBet.amountA > 0 || userBet.amountB > 0) && (
                         <div className="mb-8 p-4 bg-primary/10 border border-primary/20 rounded-xl">
@@ -411,3 +473,6 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         </main>
     );
 }
+
+
+

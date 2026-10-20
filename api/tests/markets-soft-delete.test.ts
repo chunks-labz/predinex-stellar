@@ -190,6 +190,26 @@ describe('market soft-delete (#1436)', () => {
     expect(audit.body.data[0]).toMatchObject({ fromStatus: 'cancelled', toStatus: 'open' });
   });
 
+  it('supports filters, cursor pagination, and capped page size for admin audit logs', async () => {
+    await asAdmin(request(app).post('/api/markets/1/cancel').send({ reason: 'alpha' }));
+    await asAdmin(request(app).post('/api/markets/2/cancel').send({ reason: 'beta' }));
+    await asAdmin(request(app).post('/api/markets/2/restore'));
+    sharedRateLimiter.reset();
+
+    const res = await asAdmin(
+      request(app).get(
+        '/api/markets/admin/audit?actor=admin&action=cancelled&from=2020-01-01T00:00:00.000Z&to=2100-01-01T00:00:00.000Z&limit=200'
+      )
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(2);
+    expect(res.body.data.every((entry: MarketAuditEntry) => entry.actor === 'admin')).toBe(true);
+    expect(res.body.data.every((entry: MarketAuditEntry) => entry.action === 'cancelled')).toBe(true);
+    expect(res.body.pagination.limit).toBe(100);
+    expect(res.body.pagination.nextCursor).toBeNull();
+  });
+
   it('restores a settled market to settled, not open', async () => {
     const settledSource = new InMemoryMarketSource([market(9, { status: 'settled' })]);
     const settledApp = express();
