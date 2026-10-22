@@ -17,18 +17,25 @@ import CountdownTimer from '@/components/CountdownTimer';
 import DisputeHistoryTimeline from "../../components/DisputeHistoryTimeline";
 import { useDisputeHistory } from "../../lib/hooks/useDisputeHistory";
 import PoolActivityTimeline from "../../components/PoolActivityTimeline";
-import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff } from "lucide-react";
+import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff, ArrowLeft } from "lucide-react";
 import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { parsePoolId } from '@/app/lib/market-types';
 import DepthChart from '@/components/DepthChart';
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
-    const poolId = parseInt(id);
+    // #1535 — a hand-edited or truncated URL ("/markets/abc") used to become
+    // NaN and be handed to the contract read API, which surfaced as a generic
+    // "Failed to Load Pool" error. Parse the id once and show a dedicated
+    // "invalid link" state instead of querying for a pool that cannot exist.
+    const parsedPoolId = parsePoolId(id);
+    const isInvalidPoolId = parsedPoolId === null;
+    const poolId = parsedPoolId ?? 0;
 
     const { address: stxAddress } = useWallet();
     const { activities, refresh: refreshActivity } = useUserActivity(stxAddress ?? undefined, 50);
@@ -39,7 +46,7 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         events: disputeEvents,
         isLoading: isLoadingDisputes,
         error: disputeError,
-    } = useDisputeHistory(Number.isNaN(poolId) ? undefined : poolId);
+    } = useDisputeHistory(isInvalidPoolId ? undefined : parsedPoolId ?? undefined);
 
     const [pool, setPool] = useState<Pool | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -54,32 +61,39 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     const rerunPendingRef = useRef(false);
 
     useEffect(() => {
+        if (isInvalidPoolId || parsedPoolId === null) {
+            // Nothing to read for an invalid id — skip the contract call.
+            setIsLoading(false);
+            setPool(null);
+            return;
+        }
+
         const loadPool = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                const data = await predinexReadApi.getPool(poolId);
+                const data = await predinexReadApi.getPool(parsedPoolId);
                 setPool(data);
             } catch (e) {
                 setError(e instanceof Error ? e.message : 'Failed to load pool');
-                log.error(`Failed to load pool ${poolId}:`, e);
+                log.error(`Failed to load pool ${parsedPoolId}:`, e);
             } finally {
                 setIsLoading(false);
             }
         };
         loadPool();
-    }, [poolId]);
+    }, [parsedPoolId, isInvalidPoolId]);
 
     useEffect(() => {
-        if (!stxAddress || !poolId) {
+        if (!stxAddress || !parsedPoolId) {
             setUserBet(null);
             return;
         }
 
-        predinexReadApi.getUserBet(poolId, stxAddress).then(bet => {
+        predinexReadApi.getUserBet(parsedPoolId, stxAddress).then(bet => {
             setUserBet(bet);
         }).catch(() => setUserBet(null));
-    }, [stxAddress, poolId]);
+    }, [stxAddress, parsedPoolId]);
 
     const refreshPoolData = useCallback(async () => {
         if (isRefreshingRef.current) {
@@ -179,6 +193,28 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
 
 
+    // Invalid market link (e.g. "/markets/abc") — no contract call is made.
+    if (isInvalidPoolId) {
+        return (
+            <main className="min-h-screen bg-background text-foreground">
+                <Navbar />
+                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
+                    <AlertCircle className="w-12 h-12 text-yellow-500 mb-4" />
+                    <h2 className="text-xl font-semibold mb-2">Invalid Market Link</h2>
+                    <p className="text-muted-foreground text-center max-w-md mb-6">
+                        &quot;{id}&quot; is not a valid market id. Market links look like /markets/12.
+                    </p>
+                    <Link
+                        href="/markets"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+                    >
+                        Back to Markets
+                    </Link>
+                </div>
+            </main>
+        );
+    }
+
     // Loading state - skeleton shaped like the resolved pool detail layout
     if (isLoading) {
         return (
@@ -268,6 +304,16 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
             <Navbar />
 
             <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6 animate-fade-in">
+                {/* #1535 — the only way back to the market list was the navbar,
+                    which is easy to miss on mobile and impossible to use when
+                    the market was opened from a shared link. */}
+                <Link
+                    href="/markets"
+                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors mb-4"
+                >
+                    <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                    Back to markets
+                </Link>
                 <div className="glass p-8 rounded-2xl border border-border">
                     {/* Header */}
                     <div className="flex justify-between items-start mb-6">

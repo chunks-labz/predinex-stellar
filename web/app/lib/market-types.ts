@@ -252,3 +252,21 @@ export interface ActivityConfig {
   explorerUrl: string;
   contractAddress: string;
 }
+
+/**
+ * Parse a pool id from a route parameter.
+ *
+ * A market URL can be hand-edited or truncated (`/markets/abc`), and the old
+ * `parseInt` call turned that into `NaN`, which was then sent to the contract
+ * read API and surfaced as a confusing "Failed to Load Pool" error. Returning
+ * `null` lets the page show a dedicated "invalid link" state instead.
+ *
+ * @param raw Route parameter value
+ * @returns The pool id, or `null` when the value is not a valid pool id
+ */
+export function parsePoolId(raw: string | number | null | undefined): number | null {
+  if (raw === null || raw === undefined || raw === '') return null;
+  const value = typeof raw === 'number' ? raw : Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < 0) return null;
+  return value;
+}

@@ -14,6 +14,7 @@ import {
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
   MAX_OUTCOME_COUNT,
+  clampBetAmount,
 } from '../../app/lib/validators';
 
 describe('validateContractId', () => {
@@ -284,5 +285,44 @@ describe('validateOutcomesList (issue #1001)', () => {
   it('rejects an invalid outcome label', () => {
     const result = validateOutcomesList(['Yes', 'x']);
     expect(result.valid).toBe(false);
+  });
+});
+
+describe('clampBetAmount', () => {
+  it('returns the requested amount when it is within every limit', () => {
+    expect(clampBetAmount(2, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(2);
+  });
+
+  it('raises an amount below the pool minimum up to the minimum', () => {
+    // A quick-select button picking 10% of a 20 XLM wallet on a pool with a
+    // 5 XLM minimum used to produce 2 XLM, which failed validation.
+    expect(clampBetAmount(2, { minBet: 5, maxBet: 50, balance: 20 })).toBe(5);
+  });
+
+  it('lowers an amount above the pool maximum down to the maximum', () => {
+    expect(clampBetAmount(20, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(5);
+  });
+
+  it('never exceeds the wallet balance', () => {
+    expect(clampBetAmount(50, { minBet: 0.1, maxBet: 100, balance: 12.5 })).toBe(12.5);
+  });
+
+  it('returns null when the balance is below the pool minimum', () => {
+    expect(clampBetAmount(1, { minBet: 5, maxBet: 50, balance: 2 })).toBeNull();
+  });
+
+  it('returns null for a non-positive or non-finite amount', () => {
+    expect(clampBetAmount(0, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(-3, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(Number.NaN, { minBet: 0.1, balance: 10 })).toBeNull();
+  });
+
+  it('treats missing limits as unbounded', () => {
+    expect(clampBetAmount(7.5, {})).toBe(7.5);
+  });
+
+  it('rounds down to two decimals so the amount never exceeds the cap', () => {
+    expect(clampBetAmount(1.239, { minBet: 0.1, maxBet: 1.1, balance: 100 })).toBe(1.1);
+    expect(clampBetAmount(0.129, { minBet: 0.1, balance: 100 })).toBe(0.12);
   });
 });
