@@ -97,11 +97,17 @@ export default function BetHistoryTable({
   const summaryStats = useMemo(() => {
     const totalBets = filteredHistory.length;
     const wonBets = filteredHistory.filter(bet => bet.status === 'won').length;
+    const lostBets = filteredHistory.filter(bet => bet.status === 'lost').length;
+    // #1536 — the win rate used to divide the wins by *every* row, so open
+    // bets and expired (refunded) bets counted as losses. A user with one
+    // win and one pending bet was told their win rate was 50%. Only settled
+    // bets (won + lost) can be won or lost.
+    const settledBets = wonBets + lostBets;
     const totalWagered = filteredHistory.reduce((sum, bet) => sum + bet.amountBet, 0);
     const totalProfit = filteredHistory.reduce((sum, bet) => sum + bet.profitLoss, 0);
-    const winRate = totalBets > 0 ? (wonBets / totalBets) * 100 : 0;
+    const winRate = settledBets > 0 ? (wonBets / settledBets) * 100 : 0;
 
-    return { totalBets, wonBets, totalWagered, totalProfit, winRate };
+    return { totalBets, wonBets, lostBets, settledBets, totalWagered, totalProfit, winRate };
   }, [filteredHistory]);
 
   const getStatusIcon = (status: BetHistory['status']) => {
@@ -250,6 +256,11 @@ export default function BetHistoryTable({
         <div className="glass p-4 rounded-lg text-center">
           <div className="text-2xl font-bold text-green-500">{summaryStats.winRate.toFixed(1)}%</div>
           <div className="text-sm text-muted-foreground">Win Rate</div>
+          {/* The win rate only covers settled bets — open and expired bets are
+              not wins or losses and would distort the number. */}
+          <div className="text-xs text-muted-foreground mt-1">
+            {summaryStats.wonBets} of {summaryStats.settledBets} settled bets won
+          </div>
         </div>
         <div className="glass p-4 rounded-lg text-center">
           <div className="text-2xl font-bold text-purple-500">{formatCurrency(summaryStats.totalWagered)}</div>
@@ -329,7 +340,12 @@ export default function BetHistoryTable({
                         </span>
                       </td>
                       <td className="p-4 text-sm text-muted-foreground">
-                        {new Date(bet.betTimestamp * 1000).toLocaleDateString()}
+                        {/* #1536 — the date only hid the time of day, which
+                            makes two bets on the same market impossible to
+                            tell apart. */}
+                        <time dateTime={new Date(bet.betTimestamp * 1000).toISOString()}>
+                          {new Date(bet.betTimestamp * 1000).toLocaleString()}
+                        </time>
                       </td>
                     </tr>
                   );
