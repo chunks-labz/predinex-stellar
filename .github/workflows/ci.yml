@@ -102,6 +102,13 @@ jobs:
         working-directory: .
         run: python3 scripts/verify-workflows.py
 
+      - name: Verify security disclosure policy
+        # The policy used to advertise a mailbox on a domain that no longer
+        # resolves, plus placeholder PGP blocks. This keeps SECURITY.md
+        # pointing at a working private channel.
+        working-directory: .
+        run: python3 scripts/verify-security-policy.py
+
       - name: Test
         run: npm run test -- --run
 

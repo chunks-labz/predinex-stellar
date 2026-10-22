@@ -12,43 +12,58 @@ This security policy applies to the following versions of Predinex Stellar:
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Predinex Stellar, please report it responsibly. We take security seriously and appreciate your help in keeping our users and their funds safe.
+If you discover a security vulnerability in Predinex Stellar, please report it
+privately. We take security seriously and appreciate your help in keeping our
+users and their funds safe.
 
-### How to Report
+**Please do NOT report security vulnerabilities through public GitHub issues,
+pull requests or discussions.** A public report usually means the vulnerability
+is public before a fix exists.
 
-**Please do NOT report security vulnerabilities through public GitHub issues.**
+### Primary channel: GitHub Security Advisories
 
-Instead, please send your report to:
+Report privately through GitHub's private advisory form for this repository:
 
-- **Email**: `security@predinex.io`
-- **PGP Key**: See below for encrypted communication
+**https://github.com/chunks-labz/predinex-stellar/security/advisories/new**
 
-### PGP Key for Encrypted Communication
+A security advisory is only visible to the maintainers and the reporter, so the
+technical details stay private until a fix is deployed. It also gives both
+sides a written record of the disclosure timeline.
 
-For sensitive vulnerability reports, we strongly recommend encrypting your communication using PGP.
+> **Maintainers:** private vulnerability reporting has to be enabled once for
+> this repository before outside reporters can use the form above:
+>
+> 1. Open **Settings → Code security → Private vulnerability reporting**.
+> 2. Enable **Private vulnerability reporting**.
+> 3. Confirm it is on:
+>    ```bash
+>    gh api repos/chunks-labz/predinex-stellar/private-vulnerability-reporting
+>    # {"enabled":true}
+>    ```
+>
+> Until that setting is on, the form above is not reachable for outside
+> reporters and the secondary channel below applies.
 
-```
------BEGIN PGP PUBLIC KEY BLOCK-----
+### Secondary channel: project Discord
 
-[PGP PUBLIC KEY TO BE ADDED]
+If the advisory form is not available to you, contact the maintainers through
+the project Discord (**https://discord.gg/predinex**) and ask for a private
+channel. Do not post vulnerability details in a public Discord channel.
 
------END PGP PUBLIC KEY BLOCK-----
-```
-
-**Fingerprint**: `[FINGERPRINT TO BE ADDED]`
-
-To verify this key, please check the official Predinex website or contact us through an alternative verified channel.
+> The reporting addresses that used to be listed in this file are **not**
+> monitored any more: the project domain no longer resolves, so mail sent
+> there bounces with a DNS error. Please do not use them.
 
 ### What to Include in Your Report
-
-Please include the following information in your vulnerability report:
 
 1. **Description**: A clear description of the vulnerability
 2. **Impact**: Potential impact on users and funds
 3. **Steps to Reproduce**: Detailed steps to reproduce the issue
 4. **Proof of Concept**: If applicable, a proof of concept or code snippet
-5. **Affected Versions**: Which versions are affected
+5. **Affected Versions**: Which versions are affected (commit, release or contract ID)
 6. **Suggested Fix**: If you have a suggested fix, please include it
+
+Please keep the report private until a fix has been deployed.
 
 ## Scope
 
@@ -71,7 +86,8 @@ This security policy covers:
 
 ## Disclosure Timeline
 
-We follow a coordinated disclosure process to protect users while giving credit to researchers:
+We follow a coordinated disclosure process to protect users while giving credit
+to researchers:
 
 | Phase | Duration | Description |
 |-------|----------|-------------|
@@ -88,27 +104,8 @@ We follow a coordinated disclosure process to protect users while giving credit 
 - **Medium**: Moderate security impact (target fix: 90 days)
 - **Low**: Minor security issues (target fix: next release)
 
-## Recognition Policy
-
-We value the work of security researchers and aim to recognize valid vulnerability reports:
-
-### For Valid Reports
-- **Credit**: Public acknowledgment in our security advisories (with your permission)
-- **Hall of Fame**: Inclusion in our security hall of fame (if desired)
-- **Swag**: Predinex merchandise (subject to availability)
-- **Bounty**: For critical vulnerabilities, we may offer a bounty (contact us for details)
-
-### Bounty Program
-
-We are working on establishing a formal bug bounty program. For now, bounties are handled on a case-by-case basis for critical vulnerabilities that could result in fund loss. Contact us at `security@predinex.io` for more information.
-
-## Emergency Contact
-
-For **critical** vulnerabilities that are actively being exploited or pose an immediate threat to user funds:
-
-- **Email**: `emergency@predinex.io`
-- **Response Time**: Within 12 hours
-- **PGP Key**: Same as above
+For a vulnerability that is being actively exploited, open the advisory and mark
+it as urgent so it can be triaged ahead of the schedule above.
 
 ## Safe Harbor
 
@@ -118,6 +115,17 @@ We commit to:
 - **Response**: We will respond to all vulnerability reports within the timelines specified
 - **Credit**: We will credit researchers who discover vulnerabilities (with permission)
 - **Protection**: We will work with researchers to ensure responsible disclosure
+
+## Recognition Policy
+
+We value the work of security researchers and aim to recognize valid vulnerability
+reports:
+
+- **Credit**: Public acknowledgment in our security advisories (with your permission)
+- **Hall of Fame**: Inclusion in our security hall of fame (if desired)
+
+There is no formal bounty program at the moment; critical reports are handled
+case by case through the advisory channel above.
 
 ## Verifying Signed Commits
 
@@ -136,21 +144,16 @@ git tag -v <tag-name>
 git log --show-signature
 ```
 
-Our commit signing key:
+## Security Audits
 
-```
------BEGIN PGP PUBLIC KEY BLOCK-----
-
-[COMMIT SIGNING KEY TO BE ADDED]
-
------END PGP PUBLIC KEY BLOCK-----
-```
-
-**Fingerprint**: `[COMMIT SIGNING FINGERPRINT TO BE ADDED]`
+No third-party audit report has been published for this repository yet. Treat
+the code as unaudited and report anything that looks wrong through the channel
+above.
 
 ## Security Best Practices for Users
 
-While we work hard to secure the protocol, users should also follow best practices:
+While we work hard to secure the protocol, users should also follow best
+practices:
 
 1. **Only use official contract addresses** from our documentation
 2. **Verify contract bytecode** before interacting (see our verification guide)
@@ -159,21 +162,6 @@ While we work hard to secure the protocol, users should also follow best practic
 5. **Keep your software updated** to the latest version
 6. **Be cautious of phishing attempts** - always verify URLs
 
-## Security Audits
-
-This project has undergone/is undergoing security audits by reputable firms. Audit reports will be published here:
-
-- [Audit Report 1 - Coming Soon]
-- [Audit Report 2 - Coming Soon]
-
-## Reaching Out
-
-If you have questions about this security policy or need clarification:
-
-- **General Security Questions**: `security@predinex.io`
-- **Press/Media**: `press@predinex.io`
-- **General Inquiries**: `hello@predinex.io`
-
 ---
 
-Thank you for helping keep Predinex Stellar secure! 🛡️
+Thank you for helping keep Predinex Stellar secure!
