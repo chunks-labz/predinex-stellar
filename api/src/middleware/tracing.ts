@@ -30,6 +30,7 @@ import {
   SimpleSpanProcessor,
   SpanExporter,
 } from '@opentelemetry/sdk-trace-node';
+import { getCorrelationContext } from '../lib/correlation.js';
 
 const TRACER_NAME = 'predinex-api';
 
@@ -84,11 +85,16 @@ export function tracingMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   const parent = propagation.extract(ROOT_CONTEXT, req.headers);
+  const correlation = getCorrelationContext();
   const span = trace.getTracer(TRACER_NAME).startSpan(
     `${req.method} ${req.path}`,
     {
       kind: SpanKind.SERVER,
-      attributes: { 'http.request.method': req.method, 'url.path': req.path },
+      attributes: {
+        'http.request.method': req.method,
+        'url.path': req.path,
+        ...(correlation ? { 'predinex.correlation_id': correlation.correlationId } : {}),
+      },
     },
     parent
   );
@@ -130,25 +136,37 @@ export async function withSpan<T>(
   );
 }
 
-/** Adds the active trace context (`traceparent`) to outgoing request headers. */
+/**
+ * Adds the active trace context (`traceparent`) and correlation ID to outgoing
+ * request / job headers, so downstream services can log the same ID.
+ */
 export function injectTraceHeaders(headers: Record<string, string> = {}): Record<string, string> {
   propagation.inject(context.active(), headers);
+  const correlation = getCorrelationContext();
+  if (correlation) {
+    headers['x-correlation-id'] = correlation.correlationId;
+    headers['x-request-id'] = correlation.requestId;
+  }
   return headers;
 }
 
 export interface TracedJobPayload<T = unknown> {
   payload: T;
   traceContext: Record<string, string>;
+  /** Active request/job correlation ID, stored separately for easy access. */
+  correlationId?: string;
 }
 
 /**
- * Wraps a queued job payload with the current active trace/span context so
- * background workers can continue the HTTP trace end-to-end.
+ * Wraps a queued job payload with the current active trace/span context and
+ * correlation ID so background workers can continue the request end-to-end.
  */
 export function injectJobTraceContext<T>(payload: T): TracedJobPayload<T> {
+  const correlationId = getCorrelationContext()?.correlationId;
   return {
     payload,
     traceContext: injectTraceHeaders({}),
+    ...(correlationId ? { correlationId } : {}),
   };
 }
 

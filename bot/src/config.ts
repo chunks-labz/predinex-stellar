@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Bot configuration loaded from environment variables.
  *
  * All required variables are validated at startup. The process exits
@@ -8,6 +8,7 @@
 
 import { Keypair, Networks } from "@stellar/stellar-sdk";
 import "dotenv/config";
+import { logger } from "./logger.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -39,7 +40,7 @@ export interface BotConfig {
   /** Optional RPC-specific override. */
   rpcTimeoutMs?: number;
 
-  /** Max pools per settle_pools transaction (1-–50). */
+  /** Max pools per settle_pools transaction (1-â€“50). */
   settleBatchSize: number;
 
   // Settlement
@@ -48,7 +49,7 @@ export interface BotConfig {
   defaultWinningOutcome: number;
 
   // Incentives
-  /** Volume bonus percentage (0–100) applied to calculateVolumeBonus. */
+  /** Volume bonus percentage (0â€“100) applied to calculateVolumeBonus. */
   volumeBonusPercent: number;
 
   // Oracle resolution
@@ -72,7 +73,7 @@ export interface BotConfig {
   /**
    * When true, pools whose outcome could not be resolved by the oracle or
    * on-chain data fall back to defaultWinningOutcome.
-   * When false (the default), unresolvable pools are skipped — more safe for production.
+   * When false (the default), unresolvable pools are skipped â€” more safe for production.
    */
   oracleFallbackToDefault: boolean;
 
@@ -133,7 +134,7 @@ function parseLogLevel(value: string): LogLevel {
   if (["debug", "info", "warn", "error"].includes(value)) {
     return value as LogLevel;
   }
-  console.warn(`[config] Unknown LOG_LEVEl="${value}", defaulting to "info"`);
+  logger.warn("config_unknown_log_level", { value, fallback: "info" });
   return "info";
 }
 
@@ -192,9 +193,10 @@ export function loadConfig(): BotConfig {
   const upstreamTimeoutMs = parsePositiveInt(optionalEnv("UPSTREAM_TIMEOUT_MS", "15000"), "UPSTREAM_TIMEOUT_MS", errors);
   const rpcTimeoutMs = parsePositiveInt(optionalEnv("RPC_TIMEOUT_MS", String(upstreamTimeoutMs)), "RPC_TIMEOUT_MS", errors);
   if (batchSize > 100) {
-    console.warn(
-      `[config] BATCH_SIZE=${batchSize} exceeds contract maximum of 100, clamping to 100`,
-    );
+    logger.warn("config_batch_size_clamped", {
+      batchSize,
+      maxBatchSize: 100,
+    });
   }
 
   const settleBatchSize = parseSettleBatchSize(optionalEnv("SETTLE_BATCH_SIZE", "20"), errors);
@@ -308,8 +310,7 @@ export function loadConfig(): BotConfig {
   }
 
   if (errors.length > 0) {
-    console.error("[config] Configuration validation failed:");
-    errors.forEach(e => console.error(`  - ${e}`));
+    logger.error("config_validation_failed", { errors });
     process.exit(1);
   }
 
@@ -353,3 +354,4 @@ export function loadConfig(): BotConfig {
     healthCheckPort,
   };
 }
+

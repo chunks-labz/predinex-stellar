@@ -10,7 +10,7 @@
  */
 
 import { loadConfig } from "./config.js";
-import { setLogLevel, logger } from "./logger.js";
+import { setLogLevel, logger, serializeError } from "./logger.js";
 import { Poller } from "./poller.js";
 import { HealthServer } from "./health.js";
 import { initWorkerTracing, shutdownWorkerTracing } from "./tracing.js";
@@ -106,6 +106,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error("[fatal]", err);
+  logger.error("fatal_error", serializeError(err));
   process.exit(1);
 });

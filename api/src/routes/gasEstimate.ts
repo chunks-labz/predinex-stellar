@@ -10,6 +10,7 @@ import { Contract, rpc as SorobanRpc, xdr, Address } from 'stellar-sdk';
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { rateLimitMiddleware } from '../middleware/rate-limit.js';
+import { logger, serializeError } from '../lib/logger.js';
 
 /**
  * Gas estimation result with detailed breakdown
@@ -177,7 +178,10 @@ export class GasEstimatorService {
       
       return estimate;
     } catch (error) {
-      console.error('Simulation failed:', error);
+      logger.warn('gas_simulation_failed', {
+        ...serializeError(error),
+        fallback: 'static_estimate',
+      });
       // Fallback to static estimation
       return this.estimateOperation(operation, parameters);
     }

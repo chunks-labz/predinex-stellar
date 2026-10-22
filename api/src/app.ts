@@ -27,14 +27,13 @@
 
 import express, { Express, NextFunction, Request, Response } from 'express';
 import helmet from 'helmet';
-import morgan from 'morgan';
 import { corsMiddleware } from './config/cors.js';
 import { createBudgetRouter, contractService } from './routes/budget.js';
 import { complianceRouter } from './routes/compliance.js';
 import { emergencyRouter } from './routes/emergency.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
-import { marketsRouter } from './routes/markets.js';
+import { createMarketsRouter, type TradeHistorySource } from './routes/markets.js';
 import { positionsRouter } from './routes/positions.js';
 import { createReferralRouter, defaultReferralService } from './routes/referral.js';
 import { reputationRouter } from './routes/reputation.js';
@@ -43,6 +42,8 @@ import { rateLimitMiddleware, setDefaultTokenVerifier } from './middleware/rate-
 import { sharedAuthValidator } from './middleware/auth.js';
 import { tracingMiddleware } from './middleware/tracing.js';
 import { versioningMiddleware } from './middleware/versioning.js';
+import { requestContextMiddleware } from './middleware/request-context.js';
+import { apiErrorHandler, apiNotFoundHandler } from './middleware/error-handler.js';
 import { openApiDoc } from './config/swagger.js';
 import { getHealthReport } from './services/health.js';
 
@@ -101,9 +102,12 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   // 1. Install CORS middleware ahead of all routes (explicit allowlist, no '*').
   app.use(corsMiddleware);
 
-  // 2. Request body parsing + logging.
+  // 2. Correlation context + structured access logging (see #1491). Installed
+  //    before body parsing so validation errors are correlated too.
+  app.use(requestContextMiddleware);
+
+  // 3. Request body parsing.
   app.use(express.json({ limit: '1mb' }));
-  app.use(morgan('combined'));
 
   // Opt-in OpenTelemetry request spans (see #1426); a no-op unless tracing is
   // enabled via OTEL_TRACING_ENABLED.
@@ -160,9 +164,6 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
     });
   });
 
-  app.get('/health', (_req: Request, res: Response) => {
-    res.status(200).json(healthPayload());
-  // 3. Health checks.
   app.get('/health', async (_req: Request, res: Response) => {
     const payload = await healthPayload();
     res.status(payload.status === 'healthy' ? 200 : 503).json(payload);
@@ -182,33 +183,14 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   app.use('/api/emergency', emergencyRouter);
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
-  app.use('/api/markets', marketsRouter);
+  app.use('/api/markets', createMarketsRouter(undefined, undefined, tradeHistorySource));
   app.use('/api/positions', positionsRouter);
   app.use('/api/referral', createReferralRouter(defaultReferralService));
   app.use('/api/reputation', reputationRouter);
   app.use('/api/simulation', simulationRouter);
 
-  app.use('/api', (_req: Request, res: Response) => {
-    res.status(404).json({
-      success: false,
-      error: { code: 'NOT_FOUND', message: 'Unknown API route' },
-      timestamp: new Date().toISOString(),
-    });
-  });
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    // eslint-disable-next-line no-console
-    console.error('Unhandled API error:', err);
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: err?.message || 'Internal server error',
-      },
-      timestamp: new Date().toISOString(),
-    });
-  });
+  app.use(apiNotFoundHandler);
+  app.use(apiErrorHandler);
 
   return app;
 }

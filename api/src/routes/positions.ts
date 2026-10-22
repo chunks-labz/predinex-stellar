@@ -29,6 +29,7 @@
 
 import { Router, Request, Response } from 'express';
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
+import { logger, serializeError } from '../lib/logger.js';
 import { withSpan } from '../middleware/tracing.js';
 import type {
   IndexedPosition,
@@ -287,8 +288,7 @@ export function createPositionsRouter(source: PositionSource = defaultPositionSo
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error('GET /api/positions error:', err);
+      logger.error('positions_list_failed', serializeError(err));
       res.status(500).json({
         success: false,
         error: {

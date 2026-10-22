@@ -1,5 +1,5 @@
-/**
- * Predinex API — HTTP server bootstrap (see #1194).
+﻿/**
+ * Predinex API - HTTP server bootstrap (see #1194).
  *
  * Single documented entrypoint that binds a port and serves every route
  * module mounted in `src/app.ts`:
@@ -29,6 +29,7 @@
 import 'dotenv/config';
 import { createApp } from './app.js';
 import { initTracing, shutdownTracing } from './middleware/tracing.js';
+import { logger, serializeError } from './lib/logger.js';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
@@ -37,21 +38,22 @@ initTracing();
 const app = createApp();
 
 const server = app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(
-    `predinex-api v1.0.0 listening on :${PORT} (health: GET /health)`
-  );
+  logger.info('server_started', {
+    version: '1.0.0',
+    port: PORT,
+    health: 'GET /health',
+  });
 });
 
 function shutdown(signal: string) {
-  // eslint-disable-next-line no-console
-  console.log(`Received ${signal}, shutting down predinex-api...`);
+  logger.info('server_stopping', { signal });
   server.close(() => {
-    shutdownTracing().finally(() => {
-      // eslint-disable-next-line no-console
-      console.log('predinex-api stopped.');
-      process.exit(0);
-    });
+    shutdownTracing()
+      .catch((error) => logger.error('tracing_shutdown_failed', serializeError(error)))
+      .finally(() => {
+        logger.info('server_stopped');
+        process.exit(0);
+      });
   });
   setTimeout(() => process.exit(1), 10_000).unref();
 }

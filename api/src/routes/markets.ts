@@ -53,6 +53,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
+import { logger } from '../lib/logger.js';
 import {
   MarketListQuery,
   MarketStatus,
@@ -522,14 +523,30 @@ export interface MarketsRouterOptions {
   idempotencyStore?: IdempotencyStore;
 }
 
+function isTradeHistorySource(value: unknown): value is TradeHistorySource {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as TradeHistorySource).listTrades === 'function'
+  );
+}
+
 export function createMarketsRouter(
   source: MarketSource = defaultMarketSource,
   creator?: MarketCreator,
+  tradeHistoryOrOptions?: TradeHistorySource | MarketsRouterOptions,
   options: MarketsRouterOptions = {}
 ): Router {
+  const tradeHistory = isTradeHistorySource(tradeHistoryOrOptions)
+    ? tradeHistoryOrOptions
+    : defaultTradeHistorySource;
+  const routerOptions = isTradeHistorySource(tradeHistoryOrOptions)
+    ? options
+    : (tradeHistoryOrOptions ?? {});
+
   const router = Router();
   const idempotency = createIdempotencyMiddleware({
-    store: options.idempotencyStore,
+    store: routerOptions.idempotencyStore,
   });
   router.use(rateLimitMiddleware);
 
@@ -874,7 +891,7 @@ export function createMarketsRouter(
 
     try {
       const archivedCount = await source.archiveResolvedOlderThan(archiveWindowMs(windowDays));
-      console.info(`Archived ${archivedCount} resolved markets older than ${windowDays} day(s)`);
+      logger.info('markets_archived', { archivedCount, windowDays });
       res.json({
         success: true,
         data: { archivedCount, windowDays },
