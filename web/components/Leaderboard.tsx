@@ -34,11 +34,13 @@ function SkeletonRows() {
 }
 
 function formatVolume(stroops: number): string {
-  // #1285 — 1 XLM = 10_000_000 stroops; the old 1e6 divisor showed 10x the
-  // real volume while still labelling the result in XLM.
+  // #1285 — 1 XLM = 10_000_000 stroops; use stroopsToUnits (divide by 1e7).
   const units = stroopsToUnits(stroops);
-  if (units >= 1) return `${units.toFixed(2)} ${TOKEN_SYMBOL}`;
-  return `${stroops.toLocaleString()} μ${TOKEN_SYMBOL}`;
+  if (units >= 1) return `${units.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${TOKEN_SYMBOL}`;
+  if (units >= 0.000001) {
+    return `${units.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${TOKEN_SYMBOL}`;
+  }
+  return `${(stroops / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} micro${TOKEN_SYMBOL}`;
 }
 
 const Leaderboard = memo(function Leaderboard({ currentUserAddress }: LeaderboardProps) {
@@ -129,7 +131,7 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
       )}
 
       {/* Error */}
-      {error && (
+      {error && bettors.length === 0 && creators.length === 0 && (
         <div className="flex items-center gap-2 p-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400" role="alert">
           <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           {error}
@@ -148,16 +150,17 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
         ) : bettors.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Trophy className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
-            <p>No bettors yet. Be the first!</p>
+            <p>{error ? 'Unable to load leaderboard.' : 'No bettors yet. Be the first!'}</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" role="list" aria-label="Top bettors">
             {bettors.map((entry) => {
               const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
               const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
               return (
                 <div
                   key={entry.address}
+                  role="listitem"
                   className={`flex items-center justify-between p-4 rounded-lg transition-colors
                     ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
                   aria-current={isCurrentUser ? 'true' : undefined}
@@ -199,16 +202,17 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
         ) : creators.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Layers className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
-            <p>No pool creators yet. Create the first market!</p>
+            <p>{error ? 'Unable to load leaderboard.' : 'No pool creators yet. Create the first market!'}</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" role="list" aria-label="Top creators">
             {creators.map((entry) => {
               const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
               const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
               return (
                 <div
                   key={entry.address}
+                  role="listitem"
                   className={`flex items-center justify-between p-4 rounded-lg transition-colors
                     ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
                   aria-current={isCurrentUser ? 'true' : undefined}
