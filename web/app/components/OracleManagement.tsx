@@ -203,7 +203,11 @@ function OracleManagementPreview() {
                 type="text"
                 placeholder={getRuntimeConfig().defaultOracleAddress || 'G... (Stellar account address)'}
                 className="w-full px-3 py-2 bg-muted border border-border rounded-lg text-muted-foreground cursor-not-allowed"
+                aria-describedby="oracle-address-help"
               />
+              <p id="oracle-address-help" className="mt-1 text-xs text-muted-foreground">
+                Use a Stellar public key (starts with G).
+              </p>
             </div>
 
             <div>
@@ -234,7 +238,7 @@ function OracleManagementPreview() {
       <div className="glass p-4 rounded-lg">
         <h4 className="font-semibold mb-2">Requirements</h4>
         <ul className="text-sm text-muted-foreground space-y-1">
-          <li>• Valid Stacks address</li>
+          <li>• Valid Stellar address (starts with G)</li>
           <li>• At least one supported data type</li>
           <li>• Only admins can register new providers</li>
           <li>• Providers start with 100% reliability score</li>
@@ -266,11 +270,29 @@ function OracleManagementPreview() {
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex space-x-1 mb-6 bg-muted p-1 rounded-lg">
+      <div className="flex space-x-1 mb-6 bg-muted p-1 rounded-lg" role="tablist" aria-label="Oracle management sections">
         {ORACLE_MANAGEMENT_TABS.map((tab) => (
           <button
             key={tab.key}
+            role="tab"
+            type="button"
+            aria-selected={selectedTab === tab.key}
+            tabIndex={selectedTab === tab.key ? 0 : -1}
             onClick={() => setSelectedTab(tab.key)}
+            onKeyDown={(e) => {
+              const order = ORACLE_MANAGEMENT_TABS.map((t) => t.key);
+              const idx = order.indexOf(tab.key);
+              let next: OracleManagementTab | null = null;
+              if (e.key === 'ArrowRight') next = order[(idx + 1) % order.length];
+              else if (e.key === 'ArrowLeft') next = order[(idx - 1 + order.length) % order.length];
+              else if (e.key === 'Home') next = order[0];
+              else if (e.key === 'End') next = order[order.length - 1];
+              if (next) {
+                e.preventDefault();
+                setSelectedTab(next);
+                (e.currentTarget.parentElement?.querySelectorAll('[role=tab]')[order.indexOf(next)] as HTMLButtonElement | undefined)?.focus();
+              }
+            }}
             className={`flex-1 px-4 py-2 rounded-md transition-colors ${
               selectedTab === tab.key
                 ? 'bg-background text-foreground shadow-sm'
@@ -283,7 +305,7 @@ function OracleManagementPreview() {
       </div>
 
       {/* Tab Content */}
-      <div>
+      <div role="tabpanel">
         {selectedTab === 'providers' && renderProviders()}
         {selectedTab === 'submissions' && renderSubmissions()}
         {selectedTab === 'register' && renderRegister()}
