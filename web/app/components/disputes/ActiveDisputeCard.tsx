@@ -66,10 +66,18 @@ export function ActiveDisputeCard({
             <div className="text-sm text-muted-foreground">Current Outcome</div>
             <div
               className={`text-sm font-semibold ${
-                dispute.votesFor > dispute.votesAgainst ? 'text-green-500' : 'text-red-500'
+                dispute.votesFor > dispute.votesAgainst
+                  ? 'text-green-500'
+                  : dispute.votesAgainst > dispute.votesFor
+                    ? 'text-red-500'
+                    : 'text-muted-foreground'
               }`}
             >
-              {dispute.votesFor > dispute.votesAgainst ? 'Upheld' : 'Rejected'}
+              {dispute.votesFor > dispute.votesAgainst
+                ? 'Upheld'
+                : dispute.votesAgainst > dispute.votesFor
+                  ? 'Rejected'
+                  : 'Tie'}
             </div>
           </div>
         </div>

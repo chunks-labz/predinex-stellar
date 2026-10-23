@@ -52,7 +52,11 @@ export function ResolvedDisputeCard({ dispute }: ResolvedDisputeCardProps) {
         </div>
 
         <div className="text-sm text-muted-foreground">
-          Resolved {new Date(dispute.createdAt).toLocaleDateString()}
+          Resolved {(() => {
+            let ts = dispute.createdAt;
+            if (ts > 0 && ts < 1_000_000_000_000) ts = ts * 1000;
+            return new Date(ts).toLocaleDateString();
+          })()}
         </div>
       </div>
     </div>
