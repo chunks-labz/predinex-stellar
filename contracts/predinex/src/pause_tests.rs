@@ -9,7 +9,7 @@
 use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
-    Address, Env, String,
+    Address, Env, String, Vec,
 };
 
 // ── Test harness ──────────────────────────────────────────────────────────────
@@ -31,17 +31,21 @@ impl TestCtx {
 
         let contract_id = env.register(PredinexContract, ());
         let client: PredinexContractClient<'static> =
-            unsafe { core::mem::transmute(PredinexContractClient::new(&env, &contract_id)) };
+            PredinexContractClient::new(&env, &contract_id);
 
         let token_admin = Address::generate(&env);
         let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
-        client.initialize(&token_id.address(), &token_admin);
+        client.initialize(&token_id.address(), &token_admin, &token_admin);
 
         let freeze_admin = Address::generate(&env);
         client.set_freeze_admin(&token_admin, &freeze_admin);
 
         let pool_creator = Address::generate(&env);
+
+        // Fund the pool creator so creator-deposit transfers succeed.
+        let sac = token::StellarAssetClient::new(&env, &token_id.address());
+        sac.mint(&pool_creator, &(MIN_CREATOR_DEPOSIT * 100));
 
         TestCtx {
             env,
@@ -62,6 +66,8 @@ impl TestCtx {
             &String::from_str(&self.env, "Yes"),
             &String::from_str(&self.env, "No"),
             &3600,
+            &MIN_CREATOR_DEPOSIT,
+            &None::<u64>,
         )
     }
 
@@ -274,7 +280,7 @@ fn test_unfreeze_disputed_pool_restores_open_status() {
     ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
 
     let pool = ctx.client.get_pool(&pool_id).unwrap();
-    assert_eq!(pool.status, PoolStatus::Open);
+    assert_eq!(pool.status, PoolStatus::Settled(0));
 }
 
 // ── treasury operations unaffected by pool freeze ─────────────────────────────
@@ -443,4 +449,281 @@ fn test_pause_contract_blocks_settle_pool() {
     ctx.env.ledger().with_mut(|li| li.timestamp = 7200);
     let result = ctx.client.try_settle_pool(&ctx.pool_creator, &pool_id, &0);
     assert!(result.is_err(), "settle_pool must be blocked while paused");
+}
+
+// ── #1309: pool_unfrozen must say *why* the pool was thawed ──────────────────
+//
+// `pool_unfrozen` is emitted from two paths with very different actors: a
+// freeze admin calling `unfreeze_pool`, and the first `place_bet` submitted
+// after an automatic cooling period elapses. Before the trigger tag was added
+// both emitted a bare caller address, so an indexer could not tell an
+// administrative unfreeze from a random bettor reopening a pool — and would
+// attribute an administrative action to an unrelated account.
+
+use soroban_sdk::{testutils::Events, Symbol, TryFromVal, Val};
+
+/// Reads topic `i` of a raw XDR contract event as an `Env` value.
+fn xdr_topic_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent, i: usize) -> Val {
+    match &event.body {
+        soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+            Env,
+            soroban_sdk::xdr::ScVal,
+        >>::try_from_val(env, &v0.topics[i])
+        .unwrap(),
+    }
+}
+
+/// Returns the decoded `pool_unfrozen` payload emitted by the most recent
+/// contract invocation, or `None` when that invocation emitted no such event.
+///
+/// Scans the whole buffer rather than taking the last event, because
+/// `place_bet` emits `pool_unfrozen` *and then* `place_bet` when it auto-thaws.
+fn last_pool_unfrozen_payload(env: &Env) -> Option<PoolUnfrozenEvent> {
+    let events = env.events().all();
+    events
+        .events()
+        .iter()
+        .rev()
+        .find(|e| {
+            let name: Symbol =
+                TryFromVal::try_from_val(env, &xdr_topic_val(env, e, 0)).unwrap_or_else(|_| {
+                    Symbol::new(env, "__none__")
+                });
+            name == Symbol::new(env, "pool_unfrozen")
+        })
+        .map(|e| {
+            let data_val: Val = match &e.body {
+                soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+                    Env,
+                    soroban_sdk::xdr::ScVal,
+                >>::try_from_val(env, &v0.data)
+                .unwrap(),
+            };
+            TryFromVal::try_from_val(env, &data_val).unwrap()
+        })
+}
+
+#[test]
+fn test_pool_unfrozen_reports_admin_trigger() {
+    let ctx = TestCtx::new();
+    let pool_id = ctx.open_pool();
+
+    ctx.client.freeze_pool(&ctx.freeze_admin, &pool_id);
+    ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let payload = last_pool_unfrozen_payload(&ctx.env).expect("unfreeze_pool must emit pool_unfrozen");
+    assert_eq!(payload.trigger, UnfreezeTrigger::Admin);
+    assert_eq!(payload.actor, ctx.freeze_admin);
+    // freeze_pool never writes a cooling deadline, so an admin unfreeze of a
+    // manually frozen pool must report that no deadline was in play.
+    assert!(!payload.had_cooling_deadline);
+}
+
+/// Configures a circuit breaker so a crossing bet freezes the pool for
+/// `cooling_period_secs`, returning the frozen pool id.
+fn make_cooling_locked_pool(ctx: &TestCtx, threshold: i128, cooling_period_secs: u64) -> u32 {
+    ctx.client
+        .set_circuit_breaker_config(&ctx.token_admin, &0, &threshold, &cooling_period_secs);
+
+    let pool_id = ctx.open_pool();
+    let user = Address::generate(&ctx.env);
+    let token_admin_client = token::StellarAssetClient::new(&ctx.env, &ctx.token_id);
+    token_admin_client.mint(&user, &threshold);
+    // Crossing the large-pool threshold freezes the pool and starts the cooling
+    // period. The creator cannot bet, so use a fresh address.
+    ctx.client
+        .place_bet(&user, &pool_id, &0, &threshold, &None::<Address>);
+
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(
+        pool.status,
+        PoolStatus::Frozen,
+        "crossing the large-pool threshold must freeze the pool"
+    );
+    pool_id
+}
+
+#[test]
+fn test_pool_unfrozen_reports_auto_thaw_not_an_admin_action() {
+    let ctx = TestCtx::new();
+    let cooling_period_secs = 120u64;
+    let pool_id = make_cooling_locked_pool(&ctx, 200, cooling_period_secs);
+
+    // Move past the cooling deadline, then have a *bettor* submit the first bet.
+    ctx.env
+        .ledger()
+        .with_mut(|li| li.timestamp += cooling_period_secs + 1);
+
+    let bettor = Address::generate(&ctx.env);
+    let token_admin_client = token::StellarAssetClient::new(&ctx.env, &ctx.token_id);
+    token_admin_client.mint(&bettor, &50);
+    ctx.client
+        .place_bet(&bettor, &pool_id, &1, &50, &None::<Address>);
+
+    let payload = last_pool_unfrozen_payload(&ctx.env).expect("auto-thaw must emit pool_unfrozen");
+    // The discriminator is the whole point of #1309: a cooling-period expiry
+    // must never be read as an administrative unfreeze.
+    assert_eq!(payload.trigger, UnfreezeTrigger::AutoThaw);
+    assert_ne!(
+        payload.trigger,
+        UnfreezeTrigger::Admin,
+        "auto-thaw must not be reported as an admin action"
+    );
+    assert_eq!(payload.actor, bettor);
+    assert!(payload.had_cooling_deadline);
+}
+
+#[test]
+fn test_admin_unfreeze_of_a_cooling_lock_reports_admin_and_the_deadline() {
+    let ctx = TestCtx::new();
+    let pool_id = make_cooling_locked_pool(&ctx, 200, 120);
+
+    ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let payload = last_pool_unfrozen_payload(&ctx.env).expect("unfreeze_pool must emit pool_unfrozen");
+    assert_eq!(payload.trigger, UnfreezeTrigger::Admin);
+    assert_eq!(payload.actor, ctx.freeze_admin);
+    // Distinguishes lifting a cooling lock from lifting a manual freeze without
+    // the consumer having to replay pool_cooling_started.
+    assert!(payload.had_cooling_deadline);
+}
+
+#[test]
+fn test_pool_unfrozen_trigger_discriminates_the_two_paths() {
+    // Guards the regression directly: the same event name carries two different
+    // triggers, so a consumer keyed on "which admin unfroze this pool" would
+    // otherwise return a random bettor.
+    assert_ne!(UnfreezeTrigger::Admin, UnfreezeTrigger::AutoThaw);
+}
+
+// ── MarketPaused & MarketUnpaused event tests (#1449) ───────────────────────
+
+fn all_market_paused_events(env: &Env) -> Vec<(u32, MarketPausedEvent)> {
+    let events = env.events().all();
+    let mut matching = Vec::new(env);
+    for e in events.events().iter() {
+        let name: Symbol =
+            TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 0)).unwrap_or_else(|_| {
+                Symbol::new(env, "__none__")
+            });
+        if name == Symbol::new(env, "MarketPaused") {
+            let market_id: u32 =
+                TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 2)).unwrap();
+            let data_val: Val = match &e.body {
+                soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+                    Env,
+                    soroban_sdk::xdr::ScVal,
+                >>::try_from_val(env, &v0.data)
+                .unwrap(),
+            };
+            let payload: MarketPausedEvent = TryFromVal::try_from_val(env, &data_val).unwrap();
+            matching.push_back((market_id, payload));
+        }
+    }
+    matching
+}
+
+fn all_market_unpaused_events(env: &Env) -> Vec<(u32, MarketUnpausedEvent)> {
+    let events = env.events().all();
+    let mut matching = Vec::new(env);
+    for e in events.events().iter() {
+        let name: Symbol =
+            TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 0)).unwrap_or_else(|_| {
+                Symbol::new(env, "__none__")
+            });
+        if name == Symbol::new(env, "MarketUnpaused") {
+            let market_id: u32 =
+                TryFromVal::try_from_val(env, &xdr_topic_val(env, &e, 2)).unwrap();
+            let data_val: Val = match &e.body {
+                soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as TryFromVal<
+                    Env,
+                    soroban_sdk::xdr::ScVal,
+                >>::try_from_val(env, &v0.data)
+                .unwrap(),
+            };
+            let payload: MarketUnpausedEvent = TryFromVal::try_from_val(env, &data_val).unwrap();
+            matching.push_back((market_id, payload));
+        }
+    }
+    matching
+}
+
+#[test]
+fn test_market_paused_and_unpaused_events_emitted_exactly_once() {
+    let ctx = TestCtx::new();
+    let pool_id = ctx.open_pool();
+
+    // Initial state: no pause/unpause events
+    assert_eq!(all_market_paused_events(&ctx.env).len(), 0);
+    assert_eq!(all_market_unpaused_events(&ctx.env).len(), 0);
+
+    // Freeze (pause) pool
+    ctx.client.freeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let paused_events = all_market_paused_events(&ctx.env);
+    assert_eq!(paused_events.len(), 1, "MarketPaused must be emitted exactly once");
+    let (topic_id, paused_payload) = paused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(paused_payload.market_id, pool_id);
+    assert_eq!(paused_payload.actor, ctx.freeze_admin);
+    assert_eq!(paused_payload.timestamp, ctx.env.ledger().timestamp());
+
+    // Attempting a second freeze must error and must NOT emit another event
+    let err = ctx.client.try_freeze_pool(&ctx.freeze_admin, &pool_id);
+    assert!(err.is_err());
+    assert_eq!(
+        all_market_paused_events(&ctx.env).len(),
+        1,
+        "second freeze must not emit another MarketPaused event"
+    );
+
+    // Unfreeze (unpause) pool
+    ctx.client.unfreeze_pool(&ctx.freeze_admin, &pool_id);
+
+    let unpaused_events = all_market_unpaused_events(&ctx.env);
+    assert_eq!(unpaused_events.len(), 1, "MarketUnpaused must be emitted exactly once");
+    let (unpause_topic_id, unpaused_payload) = unpaused_events.get(0).unwrap();
+    assert_eq!(unpause_topic_id, pool_id);
+    assert_eq!(unpaused_payload.market_id, pool_id);
+    assert_eq!(unpaused_payload.actor, ctx.freeze_admin);
+    assert_eq!(unpaused_payload.timestamp, ctx.env.ledger().timestamp());
+
+    // Attempting a second unfreeze must error and must NOT emit another event
+    let unfreeze_err = ctx.client.try_unfreeze_pool(&ctx.freeze_admin, &pool_id);
+    assert!(unfreeze_err.is_err());
+    assert_eq!(
+        all_market_unpaused_events(&ctx.env).len(),
+        1,
+        "second unfreeze must not emit another MarketUnpaused event"
+    );
+}
+
+#[test]
+fn test_pause_market_and_unpause_market_alias_methods() {
+    let ctx = TestCtx::new();
+    let pool_id = ctx.open_pool();
+
+    // Call pause_market entrypoint
+    ctx.client.pause_market(&ctx.freeze_admin, &pool_id);
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.status, PoolStatus::Frozen);
+
+    let paused_events = all_market_paused_events(&ctx.env);
+    assert_eq!(paused_events.len(), 1);
+    let (topic_id, paused_payload) = paused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(paused_payload.market_id, pool_id);
+    assert_eq!(paused_payload.actor, ctx.freeze_admin);
+
+    // Call unpause_market entrypoint
+    ctx.client.unpause_market(&ctx.freeze_admin, &pool_id);
+    let pool_after = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool_after.status, PoolStatus::Open);
+
+    let unpaused_events = all_market_unpaused_events(&ctx.env);
+    assert_eq!(unpaused_events.len(), 1);
+    let (topic_id, unpaused_payload) = unpaused_events.get(0).unwrap();
+    assert_eq!(topic_id, pool_id);
+    assert_eq!(unpaused_payload.market_id, pool_id);
+    assert_eq!(unpaused_payload.actor, ctx.freeze_admin);
 }

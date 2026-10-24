@@ -46,10 +46,13 @@ import { generateMockPoolActivityEvents } from '../lib/pool-activity-mock';
 
 const fetchPoolActivity = useCallback(
   async (id: number, limit: number): Promise<PoolActivityEvent[]> => {
-    // TODO: Replace with real API call
-    // Temporary: Use mock data for development
-    const mockEvents = generateMockPoolActivityEvents(id, 15);
-    return mockEvents;
+    // Real Soroban RPC path via adapters/activity.ts.
+    // Set NEXT_PUBLIC_ACTIVITY_FIXTURES=true to use deterministic seeded fixtures.
+    // Ignored in a production build (#1306) and a "Demo data" banner is shown
+    // over the timeline whenever fixtures are actually serving rows.
+    const { fetchPoolActivity } = await import('../lib/adapters/activity');
+    const res = await fetchPoolActivity(id, { limit });
+    return res.items;
   },
   []
 );
@@ -105,7 +108,7 @@ duration_extended      →  'duration-extended'
 'use client';
 
 import { use } from 'react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 import PoolActivityTimeline from '../../components/PoolActivityTimeline';
 import { predinexReadApi } from '../../lib/adapters/predinex-read-api';
 import type { Pool } from '../../lib/adapters/types';

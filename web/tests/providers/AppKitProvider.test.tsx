@@ -20,7 +20,12 @@ describe('AppKitProvider — issue #210', () => {
   beforeEach(() => {
     createAppKitMock.mockReset();
     vi.resetModules();
+
+    // AppKitProvider reads NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID at module load time.
+    process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID = 'test-walletconnect-project-id';
   });
+
+
 
   it('initializes AppKit without any Stacks chain ids', async () => {
     await import('@/providers/AppKitProvider');

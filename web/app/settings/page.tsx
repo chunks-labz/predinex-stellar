@@ -2,20 +2,26 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState, type ElementType, type ReactNode } from 'react';
-import Navbar from '../components/Navbar';
-import { useWallet } from '../components/WalletAdapterProvider';
-import { getMarkets, getUserActivity, type Pool, type ActivityItem } from '../lib/stacks-api';
+import Navbar from '@/components/Navbar';
+import { createScopedLogger } from '@/app/lib/logger';
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { getMarkets } from '../lib/soroban-read-api';
+import { predinexReadApi } from '../lib/adapters/predinex-read-api';
+import type { Pool, ActivityItem } from '../lib/market-types';
 import { useI18n, supportedLanguages, type AppLanguage } from '../lib/i18n';
 import { useBrowserNotifications } from '../lib/notifications';
 import { useNotificationPreferences } from '../lib/hooks/useNotificationPreferences';
+import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { exportRecords } from '../lib/export';
 import { Bell, Download, Languages, LoaderCircle, FileDown, Globe2, ChevronRight } from 'lucide-react';
 
+const log = createScopedLogger('SettingsPage');
+
 function StatPill({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-xl border border-border bg-card/40 px-4 py-3">
+    <div className="min-w-0 rounded-xl border border-border bg-card/40 px-4 py-3">
       <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="mt-1 text-lg font-semibold">{value}</p>
+      <p className="mt-1 text-lg font-semibold break-words">{value}</p>
     </div>
   );
 }
@@ -56,22 +62,32 @@ export default function SettingsPage() {
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [isExporting, setIsExporting] = useState<string | null>(null);
+  const [exportLoadError, setExportLoadError] = useState<string | null>(null);
+  // A stored "on" means nothing without browser permission.
+  const notificationsOn = notifications.enabled && notifications.permission === 'granted';
+  const notificationsBlocked =
+    notifications.permission === 'denied' || notifications.supportStatus === 'unsupported';
 
   useEffect(() => {
     let active = true;
 
     async function loadExportData() {
       setIsLoadingData(true);
+      setExportLoadError(null);
 
       try {
         const [marketData, activityData] = await Promise.all([
           getMarkets('all'),
-          address ? getUserActivity(address, 25) : Promise.resolve([]),
+          address ? predinexReadApi.getUserActivity(address, 25) : Promise.resolve([]),
         ]);
 
         if (!active) return;
         setPools(marketData);
         setActivity(activityData);
+      } catch (error) {
+        // Previously unhandled: the card said "Ready" and exported empty files.
+        log.error('Failed to load export data:', error);
+        if (active) setExportLoadError('Could not load your data for export. Reload the page to try again.');
       } finally {
         if (active) {
           setIsLoadingData(false);
@@ -149,6 +165,7 @@ export default function SettingsPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
 
+      <RouteErrorBoundary routeName="Settings">
       <div className="mx-auto max-w-7xl px-4 pb-16 pt-24 sm:px-6 lg:px-8">
         <div className="mb-8 flex flex-col gap-3">
           <div className="inline-flex items-center gap-2 text-sm font-medium text-primary">
@@ -182,23 +199,28 @@ export default function SettingsPage() {
 
           <SettingsCard icon={Bell} title={t('settings.notifications')} body={t('settings.notificationsBody')}>
             <div className="space-y-4">
+              {/* A stored "on" means nothing without browser permission. */}
+              {(() => null)()}
               <div className="flex items-center justify-between rounded-xl border border-border bg-card/40 px-4 py-3">
                 <div>
-                  <p className="font-medium">
-                    {notifications.enabled ? t('settings.notificationsOn') : t('settings.notificationsOff')}
+                  <p id="browser-notifications-label" className="font-medium">
+                    {notificationsOn ? t('settings.notificationsOn') : t('settings.notificationsOff')}
                   </p>
                   <p className="text-xs text-muted-foreground">{notifications.permission}</p>
                   {notifications.error && <p className="text-xs text-red-400">{notifications.error}</p>}
                 </div>
                 <button
                   type="button"
-                  onClick={() => notifications.setEnabled(!notifications.enabled)}
-                  disabled={notifications.permission === 'denied' || notifications.supportStatus === 'unsupported'}
+                  role="switch"
+                  aria-checked={notificationsOn}
+                  aria-labelledby="browser-notifications-label"
+                  onClick={() => notifications.setEnabled(!notificationsOn)}
+                  disabled={notificationsBlocked}
                   className={`rounded-full px-4 py-2 text-sm font-semibold transition-colors ${
-                    notifications.enabled ? 'bg-green-500/15 text-green-400' : 'bg-muted/50 text-muted-foreground'
+                    notificationsOn ? 'bg-green-500/15 text-green-400' : 'bg-muted/50 text-muted-foreground'
                   } disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  {notifications.enabled ? 'On' : 'Off'}
+                  <span aria-hidden="true">{notificationsOn ? 'On' : 'Off'}</span>
                 </button>
               </div>
 
@@ -222,9 +244,10 @@ export default function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => void notifications.sendTestNotification()}
-                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 font-semibold transition-colors hover:bg-card"
+                  disabled={notificationsBlocked}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 font-semibold transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <Bell className="h-4 w-4" />
+                  <Bell className="h-4 w-4" aria-hidden="true" />
                   {t('settings.testNotification')}
                 </button>
               </div>
@@ -235,7 +258,7 @@ export default function SettingsPage() {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                disabled={isLoadingData || isExporting !== null}
+                disabled={isLoadingData || !!exportLoadError || isExporting !== null}
                 onClick={() => void handleExport('pools-csv')}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 text-sm font-semibold transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -244,7 +267,7 @@ export default function SettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={isLoadingData || isExporting !== null}
+                disabled={isLoadingData || !!exportLoadError || isExporting !== null}
                 onClick={() => void handleExport('pools-json')}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 text-sm font-semibold transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -253,7 +276,7 @@ export default function SettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={!isConnected || isLoadingData || isExporting !== null}
+                disabled={!isConnected || isLoadingData || !!exportLoadError || isExporting !== null}
                 onClick={() => void handleExport('activity-csv')}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 text-sm font-semibold transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -262,7 +285,7 @@ export default function SettingsPage() {
               </button>
               <button
                 type="button"
-                disabled={!isConnected || isLoadingData || isExporting !== null}
+                disabled={!isConnected || isLoadingData || !!exportLoadError || isExporting !== null}
                 onClick={() => void handleExport('activity-json')}
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-card/40 px-4 py-3 text-sm font-semibold transition-colors hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -271,17 +294,26 @@ export default function SettingsPage() {
               </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-3">
               <StatPill label="Markets" value={pools.length} />
               <StatPill label="Activity" value={activity.length} />
               <StatPill label="Wallet" value={isConnected ? 'Connected' : 'Disconnected'} />
-              <StatPill label="Data" value={isLoadingData ? t('settings.loadingData') : 'Ready'} />
+              <StatPill
+                label="Data"
+                value={isLoadingData ? t('settings.loadingData') : exportLoadError ? 'Unavailable' : 'Ready'}
+              />
             </div>
+            {exportLoadError && (
+              <p role="alert" className="mt-3 text-sm text-red-400">
+                {exportLoadError}
+              </p>
+            )}
 
             {!isConnected && <p className="text-sm text-muted-foreground">{t('settings.noWallet')}</p>}
           </SettingsCard>
         </div>
       </div>
+      </RouteErrorBoundary>
     </main>
   );
 }

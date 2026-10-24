@@ -3,15 +3,24 @@
 import Link from 'next/link';
 import { useMemo } from 'react';
 import { ArrowLeft, BarChart2, X, Eraser } from 'lucide-react';
-import Navbar from '../components/Navbar';
+import Navbar from '@/components/Navbar';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { useMarketDiscovery } from '../lib/hooks/useMarketDiscovery';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '../lib/hooks/usePoolComparison';
 import { formatSTXAmount } from '../lib/market-utils';
-import { blocksToSeconds } from '../lib/countdown-utils';
 import { formatDisplayAddress } from '../lib/address-display';
-import CountdownTimer from '../components/CountdownTimer';
+import CountdownTimer from '@/components/CountdownTimer';
 import type { ProcessedMarket } from '../lib/market-types';
+
+/**
+ * `timeRemaining` is `null` once a pool is past expiry, which the timer reads
+ * as "unknown" ("--" / "Loading time remaining"). Past-expiry pools that are
+ * no longer active must render as expired instead.
+ */
+function countdownSeconds(m: ProcessedMarket): number | null {
+  if (m.timeRemaining !== null) return m.timeRemaining;
+  return m.status === 'active' ? null : 0;
+}
 
 const COMPARISON_ROWS: Array<{
   label: string;
@@ -74,7 +83,7 @@ const COMPARISON_ROWS: Array<{
     label: 'End time',
     render: (m) => (
       <CountdownTimer
-        secondsRemaining={m.status === 'expired' ? null : blocksToSeconds(m.timeRemaining)}
+        secondsRemaining={countdownSeconds(m)}
         settled={m.status === 'settled'}
         showIcon
       />
@@ -198,6 +207,19 @@ function CompareContent() {
           </div>
         )}
 
+        {isLoading && comparedMarkets.length === 0 ? (
+          <div role="status" aria-live="polite" className="space-y-4">
+            <span className="sr-only">Loading selected pools…</span>
+            {Array.from({ length: count }, (_, i) => (
+              <div
+                key={i}
+                aria-hidden="true"
+                className="h-24 rounded-xl border border-border bg-muted/30 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : (
+        <>
         {/* Desktop / tablet table */}
         <div className="hidden md:block overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-left">
@@ -281,6 +303,8 @@ function CompareContent() {
             </div>
           ))}
         </div>
+        </>
+        )}
       </div>
     </main>
   );

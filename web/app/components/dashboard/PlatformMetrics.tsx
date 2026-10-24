@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { TrendingUp, Activity } from 'lucide-react';
-import { PlatformMetrics as PlatformMetricsType } from '../../lib/dashboard-types';
+import { PlatformMetrics as PlatformMetricsType } from '../../lib/market-types';
 import { formatCurrency, formatPercentage } from '../../lib/dashboard-utils';
 import { selectPlatformMetricCards, selectMarketDistribution, selectVolumeMetrics } from '../../lib/dashboard-selectors';
 

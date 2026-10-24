@@ -17,6 +17,11 @@ export const MAX_OUTCOME_LENGTH = 50;
 export const MIN_POOL_DURATION_SECS = 300;
 export { MAX_POOL_DURATION_SECS };
 
+// A pool supports between 2 and 20 outcomes on-chain. The UI previously capped
+// creation at 10; the contract actually accepts up to 20.
+export const MIN_OUTCOME_COUNT = 2;
+export const MAX_OUTCOME_COUNT = 20;
+
 /**
  * Validate a Stacks contract identifier in `<address>.<name>` form.
  * The address prefix must match the target network when specified.
@@ -106,6 +111,45 @@ export function validateOutcome(outcome: string): { valid: boolean; error?: stri
   if (outcome.length < 2) {
     return { valid: false, error: 'Outcome must be at least 2 characters' };
   }
+  return { valid: true };
+}
+
+/**
+ * Validate a full list of pool outcomes against the on-chain limits.
+ *
+ * The contract accepts between `MIN_OUTCOME_COUNT` and `MAX_OUTCOME_COUNT`
+ * (20) outcomes. Each entry must be a valid outcome label and all entries must
+ * be unique (case-insensitive).
+ *
+ * @param outcomes The candidate outcome labels
+ * @returns Validation result
+ */
+export function validateOutcomesList(
+  outcomes: string[]
+): { valid: boolean; error?: string } {
+  if (!Array.isArray(outcomes) || outcomes.length < MIN_OUTCOME_COUNT) {
+    return {
+      valid: false,
+      error: `A pool requires at least ${MIN_OUTCOME_COUNT} outcomes`,
+    };
+  }
+  if (outcomes.length > MAX_OUTCOME_COUNT) {
+    return {
+      valid: false,
+      error: `A pool supports at most ${MAX_OUTCOME_COUNT} outcomes`,
+    };
+  }
+
+  for (const outcome of outcomes) {
+    const result = validateOutcome(outcome);
+    if (!result.valid) return result;
+  }
+
+  const normalized = outcomes.map((o) => o.trim().toLowerCase());
+  if (new Set(normalized).size !== normalized.length) {
+    return { valid: false, error: 'Outcomes must be unique' };
+  }
+
   return { valid: true };
 }
 
@@ -287,3 +331,4 @@ export function getHelpText(field: PoolCreationField | string): string {
   if (field === 'duration') return 'Duration is measured in seconds.';
   return '';
 }
+export * from '@/lib/validators';

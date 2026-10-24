@@ -1,6 +1,6 @@
 .PHONY: benchmark benchmark-report test fmt clippy
 
-CARGO := $(HOME)/.cargo/bin/cargo
+CARGO ?= cargo
 CONTRACT_DIR := contracts/predinex
 
 # Run the full performance benchmark suite and print a summary table.
@@ -27,10 +27,10 @@ benchmark-report:
 	fi
 
 test:
-	cd $(CONTRACT_DIR) && $(CARGO) test
+	$(CARGO) test --workspace
 
 fmt:
-	cd $(CONTRACT_DIR) && $(CARGO) fmt
+	$(CARGO) fmt --all
 
 clippy:
-	cd $(CONTRACT_DIR) && $(CARGO) clippy -- -D warnings
+	$(CARGO) clippy --workspace -- -D warnings

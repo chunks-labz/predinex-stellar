@@ -34,7 +34,7 @@ Each event uses `event_version()` which returns `Symbol("v1")` as the canonical 
 ### create_pool
 Emitted when a new pool is created.
 
-- **Topics:** `(Symbol("create_pool"), pool_id: u32)` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("create_pool"), event_version(), pool_id: u32)`
 - **Data:** `CreatePoolEvent`
   - `creator: Address` — Pool creator
   - `expiry: u64` — Unix timestamp when the pool closes for new bets
@@ -157,7 +157,7 @@ Emitted when a pool is settled with a winning outcome.
 ### claim_winnings
 Emitted when a user claims winnings from a settled pool.
 
-- **Topics:** `(Symbol("claim_winnings"), pool_id: u32, user: Address)` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("claim_winnings"), event_version(), pool_id: u32, user: Address)`
 - **Data:** `ClaimEvent`
   - `amount: i128` — Payout amount
   - `fee_amount: i128` — Fee deducted
@@ -220,6 +220,16 @@ Emitted when a pool is frozen by freeze admin.
 - **Data:** `caller: Address`
 - **Indexer Use:** Lock pool state, display frozen status
 
+### MarketPaused
+Emitted when a market/pool is paused via `freeze_pool` or `pause_market`.
+
+- **Topics:** `(Symbol("MarketPaused"), event_version(), market_id: u32)`
+- **Data:** `MarketPausedEvent { market_id: u32, actor: Address, timestamp: u64 }`
+  - `market_id: u32` — Identifier of the paused market/pool
+  - `actor: Address` — Freeze admin who triggered the pause
+  - `timestamp: u64` — Ledger timestamp when the market was paused
+- **Indexer Use:** Track market pauses, notify subscribers, update UI status badges in real time
+
 ### pool_disputed
 Emitted when a settled pool is disputed.
 
@@ -228,11 +238,46 @@ Emitted when a settled pool is disputed.
 - **Indexer Use:** Flag pool as disputed, suspend claims
 
 ### pool_unfrozen
-Emitted when a frozen or disputed pool is unfrozen.
+Emitted when a frozen or disputed pool returns to `Open`.
 
 - **Topics:** `(Symbol("pool_unfrozen"), event_version(), pool_id: u32)`
-- **Data:** `caller: Address`
+- **Data:** `PoolUnfrozenEvent { actor: Address, trigger: UnfreezeTrigger, had_cooling_deadline: bool }`
 - **Indexer Use:** Update pool state, resume claims
+
+### MarketUnpaused
+Emitted when a market/pool is resumed/unpaused via `unfreeze_pool` or `unpause_market`.
+
+- **Topics:** `(Symbol("MarketUnpaused"), event_version(), market_id: u32)`
+- **Data:** `MarketUnpausedEvent { market_id: u32, actor: Address, timestamp: u64 }`
+  - `market_id: u32` — Identifier of the resumed market/pool
+  - `actor: Address` — Freeze admin who unpaused the market
+  - `timestamp: u64` — Ledger timestamp when the market was resumed
+- **Indexer Use:** Track market unpauses, re-enable betting and claiming UI, notify indexers
+
+`pool_unfrozen` has two distinct causes, and the address alone cannot tell them
+apart — an indexer that attributes the thaw to `actor` as an administrator will
+be wrong whenever a bettor's bet happens to reopen a pool.
+
+| `trigger` | Cause | `actor` is |
+| --- | --- | --- |
+| `Admin` | Freeze admin called `unfreeze_pool` | the freeze admin |
+| `AutoThaw` | A cooling period elapsed and the first `place_bet` reopened the pool | **the bettor**, not an administrator |
+
+`had_cooling_deadline` reports whether a `PoolCoolingUntil` deadline was set when
+the pool was frozen, so a consumer can tell a cooling-lock expiry from a manual
+freeze without replaying `pool_cooling_started`. It is `true` on every
+`AutoThaw` event, since a cooling deadline is what caused the thaw.
+
+**Migration note (#1309):** the data payload was widened from a bare
+`caller: Address`. Topics are unchanged and the version marker stays `"v1"`, so
+topic filters keep working and every `pool_unfrozen` event is still observed.
+Consumers that read the data payload must accept **both** shapes — events already
+on chain cannot be rewritten and carry the old bare `Address`. A consumer that
+encounters a bare address should treat the trigger as unknown rather than assume
+an admin action.
+
+Note that `override_pool_cooling` is a separate transition with its own
+`pool_cooling_overridden` event; it does not emit `pool_unfrozen`.
 
 ### pool_cooling_overridden
 Emitted when treasury admin overrides cooling lock.
@@ -305,6 +350,17 @@ Emitted when protocol fee in basis points is updated.
 - **Data:** `(caller: Address, fee_bps: u32)`
   - `fee_bps: u32` — Fee in basis points (10000 = 100%)
 - **Indexer Use:** Update fee display, recalculate fees
+
+### protocol_fee_cap_set
+Emitted when the maximum settlement protocol fee is configured.
+
+- **Topics:** `(Symbol("protocol_fee_cap_set"), event_version())`
+- **Data:** `(caller: Address, old_cap_bps: u32, cap_bps: u32)`
+- **Indexer Use:** Track the active settlement-fee ceiling
+
+Over-cap fee changes revert with `FeeOutOfBounds`. Since failed Soroban
+transactions do not retain emitted events, indexers should use the transaction
+error for rejected updates; only successful cap changes emit this event.
 
 ### fee_tiers_updated
 Emitted when volume-based protocol fee tiers are configured.
@@ -385,32 +441,20 @@ Emitted when freeze admin address is set.
 ## Contract Control Events
 
 ### contract_paused
-Emitted when the contract is paused.
+Emitted when the contract is paused via `set_paused(true)`, `pause_contract`, or any future
+wrapper that delegates to `set_paused`.
 
-- **Topics:** `(Symbol("contract_paused"))` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("contract_paused"), event_version())`
 - **Data:** `caller: Address`
-- **Indexer Use:** Alert users to maintenance
+- **Indexer Use:** Alert users to maintenance; gate any operation that reads `is_paused`
 
 ### contract_unpaused
-Emitted when the contract is unpaused.
+Emitted when the contract is unpaused via `set_paused(false)`, `unpause_contract`, or any
+future wrapper that delegates to `set_paused`.
 
-- **Topics:** `(Symbol("contract_unpaused"))` — *Note: No event_version() topic*
+- **Topics:** `(Symbol("contract_unpaused"), event_version())`
 - **Data:** `caller: Address`
 - **Indexer Use:** Notify users operations are live
-
-### PoolPaused (Deprecated)
-Alternative pause event (has event_version() unlike contract_paused).
-
-- **Topics:** `(Symbol("PoolPaused"), event_version())`
-- **Data:** `caller: Address`
-- **Note:** Use `contract_paused` instead for consistency
-
-### PoolUnpaused (Deprecated)
-Alternative unpause event.
-
-- **Topics:** `(Symbol("PoolUnpaused"), event_version())`
-- **Data:** `caller: Address`
-- **Note:** Use `contract_unpaused` instead for consistency
 
 ---
 
@@ -446,7 +490,7 @@ Emitted when a webhook is unregistered.
 
 2. **Decode event data:** Use the contract ABI to deserialize typed payloads
 3. **Handle schema versions:** Check topic[1] for version marker before decoding
-4. **Handle 4 legacy events:** `create_pool`, `claim_winnings`, `protocol_fee_set`, `contract_paused`/`unpaused` don't include `event_version()` — treat as `v1`
+4. Every event includes `event_version()` at topic position 1 — reject events whose version does not match the schema you support.
 
 ### For Monitoring
 Track these key metrics:
@@ -470,11 +514,7 @@ Lower-volume operational events (batch daily):
 
 ## Known Issues
 
-1. **Event Schema Inconsistencies:** Four events (`create_pool`, `claim_winnings`, `protocol_fee_set`, `contract_paused`/`contract_unpaused`) do not include `event_version()` for backward compatibility. Future major release should standardize.
-
-2. **Duplicate Pause Events:** `PoolPaused`/`PoolUnpaused` and `contract_paused`/`contract_unpaused` are redundant. Deprecate the former in favor of latter.
-
-3. **Webhook URL Logging:** The `webhook_registered` and `webhook_unregistered` events currently emit URL strings which may be logged publicly. Future versions should emit webhook ID hash instead.
+1. **Webhook URL Logging:** The `webhook_registered` and `webhook_unregistered` events currently emit URL strings which may be logged publicly. Future versions should emit webhook ID hash instead.
 
 ---
 
@@ -486,3 +526,9 @@ Lower-volume operational events (batch daily):
 - 4 legacy events without version marker for backward compatibility
 - Full typed event payloads for indexer reliability
 
+### Recent fixes
+- **#1054** — `PoolPaused` / `PoolUnpaused` removed. All three pause entry
+  points (`set_paused`, `pause_contract`, `unpause_contract`) now emit the
+  canonical `contract_paused` / `contract_unpaused` with `event_version()` via
+  a single code path in `set_paused`. Off-chain indexers need only subscribe to
+  `contract_paused` / `contract_unpaused`.

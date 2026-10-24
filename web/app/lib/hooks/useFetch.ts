@@ -2,15 +2,15 @@
  * Custom hook for fetching data with caching and error handling
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { cache } from '../cache';
 import { parseContractError } from '../error-handler';
 
-interface UseFetchOptions {
+interface UseFetchOptions<T> {
   cacheKey?: string;
   cacheTTL?: number;
   immediate?: boolean;
-  onSuccess?: (data: any) => void;
+  onSuccess?: (data: T) => void;
   onError?: (error: Error) => void;
 }
 
@@ -25,7 +25,7 @@ interface UseFetchState<T> {
  */
 export function useFetch<T>(
   url: string,
-  options: UseFetchOptions = {}
+  options: UseFetchOptions<T> = {}
 ) {
   const {
     cacheKey = url,
@@ -41,29 +41,53 @@ export function useFetch<T>(
     error: null,
   });
 
+  const isMountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const fetch = useCallback(async () => {
     // Check cache first
     const cached = cache.get<T>(cacheKey);
     if (cached) {
-      setState({ data: cached, loading: false, error: null });
+      if (isMountedRef.current) {
+        setState({ data: cached, loading: false, error: null });
+      }
       onSuccess?.(cached);
       return cached;
     }
 
-    setState(prev => ({ ...prev, loading: true, error: null }));
+    if (isMountedRef.current) {
+      setState(prev => ({ ...prev, loading: true, error: null }));
+    }
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      const response = await global.fetch(url);
+      const response = await global.fetch(url, { signal: controller.signal });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const data = await response.json();
       cache.set(cacheKey, data, cacheTTL);
-      setState({ data, loading: false, error: null });
+      if (isMountedRef.current) {
+        setState({ data, loading: false, error: null });
+      }
       onSuccess?.(data);
       return data;
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
       const err = error instanceof Error ? error : new Error(String(error));
-      setState({ data: null, loading: false, error: err });
+      if (isMountedRef.current) {
+        setState({ data: null, loading: false, error: err });
+      }
       onError?.(err);
       throw err;
     }
@@ -73,6 +97,9 @@ export function useFetch<T>(
     if (immediate) {
       fetch();
     }
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [fetch, immediate]);
 
   const refetch = useCallback(() => {

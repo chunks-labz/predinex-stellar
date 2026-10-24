@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/react';
-import PWAInstallPrompt from '../../app/components/PWAInstallPrompt';
+import PWAInstallPrompt, {
+  PWA_INSTALL_DISMISSED_KEY,
+  PWA_INSTALL_SNOOZE_MS,
+} from '@/components/PWAInstallPrompt';
 
 interface MockPromptEvent extends Event {
   prompt: ReturnType<typeof vi.fn>;
@@ -18,7 +21,10 @@ function fireBeforeInstallPrompt(outcome: 'accepted' | 'dismissed' = 'accepted')
 }
 
 describe('PWAInstallPrompt', () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    localStorage.clear();
+  });
 
   it('stays hidden until the browser offers an install prompt', () => {
     render(<PWAInstallPrompt />);
@@ -48,6 +54,39 @@ describe('PWAInstallPrompt', () => {
     fireBeforeInstallPrompt();
 
     fireEvent.click(screen.getByRole('button', { name: /dismiss install prompt/i }));
+    expect(screen.queryByRole('dialog', { name: /install predinex/i })).toBeNull();
+  });
+
+  it('remembers a dismissal across reloads', () => {
+    const first = render(<PWAInstallPrompt />);
+    fireBeforeInstallPrompt();
+    fireEvent.click(screen.getByRole('button', { name: /dismiss install prompt/i }));
+    first.unmount();
+
+    // Browsers fire beforeinstallprompt again on the next page load.
+    render(<PWAInstallPrompt />);
+    fireBeforeInstallPrompt();
+    expect(screen.queryByRole('dialog', { name: /install predinex/i })).toBeNull();
+  });
+
+  it('offers the banner again once the snooze has expired', () => {
+    localStorage.setItem(
+      PWA_INSTALL_DISMISSED_KEY,
+      String(Date.now() - PWA_INSTALL_SNOOZE_MS - 1)
+    );
+    render(<PWAInstallPrompt />);
+    fireBeforeInstallPrompt();
+    expect(screen.getByRole('dialog', { name: /install predinex/i })).toBeInTheDocument();
+  });
+
+  it('hides the banner even if the deferred prompt rejects', async () => {
+    render(<PWAInstallPrompt />);
+    const event = fireBeforeInstallPrompt();
+    event.prompt.mockRejectedValue(new Error('already used'));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Install' }));
+    });
     expect(screen.queryByRole('dialog', { name: /install predinex/i })).toBeNull();
   });
 });

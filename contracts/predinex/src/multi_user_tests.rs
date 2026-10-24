@@ -29,11 +29,9 @@ fn setup_multi_user() -> MultiUserEnv<'static> {
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
 
     let contract_id = env.register(PredinexContract, ());
-    let client = PredinexContractClient::new(&env, &contract_id);
+    let client: PredinexContractClient<'static> = PredinexContractClient::new(&env, &contract_id);
 
-    client.initialize(&token_id.address(), &token_admin);
-
-    let client: PredinexContractClient<'static> = unsafe { core::mem::transmute(client) };
+    client.initialize(&token_id.address(), &token_admin, &token_admin);
 
     MultiUserEnv {
         env,
@@ -52,6 +50,7 @@ fn mint(env: &Env, token: &Address, user: &Address, amount: i128) {
 /// Create a standard 1-hour pool and return its ID.
 fn make_pool_mu(t: &MultiUserEnv) -> u32 {
     let creator = Address::generate(&t.env);
+    mint(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     t.client.create_pool(
         &creator,
         &String::from_str(&t.env, "Accumulation Pool"),
@@ -59,6 +58,8 @@ fn make_pool_mu(t: &MultiUserEnv) -> u32 {
         &String::from_str(&t.env, "Yes"),
         &String::from_str(&t.env, "No"),
         &3_600u64,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
     )
 }
 
@@ -637,8 +638,8 @@ fn l1_fifty_users_same_pool_multiple_winner_claims() {
     );
     assert_eq!(
         token_client.balance(&contract_addr),
-        total_pool,
-        "contract escrow must hold every staked token"
+        total_pool + MIN_CREATOR_DEPOSIT,
+        "contract escrow must hold every staked token plus the creator deposit"
     );
 
     let fee = (total_pool * 200) / 10_000; // 80
@@ -780,8 +781,8 @@ fn l2_settle_and_claim_rapid_succession() {
             // escrow must equal exactly the treasury balance — nothing stranded.
             assert_eq!(
                 token_client.balance(&contract_addr),
-                treasury,
-                "escrow must equal the treasury balance once all winners claim"
+                treasury + MIN_CREATOR_DEPOSIT,
+                "escrow must equal the treasury balance plus the creator deposit once all winners claim"
             );
         }
     }
@@ -869,9 +870,10 @@ fn l3_rapid_interleaved_bets_then_batch_claim_consistent() {
         }
         let mut ids = Vec::new(&t.env);
         ids.push_back(pool_id);
-        let entries = t.client.claim_all_winnings(u, &ids);
-        assert_eq!(entries.len(), 1, "one entry per claimable pool");
-        let entry = entries.get(0).unwrap();
+        let batch = t.client.claim_all_winnings(u, &ids);
+        assert_eq!(batch.results.len(), 1, "one entry per claimable pool");
+        let entry = batch.results.get(0).unwrap();
+        assert_eq!(entry.error_code, 0, "claim must succeed");
         let expected = (expected_a_stake[i] * net) / total_a;
         assert_eq!(
             entry.amount, expected,
@@ -893,5 +895,161 @@ fn l3_rapid_interleaved_bets_then_batch_claim_consistent() {
         total_paid + treasury,
         total_pool,
         "payouts plus treasury must equal the total staked (conservation)"
+    );
+}
+
+/// L4: Leaderboard returns entries sorted by total bet descending.
+///
+/// Five users bet different amounts on the same pool. `get_leaderboard`
+/// must return them ordered by total_bet from highest to lowest.
+#[test]
+fn l4_leaderboard_ordered_by_total_bet_descending() {
+    let t = setup_multi_user();
+    let pool_id = make_pool_mu(&t);
+
+    let users: alloc::vec::Vec<Address> = (0..5).map(|_| Address::generate(&t.env)).collect();
+    let amounts = [
+        1_000_000_000i128,
+        500_000_000i128,
+        2_000_000_000i128,
+        750_000_000i128,
+        1_500_000_000i128,
+    ];
+
+    for (user, &amount) in users.iter().zip(amounts.iter()) {
+        mint(&t.env, &t.token, user, amount);
+        t.client
+            .place_bet(user, &pool_id, &0u32, &amount, &None::<Address>);
+    }
+
+    let leaderboard = t.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
+
+    assert_eq!(leaderboard.len(), 5, "all five users must appear");
+
+    let expected_order = [
+        2_000_000_000i128,
+        1_500_000_000i128,
+        1_000_000_000i128,
+        750_000_000i128,
+        500_000_000i128,
+    ];
+    for i in 0..leaderboard.len() {
+        assert_eq!(
+            leaderboard.get(i).unwrap().total_bet,
+            expected_order[i as usize],
+            "entry #{} must have correct total_bet",
+            i
+        );
+    }
+}
+
+/// L5: Leaderboard cursor pagination skips entries before the cursor.
+///
+/// After fetching the top 2 entries, pass the last user address as cursor
+/// to get the remaining 3 entries.
+#[test]
+fn l5_leaderboard_cursor_pagination() {
+    let t = setup_multi_user();
+    let pool_id = make_pool_mu(&t);
+
+    let users: alloc::vec::Vec<Address> = (0..5).map(|_| Address::generate(&t.env)).collect();
+    let amounts = [
+        1_000_000_000i128,
+        500_000_000i128,
+        2_000_000_000i128,
+        750_000_000i128,
+        1_500_000_000i128,
+    ];
+
+    for (user, &amount) in users.iter().zip(amounts.iter()) {
+        mint(&t.env, &t.token, user, amount);
+        t.client
+            .place_bet(user, &pool_id, &0u32, &amount, &None::<Address>);
+    }
+
+    // Fetch top 2.
+    let page1 = t.client.get_leaderboard(&pool_id, &2u32, &None::<Address>);
+    assert_eq!(page1.len(), 2, "page 1 must have 2 entries");
+    assert_eq!(page1.get(0).unwrap().total_bet, 2_000_000_000i128);
+    assert_eq!(page1.get(1).unwrap().total_bet, 1_500_000_000i128);
+
+    // Fetch remaining with cursor = last user from page 1.
+    let cursor = page1.get(1).unwrap().user.clone();
+    let page2 = t.client.get_leaderboard(&pool_id, &50u32, &Some(cursor));
+    assert_eq!(page2.len(), 3, "page 2 must have the remaining 3 entries");
+    assert_eq!(page2.get(0).unwrap().total_bet, 1_000_000_000i128);
+    assert_eq!(page2.get(1).unwrap().total_bet, 750_000_000i128);
+    assert_eq!(page2.get(2).unwrap().total_bet, 500_000_000i128);
+}
+
+/// L6: Leaderboard limit is capped at 50.
+///
+/// Even if a pool has many participants, requesting limit > 50 should
+/// return at most 50 entries.
+#[test]
+fn l6_leaderboard_limit_capped_at_fifty() {
+    let t = setup_multi_user();
+    let pool_id = make_pool_mu(&t);
+
+    let num_users = 60usize;
+    let users: alloc::vec::Vec<Address> =
+        (0..num_users).map(|_| Address::generate(&t.env)).collect();
+
+    for user in &users {
+        mint(&t.env, &t.token, user, 100);
+        t.client
+            .place_bet(user, &pool_id, &0u32, &100i128, &None::<Address>);
+    }
+
+    let leaderboard = t
+        .client
+        .get_leaderboard(&pool_id, &100u32, &None::<Address>);
+    assert_eq!(
+        leaderboard.len(),
+        50,
+        "leaderboard must be capped at 50 entries"
+    );
+}
+
+/// L7: Leaderboard rejects a cursor that is not in the entry list.
+///
+/// #1176 — An unknown cursor used to leave `start_index` at 0, so the call
+/// silently answered with page 1. The caller must get a hard error instead.
+#[test]
+fn l7_leaderboard_unknown_cursor_rejected() {
+    let t = setup_multi_user();
+    let pool_id = make_pool_mu(&t);
+
+    let bettor = Address::generate(&t.env);
+    let outsider = Address::generate(&t.env);
+    mint(&t.env, &t.token, &bettor, 1_000);
+    t.client
+        .place_bet(&bettor, &pool_id, &0u32, &1_000i128, &None::<Address>);
+
+    assert_eq!(
+        t.client
+            .try_get_leaderboard(&pool_id, &50u32, &Some(outsider.clone()))
+            .err(),
+        Some(Ok(ContractError::InvalidLeaderboardCursor)),
+        "a cursor that never bet on this pool must not fall back to page 1"
+    );
+
+    // A pool with no bettors at all cannot resolve a cursor either.
+    let empty_pool = make_pool_mu(&t);
+    assert_eq!(
+        t.client
+            .try_get_leaderboard(&empty_pool, &50u32, &Some(outsider))
+            .err(),
+        Some(Ok(ContractError::InvalidLeaderboardCursor)),
+        "a cursor against an empty leaderboard must be rejected"
+    );
+
+    // The bettor themselves remains a valid cursor.
+    let entries = t
+        .client
+        .get_leaderboard(&pool_id, &50u32, &Some(bettor));
+    assert!(
+        entries.is_empty(),
+        "the last entry as cursor yields no further pages"
     );
 }

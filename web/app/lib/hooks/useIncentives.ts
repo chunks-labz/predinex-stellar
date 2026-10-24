@@ -1,4 +1,6 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useIncentives');
 
 import { useState, useCallback } from 'react';
 import {
@@ -25,7 +27,8 @@ export function useIncentives() {
       betAmount: number,
       betPosition: number,
       poolVolume: number,
-      previousBetsCount: number
+      previousBetsCount: number,
+      isReferred: boolean
     ) => {
       try {
         const { total, breakdown } = calculateTotalIncentive(
@@ -33,6 +36,7 @@ export function useIncentives() {
           betPosition,
           poolVolume,
           previousBetsCount,
+          isReferred,
           config
         );
 
@@ -43,6 +47,7 @@ export function useIncentives() {
         else if (breakdown.loyalty > 0) bonusType = 'loyalty';
 
         const incentive: BetterIncentive = {
+          id: `inc-${betterId}-${poolId}-${bonusType}-${Date.now()}`,
           betterId,
           poolId,
           betAmount,
@@ -53,28 +58,46 @@ export function useIncentives() {
 
         return incentive;
       } catch (err) {
-        console.error('Error calculating incentive:', err);
+        log.error('Error calculating incentive:', err);
         throw err;
       }
     },
     [config]
   );
 
-  const addIncentive = useCallback(
-    (incentive: BetterIncentive) => {
-      setIncentives(prev => [...prev, incentive]);
+  const setIncentivesNormalized = useCallback(
+    (action: BetterIncentive[] | ((prev: BetterIncentive[]) => BetterIncentive[])) => {
+      setIncentives(prev => {
+        const next = typeof action === 'function' ? action(prev) : action;
+        return next.map((inc, idx) => ({
+          ...inc,
+          id: inc.id || `inc-${inc.betterId}-${inc.poolId}-${inc.bonusType}-${idx}`,
+        }));
+      });
     },
     []
   );
 
+  const addIncentive = useCallback(
+    (incentive: BetterIncentive) => {
+      const incWithId = {
+        ...incentive,
+        id: incentive.id || `inc-${incentive.betterId}-${incentive.poolId}-${incentive.bonusType}-${Date.now()}`,
+      };
+      setIncentivesNormalized(prev => [...prev, incWithId]);
+    },
+    [setIncentivesNormalized]
+  );
+
   const claimIncentive = useCallback(
-    (incentiveId: number) => {
+    (incentiveId: string | number) => {
       setIncentives(prev =>
-        prev.map((inc, idx) =>
-          idx === incentiveId
+        prev.map((inc, idx) => {
+          const isMatch = inc.id !== undefined ? inc.id === incentiveId : idx === incentiveId;
+          return isMatch
             ? { ...inc, status: 'claimed', claimedAt: Date.now() }
-            : inc
-        )
+            : inc;
+        })
       );
     },
     []

@@ -1,4 +1,6 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useMarketDiscovery');
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MarketFilters, PaginationState, ProcessedMarket } from '../market-types';
@@ -36,6 +38,8 @@ interface UseMarketDiscoveryState {
   setMaxVolume: (maxVolume: string) => void;
   setTimeRange: (timeRange: MarketFilters['timeRange']) => void;
   setSortBy: (sortBy: MarketFilters['sortBy']) => void;
+  /** Batch-replaces all filter dimensions at once. Used by preset loading to avoid multiple re-renders. */
+  setFilters: (filters: MarketFilters) => void;
   resetFilters: () => void;
   setPage: (page: number) => void;
   retry: () => void;
@@ -125,7 +129,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     } catch (err) {
       if (!isCurrentRequest()) return;
 
-      console.error('Failed to fetch markets:', err);
+      log.error('Failed to fetch markets:', err);
       const issue = classifyConnectivityIssue(err);
       const message = getConnectivityMessage(issue, 'Loading markets');
 
@@ -205,6 +209,11 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     updateFilters({ sortBy: value });
   }, [updateFilters]);
 
+  const setFilters = useCallback((next: MarketFilters) => {
+    setFiltersState(normalizeMarketFilters(next));
+    setCurrentPage(1);
+  }, []);
+
   const resetFilters = useCallback(() => {
     setFiltersState({ ...DEFAULT_MARKET_FILTERS });
     setCurrentPage(1);
@@ -239,6 +248,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     setMaxVolume,
     setTimeRange,
     setSortBy,
+    setFilters,
     resetFilters,
     setPage,
     retry,

@@ -146,12 +146,8 @@ export default function PoolDetail({ poolId }: { poolId: number }) {
 - [x] Tailwind CSS styling
 - [x] Follows project patterns
 
-### 📋 TODO: Backend Integration
-- [ ] Replace mock data in `usePoolActivity.ts` with real API call
-- [ ] Create Soroban event decoder (if needed)
-- [ ] Map contract events to `PoolActivityEventType`
-- [ ] Connect to `predinexReadApi.getPoolActivity()`
-- [ ] Test with real pool data
+### ✅ Backend Integration
+The timeline is wired to the real Soroban event pipeline via `web/app/lib/adapters/activity.ts` + `usePoolActivity.ts`. Pool lifecycle events (`create_pool`, `place_bet`, `settle_pool`, `claim_winnings`) are decoded from `getEvents` RPC results and mapped to `PoolActivityEventType`. For offline/dev QA set `NEXT_PUBLIC_ACTIVITY_FIXTURES=true` to opt into deterministic in-memory fixtures instead of hitting the RPC. The flag is refused in a production build (#1306) — being `NEXT_PUBLIC_*` it is inlined at build time, so any built environment that set it would ship fabricated bets, settlements and claims to real users — and a persistent `DemoDataBanner` marks the timeline whenever fixtures are actually serving rows.
 
 ## Styling
 

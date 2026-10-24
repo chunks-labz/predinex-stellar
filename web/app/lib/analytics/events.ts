@@ -325,7 +325,7 @@ export interface AnalyticsEvent<T extends EventName = EventName> {
 export function bucketAmount(amount: bigint | number): AmountRange {
   const xlm = Number(amount) / 10_000_000;
   
-  if (xlm < 10) return 'micro';
+  if (xlm < 1) return 'micro';
   if (xlm < 100) return 'small';
   if (xlm < 1000) return 'medium';
   if (xlm < 10000) return 'large';

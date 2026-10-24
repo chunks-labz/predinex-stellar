@@ -6,7 +6,7 @@
 export interface TimeSeriesPoint {
   timestamp: number;
   value: number;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TimeRange {
@@ -203,7 +203,7 @@ export interface PredictionModel {
 export interface PredictionResult {
   poolId: number;
   modelType: string;
-  prediction: any;
+  prediction: unknown;
   confidence: number;
   factors: PredictionFactor[];
   historicalAccuracy: number;
@@ -213,17 +213,16 @@ export interface PredictionResult {
 export interface PredictionFactor {
   factor: string;
   importance: number;
-  value: any;
+  value: unknown;
   description: string;
 }
 
-// Contract event types
 export interface ContractEvent {
   eventType: 'pool_created' | 'bet_placed' | 'pool_settled' | 'winnings_claimed';
   blockHeight: number;
   txId: string;
   timestamp: number;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
 }
 
 // API interfaces

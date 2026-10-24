@@ -2,7 +2,7 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useDisputeManagement } from '../lib/disputes/useDisputeManagement';
 import { DisputePageHeader } from './disputes/DisputePageHeader';
 import { DisputeTabNav } from './disputes/DisputeTabNav';
@@ -51,23 +51,25 @@ export default function DisputeManagement() {
       <DisputePageHeader />
       <DisputeTabNav selected={selectedTab} onSelect={setSelectedTab} />
       <div>
-        {selectedTab === 'active' && (
-          <ActiveDisputesSection
-            disputes={disputes}
-            now={now}
-            isLoading={isLoading}
-            hasUserVoted={hasUserVoted}
-            getUserVote={getUserVote}
-            onVote={handleVote}
-          />
-        )}
-        {selectedTab === 'resolved' &&
-          (disputes.length === 0 ? (
-            <EmptyState message="No resolved disputes yet" />
-          ) : (
-            <ResolvedDisputesSection disputes={disputes} />
-          ))}
-        {selectedTab === 'create' && <CreateDisputeSection isLoading={isLoading} />}
+        <div role="tabpanel" aria-labelledby={`tab-${selectedTab}`} id={`panel-${selectedTab}`}>
+          {selectedTab === 'active' && (
+            <ActiveDisputesSection
+              disputes={disputes}
+              now={now}
+              isLoading={isLoading}
+              hasUserVoted={hasUserVoted}
+              getUserVote={getUserVote}
+              onVote={handleVote}
+            />
+          )}
+          {selectedTab === 'resolved' &&
+            (disputes.filter((d) => d.status === 'resolved').length === 0 ? (
+              <EmptyState message="No resolved disputes yet" />
+            ) : (
+              <ResolvedDisputesSection disputes={disputes.filter((d) => d.status === 'resolved')} />
+            ))}
+          {selectedTab === 'create' && <CreateDisputeSection isLoading={isLoading} />}
+        </div>
       </div>
     </div>
   );

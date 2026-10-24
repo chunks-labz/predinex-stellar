@@ -20,8 +20,8 @@ const TOKEN_SYMBOL = TOKEN_CONFIG.SYMBOL;
 /**
  * Convert token units to stroops (multiply by STROOPS_PER_UNIT).
  */
-export function unitsToStroops(amount: number): number {
-  return Math.floor(amount * STROOPS_PER_UNIT);
+export function unitsToStroops(amount: bigint): bigint {
+  return amount * BigInt(STROOPS_PER_UNIT);
 }
 
 /**
@@ -33,8 +33,8 @@ export const stxToMicroStx = unitsToStroops;
 /**
  * Convert stroops to token units (divide by STROOPS_PER_UNIT).
  */
-export function stroopsToUnits(stroops: number): number {
-  return stroops / STROOPS_PER_UNIT;
+export function stroopsToUnits(stroops: bigint): number {
+  return Number(stroops) / STROOPS_PER_UNIT;
 }
 
 /**
@@ -48,7 +48,7 @@ export const microStxToStx = stroopsToUnits;
  * Uses 2–7 decimal places based on value size.
  * Uses configurable TOKEN_SYMBOL.
  */
-export function formatTokenAmount(stroops: number): string {
+export function formatTokenAmount(stroops: bigint): string {
   const units = stroopsToUnits(stroops);
   return units.toLocaleString('en-US', {
     minimumFractionDigits: 2,
@@ -66,7 +66,7 @@ export const formatStxAmount = formatTokenAmount;
  * Format a stroops amount with compact notation (K, M suffixes).
  * Uses configurable TOKEN_SYMBOL.
  */
-export function formatTokenAmountCompact(stroops: number): string {
+export function formatTokenAmountCompact(stroops: bigint): string {
   const amount = stroopsToUnits(stroops);
   if (amount >= 1_000_000) {
     return `${(amount / 1_000_000).toFixed(1)}M ${TOKEN_SYMBOL}`;
@@ -88,7 +88,7 @@ export const formatStxAmountCompact = formatTokenAmountCompact;
 /**
  * Format a raw stroops value without asset suffix.
  */
-export function formatStroopsValue(stroops: number): string {
+export function formatStroopsValue(stroops: bigint): string {
   return stroopsToUnits(stroops).toFixed(2);
 }
 

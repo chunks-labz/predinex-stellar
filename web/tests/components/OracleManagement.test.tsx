@@ -1,15 +1,20 @@
 import React from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OracleManagementPage from '../../app/oracle-management/page';
 import { ORACLE_MANAGEMENT_PLACEHOLDER_FLAG } from '../../app/lib/feature-flags';
+import { __resetRuntimeConfigForTests } from '../../app/lib/runtime-config';
 
 describe('OracleManagement route', () => {
   const originalFlagValue = process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG];
+  const originalNodeEnv = process.env.NODE_ENV;
+  const originalOracleAddress = process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
 
   beforeEach(() => {
     delete process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG];
+    delete process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
+    __resetRuntimeConfigForTests();
   });
 
   afterEach(() => {
@@ -18,6 +23,18 @@ describe('OracleManagement route', () => {
     } else {
       process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = originalFlagValue;
     }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    if (originalOracleAddress === undefined) {
+      delete process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS;
+    } else {
+      process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS = originalOracleAddress;
+    }
+    __resetRuntimeConfigForTests();
+    vi.restoreAllMocks();
   });
 
   it('hides mock oracle actions when the placeholder flag is disabled', () => {
@@ -48,5 +65,63 @@ describe('OracleManagement route', () => {
       .toBeDisabled();
     expect(screen.getByRole('button', { name: /registration preview only/i }))
       .toBeDisabled();
+  });
+
+  it('uses the generic Stellar placeholder when NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS is not set', async () => {
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    // NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS intentionally unset
+
+    const user = userEvent.setup();
+    render(<OracleManagementPage />);
+
+    await user.click(screen.getByRole('button', { name: /register preview/i }));
+
+    const input = screen.getByRole('textbox', { hidden: true });
+    expect(input).toHaveAttribute('placeholder', 'G... (Stellar account address)');
+  });
+
+  it('pre-fills the oracle address placeholder from runtime-config when NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS is set', async () => {
+    const testAddress = 'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN';
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NEXT_PUBLIC_DEFAULT_ORACLE_ADDRESS = testAddress;
+    __resetRuntimeConfigForTests();
+
+    const user = userEvent.setup();
+    render(<OracleManagementPage />);
+
+    await user.click(screen.getByRole('button', { name: /register preview/i }));
+
+    const input = screen.getByRole('textbox', { hidden: true });
+    expect(input).toHaveAttribute('placeholder', testAddress);
+  });
+
+  // #1306 — the flag is NEXT_PUBLIC_*, so its value is inlined into the bundle
+  // and a production build that had it set served mockProviders/mockSubmissions
+  // — reliability scores, resolution counts, pool ids — to real users with no
+  // indication they were fabricated. NODE_ENV is inlined the same way, so the
+  // refusal is checked here through the rendered route rather than only at the
+  // flag helper.
+  it('refuses the fixture-backed panel in a production build even when the flag is set', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NODE_ENV = 'production';
+
+    render(<OracleManagementPage />);
+
+    expect(screen.getByText(/oracle management is unavailable/i)).toBeInTheDocument();
+    expect(screen.queryByText(/oracle management preview/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /register preview/i })).not.toBeInTheDocument();
+  });
+
+  it('reports the refused production flag instead of ignoring it silently', () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    process.env[ORACLE_MANAGEMENT_PLACEHOLDER_FLAG] = 'true';
+    process.env.NODE_ENV = 'production';
+
+    render(<OracleManagementPage />);
+
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(`${ORACLE_MANAGEMENT_PLACEHOLDER_FLAG}=true was ignored`)
+    );
   });
 });

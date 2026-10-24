@@ -1,0 +1,1106 @@
+/**
+ * OpenAPI 3.1 Specification for PrediNx Budget Planner API
+ * Generated and maintained automatically - see scripts/generate-sdk.sh
+ *
+ * Base path: /api
+ * Version: 1.0.0
+ * Contact: predinex-dev@stellar.org
+ * License: Apache-2.0
+ */
+
+
+
+/**
+ * Base Schemas - Shared across all modules
+ */
+export const baseSchemas = {
+  // Error response structures
+  Error400: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: false },
+      error: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', example: 'VALIDATION_ERROR' },
+          message: { type: 'string' },
+          details: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Specific field validation errors',
+          },
+        },
+        required: ['code', 'message'],
+      },
+      timestamp: { type: 'string', format: 'date-time', example: '2024-01-15T10:30:00Z' },
+    },
+    required: ['success', 'error', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  Error401: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: false },
+      error: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', example: 'UNAUTHORIZED' },
+          message: { type: 'string' },
+        },
+      },
+      timestamp: { type: 'string', format: 'date-time', example: '2024-01-15T10:30:00Z' },
+    },
+    required: ['success', 'error', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  Error404: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: false },
+      error: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', example: 'NOT_FOUND' },
+          message: { type: 'string' },
+        },
+      },
+      timestamp: { type: 'string', format: 'date-time', example: '2024-01-15T10:30:00Z' },
+    },
+    required: ['success', 'error', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  Error429: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: false },
+      error: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', example: 'RATE_LIMITED' },
+          message: { type: 'string' },
+          retryAfter: { type: 'integer', format: 'int32' },
+        },
+      },
+      timestamp: { type: 'string', format: 'date-time', example: '2024-01-15T10:30:00Z' },
+    },
+    required: ['success', 'error', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  Error500: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: false },
+      error: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', example: 'INTERNAL_ERROR' },
+          message: { type: 'string' },
+        },
+      },
+      timestamp: { type: 'string', format: 'date-time', example: '2024-01-15T10:30:00Z' },
+    },
+    required: ['success', 'error', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  // Success response wrapper
+  Success200: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: true },
+      data: { $ref: '#/components/schemas/GenericData' },
+    },
+    required: ['success', 'data'],
+    additionalProperties: false,
+  },
+
+  Success201: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: true },
+      data: { $ref: '#/components/schemas/GenericData' },
+    },
+    required: ['success', 'data'],
+    additionalProperties: false,
+  },
+
+  // Generic data wrapper for 200/201 responses
+  GenericData: {
+    type: 'object',
+    description: 'Generic data wrapper - actual type varies by endpoint',
+    additionalProperties: true,
+  },
+
+  // Pagination metadata
+  PaginationMeta: {
+    type: 'object',
+    properties: {
+      page: { type: 'integer', format: 'int32', example: 1 },
+      limit: { type: 'integer', format: 'int32', example: 20 },
+      total: { type: 'integer', format: 'int32', example: 100 },
+      totalPages: { type: 'integer', format: 'int32', example: 5 },
+    },
+    required: ['page', 'limit', 'total', 'totalPages'],
+    additionalProperties: false,
+  },
+
+  // Timestamp type for BigInt/string serialization
+  IsoTimestamp: {
+    type: 'string',
+    format: 'date-time',
+    description: 'ISO 8601 timestamp - BigInt epoch milliseconds serialized as string',
+  },
+
+  // Stellar address type
+  StellarAddress: {
+    type: 'string',
+    pattern: '^G[A-Z0-9]{55}$',
+    description: 'Stellar account address (starting with G)',
+  },
+};
+
+/**
+ * Budget Module Schemas
+ */
+export const budgetSchemas = {
+  CreatePlanRequest: {
+    type: 'object',
+    required: ['lenderAddress', 'totalBudget', 'strategy', 'riskTolerance', 'reservePct'],
+    properties: {
+      lenderAddress: { $ref: '#/components/schemas/StellarAddress' },
+      totalBudget: { type: 'string', description: 'Total budget as string (BigInt serialization)' },
+      strategy: {
+        type: 'string',
+        enum: ['equal_weight', 'size_weighted', 'return_weighted', 'risk_adjusted', 'custom'],
+      },
+      riskTolerance: {
+        type: 'string',
+        enum: ['conservative', 'moderate', 'aggressive'],
+      },
+      reservePct: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 100,
+        description: 'Reserve percentage (0-100)',
+      },
+    },
+    additionalProperties: false,
+  },
+
+  BudgetPlanResponse: {
+    type: 'object',
+    description: 'Budget plan creation response',
+    properties: {
+      lender: { $ref: '#/components/schemas/StellarAddress' },
+      totalBudget: { type: 'string' },
+      allocatedAmount: { type: 'string' },
+      reserveAmount: { type: 'string' },
+      allocations: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            poolId: { type: 'integer' },
+            allocatedAmount: { type: 'string' },
+            weightPct: { type: 'number' },
+            expectedReturn: { type: 'string' },
+            riskScore: { type: 'integer' },
+          },
+          required: ['poolId', 'allocatedAmount', 'weightPct', 'expectedReturn', 'riskScore'],
+        },
+      },
+      strategy: {
+        type: 'string',
+        enum: ['equal_weight', 'size_weighted', 'return_weighted', 'risk_adjusted', 'custom'],
+      },
+      expectedTotalReturn: { type: 'string' },
+      portfolioRiskScore: { type: 'integer' },
+      diversificationScore: { type: 'integer' },
+      createdAt: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['lender', 'totalBudget', 'allocatedAmount', 'reserveAmount', 'allocations', 'strategy', 'expectedTotalReturn', 'portfolioRiskScore', 'diversificationScore', 'createdAt'],
+  },
+
+  PortfolioMetricsResponse: {
+    type: 'object',
+    properties: {
+      totalInvested: { type: 'string' },
+      currentValue: { type: 'string' },
+      totalReturn: { type: 'string' },
+      returnPct: { type: 'number' },
+      feeRevenue: { type: 'string' },
+      activePools: { type: 'integer' },
+      settledPools: { type: 'integer' },
+      sharpeRatio: { type: 'number' },
+      lastUpdated: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['totalInvested', 'currentValue', 'totalReturn', 'returnPct', 'feeRevenue', 'activePools', 'settledPools', 'sharpeRatio', 'lastUpdated'],
+  },
+
+  LiquidityProjectionResponse: {
+    type: 'object',
+    properties: {
+      currentLiquid: { type: 'string' },
+      lockedUntilTimestamp: { type: 'integer', format: 'int32' },
+      expectedReturns7d: { type: 'string' },
+      expectedReturns30d: { type: 'string' },
+      minimumReserveNeeded: { type: 'string' },
+      excessCapacity: { type: 'string' },
+    },
+    required: ['currentLiquid', 'lockedUntilTimestamp', 'expectedReturns7d', 'expectedReturns30d', 'minimumReserveNeeded', 'excessCapacity'],
+  },
+
+  FeeOptimizationResponse: {
+    type: 'object',
+    properties: {
+      currentFeeBps: { type: 'integer' },
+      recommendedFeeBps: { type: 'integer' },
+      expectedVolumeImpactPct: { type: 'number' },
+      expectedRevenueImpact: { type: 'string' },
+      competitivenessScore: { type: 'integer' },
+    },
+    required: ['currentFeeBps', 'recommendedFeeBps', 'expectedVolumeImpactPct', 'expectedRevenueImpact', 'competitivenessScore'],
+  },
+
+  RiskAssessmentResponse: {
+    type: 'object',
+    properties: {
+      volatilityScore: { type: 'integer' },
+      liquidityRisk: { type: 'integer' },
+      concentrationRisk: { type: 'integer' },
+      timeRisk: { type: 'integer' },
+      overallRiskScore: { type: 'integer' },
+    },
+    required: ['volatilityScore', 'liquidityRisk', 'concentrationRisk', 'timeRisk', 'overallRiskScore'],
+  },
+};
+
+/**
+ * Gas Estimate Module Schemas
+ */
+export const gasEstimateSchemas = {
+  OperationType: {
+    type: 'string',
+    enum: ['create_pool', 'place_bet', 'settle_pool', 'claim_winnings', 'cancel_bet', 'extend_pool', 'batch_settle', 'claim_all_winnings'],
+  },
+
+  GasEstimate: {
+    type: 'object',
+    properties: {
+      operation: { $ref: '#/components/schemas/OperationType' },
+      estimatedInstructions: { type: 'integer' },
+      estimatedCpuCost: { type: 'number' },
+      estimatedMemoryCost: { type: 'number' },
+      estimatedStorageCost: { type: 'number' },
+      totalCost: { type: 'number' },
+      optimizationLevel: { type: 'string', enum: ['low', 'medium', 'high'] },
+      timestamp: { type: 'integer', format: 'int64' },
+    },
+    required: ['operation', 'estimatedInstructions', 'estimatedCpuCost', 'estimatedMemoryCost', 'estimatedStorageCost', 'totalCost', 'optimizationLevel', 'timestamp'],
+  },
+
+  OptimizationSuggestion: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' },
+      title: { type: 'string' },
+      description: { type: 'string' },
+      priority: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+      estimatedSavings: { type: 'number' },
+      implementationComplexity: { type: 'string', enum: ['easy', 'medium', 'hard'] },
+      category: { type: 'string', enum: ['storage', 'computation', 'network', 'batching'] },
+      codeExample: { type: 'string' },
+    },
+    required: ['id', 'title', 'description', 'priority', 'estimatedSavings', 'implementationComplexity', 'category'],
+  },
+
+  GasAnalysisReport: {
+    type: 'object',
+    properties: {
+      estimates: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/GasEstimate' },
+      },
+      suggestions: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/OptimizationSuggestion' },
+      },
+      totalEstimatedCost: { type: 'number' },
+      averageOptimizationPotential: { type: 'number' },
+      timestamp: { type: 'integer', format: 'int64' },
+      contractId: { type: 'string' },
+    },
+    required: ['estimates', 'suggestions', 'totalEstimatedCost', 'averageOptimizationPotential', 'timestamp', 'contractId'],
+  },
+};
+
+/**
+ * Markets Module Schemas (Issues #1420, #1432, #1436, #1437)
+ */
+export const marketSchemas = {
+  MarketStatus: {
+    type: 'string',
+    enum: ['open', 'settled', 'voided', 'cancelled'],
+    description:
+      'Market lifecycle status. `cancelled` is a soft delete: the record, its data and its audit trail are retained.',
+  },
+
+  MarketSummary: {
+    type: 'object',
+    description: 'One market row, including soft-deleted (cancelled) markets for admins.',
+    properties: {
+      id: { type: 'integer', format: 'int32', example: 21 },
+      title: { type: 'string', example: 'Will BTC close above $150k?' },
+      outcomes: {
+        type: 'array',
+        items: { type: 'string' },
+        example: ['Yes', 'No'],
+      },
+      status: { $ref: '#/components/schemas/MarketStatus' },
+      expiry: {
+        type: 'integer',
+        format: 'int64',
+        description: 'Unix expiry timestamp in seconds',
+        example: 1700000021,
+      },
+      totalVolume: {
+        type: 'string',
+        description: 'Total volume in base token units (BigInt serialized as string)',
+        example: '21000',
+      },
+      cancelledAt: {
+        allOf: [{ $ref: '#/components/schemas/IsoTimestamp' }],
+        description: 'Set only on cancelled markets; ISO timestamp of the soft delete.',
+      },
+      cancelledBy: {
+        type: 'string',
+        description: 'Set only on cancelled markets; audit actor that cancelled the market.',
+      },
+      cancelReason: {
+        type: 'string',
+        description: 'Set only on cancelled markets; optional reason supplied at cancellation.',
+      },
+    },
+    required: ['id', 'title', 'outcomes', 'status', 'expiry', 'totalVolume'],
+    additionalProperties: false,
+  },
+
+  MarketAuditEntry: {
+    type: 'object',
+    description: 'One cancellation or restoration record from a market audit trail.',
+    properties: {
+      id: { type: 'integer', format: 'int32', example: 3 },
+      marketId: { type: 'integer', format: 'int32', example: 21 },
+      action: { type: 'string', enum: ['cancelled', 'restored'] },
+      actor: { type: 'string', example: 'admin' },
+      reason: { type: 'string' },
+      fromStatus: { $ref: '#/components/schemas/MarketStatus' },
+      toStatus: { $ref: '#/components/schemas/MarketStatus' },
+      timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['id', 'marketId', 'action', 'actor', 'fromStatus', 'toStatus', 'timestamp'],
+    additionalProperties: false,
+  },
+
+  MarketPagination: {
+    type: 'object',
+    properties: {
+      total: { type: 'integer', format: 'int32', example: 45 },
+      limit: { type: 'integer', format: 'int32', example: 20 },
+      offset: { type: 'integer', format: 'int32', example: 0 },
+      count: { type: 'integer', format: 'int32', example: 20 },
+      hasMore: { type: 'boolean', example: true },
+      nextOffset: {
+        type: ['integer', 'null'],
+        format: 'int32',
+        example: 20,
+        description: 'Offset for the next page, or null on the last page',
+      },
+      prevOffset: {
+        type: ['integer', 'null'],
+        format: 'int32',
+        example: null,
+        description: 'Offset for the previous page, or null on the first page',
+      },
+    },
+    required: ['total', 'limit', 'offset', 'count', 'hasMore', 'nextOffset', 'prevOffset'],
+    additionalProperties: false,
+  },
+
+  MarketListResponse: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', example: true },
+      data: {
+        type: 'array',
+        items: { $ref: '#/components/schemas/MarketSummary' },
+      },
+      pagination: { $ref: '#/components/schemas/MarketPagination' },
+      timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+    },
+    required: ['success', 'data', 'pagination', 'timestamp'],
+    additionalProperties: false,
+  },
+};
+
+/**
+ * Insurance Module Schemas
+ */
+export const insuranceSchemas = {
+  // Insurance route schemas would go here
+};
+
+/**
+ * Referral Module Schemas
+ */
+export const referralSchemas = {
+  // Referral route schemas would go here
+};
+
+/**
+ * Reputation Module Schemas
+ */
+export const reputationSchemas = {
+  // Reputation route schemas would go here
+};
+
+/**
+ * Emergency Module Schemas
+ */
+export const emergencySchemas = {
+  // Emergency route schemas would go here
+};
+
+/**
+ * Simulation Module Schemas
+ */
+export const simulationSchemas = {
+  // Simulation route schemas would go here
+};
+
+/**
+ * Full OpenAPI 3.1 Specification
+ */
+export const openApiDoc = {
+  openapi: '3.1.0',
+  info: {
+    title: 'PrediNx Budget Planner API',
+    version: '1.0.0',
+    description: 'RESTful API for PrediNx prediction market protocol. Public routes are rate limited per IP or registered API key. Configure RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, and RATE_LIMIT_STRICT_MAX_REQUESTS; throttled requests return 429 with Retry-After.',
+    contact: {
+      name: 'PrediNx Dev Team',
+      email: 'predinex-dev@stellar.org',
+    },
+    license: {
+      name: 'Apache-2.0',
+      url: 'https://www.apache.org/licenses/LICENSE-2.0.html',
+    },
+    termsOfService: 'https://predinex.stellar.org/terms',
+  },
+  servers: [
+    {
+      url: 'http://localhost:3001',
+      description: 'Local development server (npm run dev, PORT=3001)',
+    },
+    {
+      url: 'https://api.predinex.stellar.org',
+      description: 'Production server',
+    },
+  ],
+  paths: {
+    '/health': {
+      get: {
+        summary: 'Dependency health probe',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
+      },
+    },
+    '/api/health': {
+      get: {
+        summary: 'Dependency health probe under the API prefix',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
+      },
+    },
+    '/api/openapi.json': {
+      get: {
+        summary: 'OpenAPI document for this server',
+        responses: { '200': { description: 'OpenAPI 3.1 JSON' } },
+      },
+    },
+    '/api/budget/plan': {
+      post: { summary: 'Create a budget plan', responses: { '200': { description: 'Budget plan' } } },
+    },
+    '/api/budget/portfolio/{lenderAddress}': {
+      get: { summary: 'Get portfolio metrics', responses: { '200': { description: 'Portfolio metrics' } } },
+    },
+    '/api/budget/liquidity/{lenderAddress}': {
+      get: { summary: 'Project liquidity', responses: { '200': { description: 'Liquidity projection' } } },
+    },
+    '/api/budget/optimize-fees': {
+      post: { summary: 'Fee optimization recommendations', responses: { '200': { description: 'Fee optimization' } } },
+    },
+    '/api/budget/risk-assessment': {
+      post: { summary: 'Assess pool risk', responses: { '200': { description: 'Risk assessment' } } },
+    },
+    '/api/budget/health': {
+      get: { summary: 'Budget service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/compliance/verify': {
+      post: { summary: 'Verify a transaction against compliance rules', responses: { '200': { description: 'Compliance verdict' } } },
+    },
+    '/api/compliance/register': {
+      post: { summary: 'Register a participant (officer/admin only)', security: [{ apiKey: [] }], responses: { '200': { description: 'Compliance record' } } },
+    },
+    '/api/compliance/status/{address}': {
+      get: { summary: 'Get compliance status', responses: { '200': { description: 'Compliance record' } } },
+    },
+    '/api/compliance/health': {
+      get: { summary: 'Compliance service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/emergency/activate': {
+      post: { summary: 'Activate emergency mode (admin, real on-chain tx)', security: [{ apiKey: [] }], responses: { '200': { description: 'Activation tx hash' } } },
+    },
+    '/api/emergency/deactivate': {
+      post: { summary: 'Deactivate emergency mode (admin, real on-chain tx)', security: [{ apiKey: [] }], responses: { '200': { description: 'Deactivation tx hash' } } },
+    },
+    '/api/emergency/withdraw/request': {
+      post: { summary: 'Create an emergency withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Request + tx hash' } } },
+    },
+    '/api/emergency/withdraw/approve': {
+      post: { summary: 'Approve a withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Approval tx hash' } } },
+    },
+    '/api/emergency/withdraw/execute': {
+      post: { summary: 'Execute an approved withdrawal', security: [{ apiKey: [] }], responses: { '200': { description: 'Execution tx hash' } } },
+    },
+    '/api/emergency/withdraw/cancel': {
+      post: { summary: 'Cancel a withdrawal request', security: [{ apiKey: [] }], responses: { '200': { description: 'Cancellation tx hash' } } },
+    },
+    '/api/emergency/admin/add': {
+      post: { summary: 'Add a secondary admin', security: [{ apiKey: [] }], responses: { '200': { description: 'Add-admin tx hash' } } },
+    },
+    '/api/emergency/config/update': {
+      post: { summary: 'Update emergency configuration', security: [{ apiKey: [] }], responses: { '200': { description: 'Update tx hash' } } },
+    },
+    '/api/emergency/config': {
+      get: { summary: 'Get emergency configuration', responses: { '200': { description: 'Emergency config' } } },
+    },
+    '/api/emergency/status': {
+      get: { summary: 'Get emergency system status', responses: { '200': { description: 'System status' } } },
+    },
+    '/api/emergency/audit-logs': {
+      get: { summary: 'Get emergency audit logs', responses: { '200': { description: 'Audit logs' } } },
+    },
+    '/api/emergency/health': {
+      get: { summary: 'Emergency service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/gas-estimate/estimate': {
+      post: { summary: 'Estimate gas for an operation', responses: { '200': { description: 'Gas estimate' } } },
+    },
+    '/api/gas-estimate/suggestions': {
+      post: { summary: 'Gas optimization suggestions', responses: { '200': { description: 'Suggestions' } } },
+    },
+    '/api/gas-estimate/report': {
+      post: { summary: 'Full gas analysis report', responses: { '200': { description: 'Analysis report' } } },
+    },
+    '/api/gas-estimate/health': {
+      get: { summary: 'Gas estimator health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/insurance/pools': {
+      get: { summary: 'List insurance pools', responses: { '200': { description: 'Pool list' } } },
+    },
+    '/api/insurance/quote': {
+      post: { summary: 'Get an insurance quote', responses: { '200': { description: 'Quote' } } },
+    },
+    '/api/insurance/purchase': {
+      post: { summary: 'Purchase a policy', responses: { '200': { description: 'Policy' } } },
+    },
+    '/api/insurance/claim': {
+      post: { summary: 'Submit a claim', responses: { '200': { description: 'Claim' } } },
+    },
+    '/api/insurance/audit/{poolId}': {
+      get: { summary: 'Solvency audit for a pool', responses: { '200': { description: 'Audit' } } },
+    },
+    '/api/insurance/health': {
+      get: { summary: 'Insurance service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/markets': {
+      get: {
+        summary: 'List markets (paginated, ordered by ascending id)',
+        description:
+          'Cancelled (soft-deleted) markets are excluded by default. ' +
+          '`status` filters by one or more statuses and combines with `sort`, `order`, `limit` and `offset`; ' +
+          'pagination totals always reflect the filtered set. Requesting the `cancelled` status requires admin ' +
+          'credentials and is answered with 403 otherwise.',
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Page size, 1-100 (default 20; larger values are capped at 100)',
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            description: 'Zero-based index of the first market to return (default 0)',
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            required: false,
+            description:
+              'One or more market statuses to include. Values may be comma-separated (?status=open,settled) ' +
+              'and/or repeated (?status=open&status=settled). When omitted, every non-cancelled market is ' +
+              'returned. Including "cancelled" requires admin credentials (x-api-key).',
+            style: 'form',
+            explode: false,
+            schema: {
+              type: 'array',
+              items: { $ref: '#/components/schemas/MarketStatus' },
+              example: ['open', 'settled'],
+            },
+          },
+          {
+            name: 'sort',
+            in: 'query',
+            required: false,
+            description: 'Field to sort by (default id)',
+            schema: { type: 'string', enum: ['id', 'expiry', 'volume', 'title'], default: 'id' },
+          },
+          {
+            name: 'order',
+            in: 'query',
+            required: false,
+            description: 'Sort direction (default asc)',
+            schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of markets with pagination metadata (total, nextOffset, hasMore)',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MarketListResponse' } },
+            },
+          },
+          '400': { description: 'Invalid pagination, status, sort, or order parameters' },
+          '403': { description: 'Cancelled markets requested without admin credentials' },
+          '429': { description: 'Rate limited; see the Retry-After header' },
+        },
+      },
+      post: {
+        summary: 'Create a market (validated; on-chain submission not yet implemented)',
+        description:
+          'Optional `Idempotency-Key` header (#1466): retries with the same key and payload replay the ' +
+          'stored response (`Idempotency-Replayed: true`); a different payload under the same key returns ' +
+          '409 `IDEMPOTENCY_KEY_CONFLICT`.',
+        parameters: [
+          {
+            name: 'Idempotency-Key',
+            in: 'header',
+            required: false,
+            schema: { type: 'string', maxLength: 255 },
+            description:
+              'Optional caller-chosen key that makes market creation safe to retry within the TTL window.',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                required: ['title', 'outcomes', 'closeTime'],
+                properties: {
+                  title: { type: 'string', maxLength: 100, description: 'At most 100 bytes' },
+                  outcomes: {
+                    type: 'array',
+                    minItems: 2,
+                    maxItems: 20,
+                    items: { type: 'string', maxLength: 50 },
+                    description: '2-20 unique outcomes, each at most 50 bytes',
+                  },
+                  closeTime: {
+                    type: 'integer',
+                    description: 'Unix seconds, 300 s to 31,536,000 s from now',
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          '201': { description: 'Market created' },
+          '400': { description: 'Invalid market parameters; error.details lists each offending field' },
+          '409': {
+            description:
+              'IDEMPOTENCY_KEY_CONFLICT (key reused with a different payload) or ' +
+              'IDEMPOTENCY_REQUEST_IN_PROGRESS (concurrent duplicate)',
+          },
+          '501': { description: 'On-chain market creation is not yet implemented' },
+        },
+      },
+    },
+    '/api/markets/{id}/trades/export': {
+      get: {
+        summary: 'Export the authenticated user’s market trades as CSV',
+        description:
+          'Returns only trades for the Stellar account bound to the caller’s USER_API_KEYS entry. ' +
+          'The deployment must inject a trade-history source; otherwise the endpoint returns 503.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive ISO date or timestamp (UTC for date-only values)',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'side',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['buy', 'sell'] },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Rows in this export page (default 100, maximum 1,000)',
+            schema: { type: 'integer', minimum: 1, maximum: 1000, default: 100 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'RFC 4180 CSV attachment',
+            content: { 'text/csv': { schema: { type: 'string', format: 'binary' } } },
+          },
+          '400': { description: 'Invalid market id or export filters' },
+          '401': { description: 'User API key with a bound Stellar address required' },
+          '404': { description: 'Market not found' },
+          '429': { description: 'Rate limited; see the Retry-After header' },
+          '503': { description: 'Trade-history source is not configured' },
+        },
+      },
+    },
+    '/api/markets/admin/cancelled': {
+      get: {
+        summary: 'List soft-deleted (cancelled) markets (admin only)',
+        description:
+          'Returns cancelled markets with the same `limit`/`offset` pagination and `sort`/`order` controls as ' +
+          'GET /api/markets. Cancellation keeps every recorded field, so these rows remain linkable.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+          {
+            name: 'sort',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['id', 'expiry', 'volume', 'title'], default: 'id' },
+          },
+          {
+            name: 'order',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['asc', 'desc'], default: 'asc' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of cancelled markets',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/MarketListResponse' } },
+            },
+          },
+          '400': { description: 'Invalid pagination parameters' },
+          '403': { description: 'Admin access required' },
+        },
+      },
+    },
+    '/api/markets/admin/audit': {
+      get: {
+        summary: 'Cancellation/restoration audit history (admin only)',
+        description:
+          'Newest-first audit entries for every market cancellation and restoration. Supports cursor pagination + ' +
+          'filters for market, actor, action, and date range. Example: GET /api/markets/admin/audit?actor=admin&action=cancelled&from=2025-01-01T00:00:00.000Z&limit=50',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'marketId',
+            in: 'query',
+            required: false,
+            description: 'Only return entries for this market id',
+            schema: { type: 'integer', minimum: 0 },
+          },
+          {
+            name: 'actor',
+            in: 'query',
+            required: false,
+            description: 'Case-insensitive substring filter on the actor address or admin name',
+            schema: { type: 'string', example: 'admin' },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            required: false,
+            description: 'Filter by audit action type',
+            schema: { type: 'string', enum: ['cancelled', 'restored'], example: 'cancelled' },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive lower bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-01-01T00:00:00.000Z' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive upper bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-12-31T23:59:59.999Z' },
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'Opaque cursor for the next page; use the previous response\'s nextCursor value',
+            schema: { type: 'string', example: '42' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Maximum records to return; capped server-side at 100',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 0, default: 0 },
+          },
+        ],
+        responses: {
+          '200': {
+            description: 'Page of audit entries',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean', example: true },
+                    data: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/MarketAuditEntry' },
+                    },
+                    pagination: {
+                      type: 'object',
+                      properties: {
+                        total: { type: 'integer', example: 42 },
+                        limit: { type: 'integer', example: 20 },
+                        offset: { type: 'integer', example: 0 },
+                        count: { type: 'integer', example: 20 },
+                        hasMore: { type: 'boolean', example: true },
+                        nextOffset: { type: 'integer', nullable: true, example: 20 },
+                        prevOffset: { type: 'integer', nullable: true, example: null },
+                        page: { type: 'integer', example: 1 },
+                        pageSize: { type: 'integer', example: 20 },
+                        nextCursor: { type: 'string', nullable: true, example: '42' },
+                        prevCursor: { type: 'string', nullable: true, example: null },
+                        cursor: { type: 'string', nullable: true, example: '12' },
+                      },
+                    },
+                    timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid pagination or marketId parameter' },
+          '403': { description: 'Admin access required' },
+        },
+      },
+    },
+    '/api/markets/{id}/cancel': {
+      post: {
+        summary: 'Soft-delete (cancel) a market (admin only)',
+        description:
+          'Marks the market with status `cancelled` instead of removing it, preserving the record and its ' +
+          'links, and appends an entry to the audit history. Cancelling an already-cancelled market is ' +
+          'idempotent and does not duplicate audit entries.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  reason: {
+                    type: 'string',
+                    maxLength: 256,
+                    description: 'Optional reason recorded on the market and in the audit trail',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The cancelled market (status `cancelled`, audit fields set)' },
+          '400': { description: 'Invalid market id or reason' },
+          '403': { description: 'Admin access required' },
+          '404': { description: 'Market not found' },
+        },
+      },
+    },
+    '/api/markets/{id}/restore': {
+      post: {
+        summary: 'Restore a soft-deleted market (admin only)',
+        description:
+          'Returns a cancelled market to the status it had before cancellation (recorded in the audit trail) ' +
+          'and clears the cancellation fields. Restoring a market that is not cancelled returns 409.',
+        security: [{ apiKey: [] }],
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'integer', minimum: 1 },
+          },
+        ],
+        responses: {
+          '200': { description: 'The restored market' },
+          '400': { description: 'Invalid market id' },
+          '403': { description: 'Admin access required' },
+          '404': { description: 'Market not found' },
+          '409': { description: 'Market is not cancelled' },
+        },
+      },
+    },
+    '/api/referral': {
+      post: { summary: 'Create a referral', security: [{ apiKey: [] }], responses: { '200': { description: 'Success' } } },
+    },
+    '/api/referral/health': {
+      get: { summary: 'Referral service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/reputation/profile/{address}': {
+      get: { summary: 'Get reputation profile', responses: { '200': { description: 'Profile' } } },
+    },
+    '/api/reputation/simulate': {
+      post: { summary: 'Simulate reputation impact', responses: { '200': { description: 'Simulation' } } },
+    },
+    '/api/reputation/leaderboard': {
+      get: { summary: 'Top reputations', responses: { '200': { description: 'Leaderboard' } } },
+    },
+    '/api/reputation/health': {
+      get: { summary: 'Reputation service health', responses: { '200': { description: 'OK' } } },
+    },
+    '/api/simulation/simulate': {
+      post: { summary: 'Simulate position health', responses: { '200': { description: 'Simulation result' } } },
+    },
+    '/api/simulation/position-health': {
+      post: {
+        summary: 'Simulate position health (deprecated alias)',
+        deprecated: true,
+        'x-api-version': 'v1',
+        'x-sunset': '2026-12-31T23:59:59Z',
+        responses: {
+          '200': {
+            description: 'Simulation result (includes RFC 8594 Deprecation and Sunset headers)',
+            headers: {
+              Deprecation: {
+                description: 'RFC 8594 deprecation timestamp (`@1767225600` or `true`)',
+                schema: { type: 'string' },
+              },
+              Sunset: {
+                description: 'RFC 8594 / RFC 7231 HTTP-date when the endpoint will be removed',
+                schema: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/simulation/health': {
+      get: { summary: 'Simulation service health', responses: { '200': { description: 'OK' } } },
+    },
+  },
+  components: {
+    schemas: {
+      ...baseSchemas,
+      ...budgetSchemas,
+      ...gasEstimateSchemas,
+      ...marketSchemas,
+      ...insuranceSchemas,
+      ...referralSchemas,
+      ...reputationSchemas,
+      ...emergencySchemas,
+      ...simulationSchemas,
+    },
+    securitySchemes: {
+      apiKey: {
+        type: 'apiKey',
+        in: 'header',
+        name: 'x-api-key',
+      },
+    },
+  },
+};
+
+// Stamp `x-api-version: 'v1'` on every documented path so endpoint version linting passes
+for (const pathItem of Object.values(openApiDoc.paths)) {
+  if (pathItem && typeof pathItem === 'object') {
+    (pathItem as Record<string, unknown>)['x-api-version'] ??= 'v1';
+  }
+}

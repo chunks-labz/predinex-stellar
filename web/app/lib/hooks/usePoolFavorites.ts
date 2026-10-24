@@ -3,6 +3,9 @@ import { useLocalStorage } from './useLocalStorage';
 
 const POOL_FAVORITES_KEY = 'predinex_pool_favorites_v1';
 
+/** Bookmarks are capped so the favorites page stays a quick-access list. */
+export const POOL_FAVORITES_MAX = 50;
+
 function normalizeIds(ids: unknown): number[] {
   if (!Array.isArray(ids)) return [];
   const normalized = ids
@@ -22,6 +25,8 @@ export function usePoolFavorites() {
 
   const favoritePoolIds = useMemo(() => normalizeIds(storedIds), [storedIds]);
 
+  const atCapacity = favoritePoolIds.length >= POOL_FAVORITES_MAX;
+
   const isFavorite = useCallback(
     (poolId: number) => favoritePoolIds.includes(poolId),
     [favoritePoolIds]
@@ -37,6 +42,9 @@ export function usePoolFavorites() {
         if (prevNormalized.includes(normalizedPoolId)) {
           return prevNormalized.filter((id) => id !== normalizedPoolId);
         }
+        if (prevNormalized.length >= POOL_FAVORITES_MAX) {
+          return prevNormalized;
+        }
         return normalizeIds([...prevNormalized, normalizedPoolId]);
       });
     },
@@ -49,6 +57,7 @@ export function usePoolFavorites() {
 
   return {
     favoritePoolIds,
+    atCapacity,
     isFavorite,
     toggleFavorite,
     clearFavorites,
