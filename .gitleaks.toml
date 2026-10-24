@@ -1,0 +1,28 @@
+title = "Predinex Stellar Gitleaks Config"
+
+# Use the default gitleaks rules as a base
+[extend]
+useDefault = true
+
+# Allowlist for known false positives
+[[allowlist.paths]]
+description = "Documentation and test fixtures that may contain example keys"
+paths = [
+  '''docs/.*''',
+  '''web/docs/.*''',
+  '''contracts/.*/docs/.*''',
+  '''.*_test\.rs''',
+  '''web/tests/.*''',
+  '''bot/tests/.*''',
+  '''api/tests/.*''',
+]
+
+[[allowlist.regexes]]
+description = "Example/test keys and dummy values"
+regexes = [
+  '''dummy.*''',
+  '''example.*''',
+  '''test.*key''',
+  '''PLACEHOLDER''',
+  '''__TEST_.*''',
+]

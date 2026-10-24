@@ -1,9 +1,10 @@
 'use client';
 
-import { memo } from 'react';
-import { Trophy, RefreshCw, AlertCircle } from 'lucide-react';
-import { useLeaderboard } from '../app/lib/hooks/useLeaderboard';
+import { memo, useState, useRef, type KeyboardEvent } from 'react';
+import { Trophy, RefreshCw, AlertCircle, Users, Layers } from 'lucide-react';
+import { useLeaderboard, type LeaderboardTab } from '../app/lib/hooks/useLeaderboard';
 import { formatDisplayAddress } from '../app/lib/address-display';
+import { stroopsToUnits, TOKEN_SYMBOL } from '../app/lib/formatting';
 
 interface LeaderboardProps {
   currentUserAddress?: string | null;
@@ -15,15 +16,68 @@ const RANK_COLORS: Record<number, string> = {
   3: 'text-amber-600',
 };
 
+function SkeletonRows() {
+  return (
+    <div className="space-y-3" aria-busy="true" aria-label="Loading leaderboard">
+      {[...Array(5)].map((_, i) => (
+        <div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-lg animate-pulse">
+          <div className="flex items-center gap-4">
+            <div className="h-5 w-8 bg-muted/50 rounded" />
+            <div className="h-10 w-10 rounded-full bg-muted/50" />
+            <div className="h-4 w-32 bg-muted/50 rounded" />
+          </div>
+          <div className="h-4 w-20 bg-muted/50 rounded" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function formatVolume(stroops: number): string {
+  // #1285 — 1 XLM = 10_000_000 stroops; use stroopsToUnits (divide by 1e7).
+  const units = stroopsToUnits(stroops);
+  if (units >= 1) return `${units.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${TOKEN_SYMBOL}`;
+  if (units >= 0.000001) {
+    return `${units.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${TOKEN_SYMBOL}`;
+  }
+  return `${(stroops / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} micro${TOKEN_SYMBOL}`;
+}
+
 const Leaderboard = memo(function Leaderboard({ currentUserAddress }: LeaderboardProps) {
-  const { entries, isLoading, error, refresh } = useLeaderboard(currentUserAddress);
+  const [activeTab, setActiveTab] = useState<LeaderboardTab>('bettors');
+  const { bettors, creators, userBettorRank, userCreatorRank, isLoading, error, refresh } =
+    useLeaderboard(currentUserAddress);
+
+  const userRank = activeTab === 'bettors' ? userBettorRank : userCreatorRank;
+
+  // #1540 — WAI-ARIA tabs: roving tabindex + arrow-key movement, so keyboard
+  // users switch panels without tabbing through every row of the active one.
+  const tabRefs = {
+    bettors: useRef<HTMLButtonElement>(null),
+    creators: useRef<HTMLButtonElement>(null),
+  };
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: LeaderboardTab) => {
+    const order: LeaderboardTab[] = ['bettors', 'creators'];
+    const index = order.indexOf(current);
+    let next: LeaderboardTab | null = null;
+    if (event.key === 'ArrowRight') next = order[(index + 1) % order.length];
+    else if (event.key === 'ArrowLeft') next = order[(index - 1 + order.length) % order.length];
+    else if (event.key === 'Home') next = order[0];
+    else if (event.key === 'End') next = order[order.length - 1];
+    if (next) {
+      event.preventDefault();
+      setActiveTab(next);
+      tabRefs[next].current?.focus();
+    }
+  };
 
   return (
     <div className="glass-panel rounded-xl p-6">
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Trophy className="h-6 w-6 text-yellow-500" />
-          <h2 className="text-2xl font-bold">Top Contributors</h2>
+          <Trophy className="h-6 w-6 text-yellow-500" aria-hidden="true" />
+          <h2 className="text-2xl font-bold">Leaderboard</h2>
         </div>
         <button
           onClick={refresh}
@@ -31,86 +85,162 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
           className="p-2 rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50"
           aria-label="Refresh leaderboard"
         >
-          <RefreshCw className={`h-4 w-4 text-muted-foreground ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-4 w-4 text-muted-foreground ${isLoading ? 'animate-spin' : ''}`} aria-hidden="true" />
         </button>
       </div>
 
-      {/* Ranking formula explanation */}
-      <p className="text-xs text-muted-foreground mb-4">
-        Ranked by total net profits (winnings - wagered).
-      </p>
+      {/* Tabs */}
+      <div className="flex gap-2 mb-6" role="tablist" aria-label="Leaderboard categories">
+        <button
+          role="tab"
+          aria-selected={activeTab === 'bettors'}
+          aria-controls="tab-panel-bettors"
+          id="tab-bettors"
+          ref={tabRefs.bettors}
+          tabIndex={activeTab === 'bettors' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'bettors')}
+          onClick={() => setActiveTab('bettors')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+            ${activeTab === 'bettors' ? 'bg-primary text-primary-foreground' : 'bg-muted/30 hover:bg-muted/50 text-muted-foreground'}`}
+        >
+          <Users className="h-4 w-4" aria-hidden="true" />
+          Top Bettors
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === 'creators'}
+          aria-controls="tab-panel-creators"
+          id="tab-creators"
+          ref={tabRefs.creators}
+          tabIndex={activeTab === 'creators' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'creators')}
+          onClick={() => setActiveTab('creators')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
+            ${activeTab === 'creators' ? 'bg-primary text-primary-foreground' : 'bg-muted/30 hover:bg-muted/50 text-muted-foreground'}`}
+        >
+          <Layers className="h-4 w-4" aria-hidden="true" />
+          Top Creators
+        </button>
+      </div>
 
-      {error && (
-        <div className="flex items-center gap-2 p-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400">
-          <AlertCircle className="h-4 w-4 shrink-0" />
+      {/* Current user rank badge */}
+      {userRank && (
+        <p className="text-xs text-primary mb-4">
+          Your rank: <span className="font-bold">#{userRank}</span>
+        </p>
+      )}
+
+      {/* Error */}
+      {error && bettors.length === 0 && creators.length === 0 && (
+        <div className="flex items-center gap-2 p-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400" role="alert">
+          <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           {error}
         </div>
       )}
 
-      {isLoading && entries.length === 0 ? (
-        <div className="space-y-4">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="flex items-center justify-between p-4 bg-muted/30 rounded-lg animate-pulse">
-              <div className="flex items-center gap-4">
-                <div className="h-5 w-8 bg-muted/50 rounded" />
-                <div className="h-10 w-10 rounded-full bg-muted/50" />
-                <div className="h-4 w-32 bg-muted/50 rounded" />
-              </div>
-              <div className="h-4 w-20 bg-muted/50 rounded" />
-            </div>
-          ))}
-        </div>
-      ) : entries.length === 0 ? (
-        <div className="text-center py-10 text-muted-foreground">
-          <Trophy className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p>No contributors yet. Be the first!</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {entries.slice(0, 10).map((entry) => {
-            const isCurrentUser = currentUserAddress && entry.address === currentUserAddress;
-            const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
-            const profitsDisplay = entry.totalProfits >= 1_000_000
-              ? `${(entry.totalProfits / 1_000_000).toFixed(2)} STX`
-              : `${entry.totalProfits.toLocaleString()} μSTX`;
-
-            return (
-              <div
-                key={entry.address}
-                className={`flex items-center justify-between p-4 rounded-lg transition-colors
-                  ${isCurrentUser
-                    ? 'bg-primary/10 border border-primary/30'
-                    : 'bg-muted/30 hover:bg-muted/50'
-                  }`}
-              >
-                <div className="flex items-center gap-4">
-                  <span className={`font-bold text-lg font-mono w-8 ${rankColor}`}>
-                    #{entry.rank}
-                  </span>
-                  <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary">
-                    {entry.address.slice(0, 2).toUpperCase()}
-                  </div>
-                  <div>
-                    <span className="font-medium text-sm">
-                      {formatDisplayAddress(entry.address)}
-                      {isCurrentUser && (
-                        <span className="ml-2 text-xs text-primary font-semibold">(you)</span>
-                      )}
+      {/* Bettors panel */}
+      <div
+        id="tab-panel-bettors"
+        role="tabpanel"
+        aria-labelledby="tab-bettors"
+        hidden={activeTab !== 'bettors'}
+      >
+        {isLoading && bettors.length === 0 ? (
+          <SkeletonRows />
+        ) : bettors.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <Trophy className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
+            <p>{error ? 'Unable to load leaderboard.' : 'No bettors yet. Be the first!'}</p>
+          </div>
+        ) : (
+          <div className="space-y-3" role="list" aria-label="Top bettors">
+            {bettors.map((entry) => {
+              const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
+              const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
+              return (
+                <div
+                  key={entry.address}
+                  role="listitem"
+                  className={`flex items-center justify-between p-4 rounded-lg transition-colors
+                    ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
+                  aria-current={isCurrentUser ? 'true' : undefined}
+                >
+                  <div className="flex items-center gap-4">
+                    <span className={`font-bold text-lg font-mono w-8 ${rankColor}`} aria-label={`Rank ${entry.rank}`}>
+                      #{entry.rank}
                     </span>
-                    <p className="text-xs text-muted-foreground">
-                      {entry.totalPredictions} predictions • {entry.winPercentage.toFixed(1)}% win rate
-                      {entry.currentStreak > 0 && (
-                        <span className="ml-2 text-green-400">• {entry.currentStreak}🔥</span>
-                      )}
-                    </p>
+                    <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary" aria-hidden="true">
+                      {entry.address.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <span className="font-medium text-sm">
+                        {formatDisplayAddress(entry.address)}
+                        {isCurrentUser && <span className="ml-2 text-xs text-primary font-semibold">(you)</span>}
+                      </span>
+                      <p className="text-xs text-muted-foreground">
+                        {entry.totalPredictions} bets · {entry.winPercentage.toFixed(1)}% win rate · {entry.wins} wins
+                      </p>
+                    </div>
                   </div>
+                  <span className="font-bold text-primary text-sm">{formatVolume(entry.totalVolume)}</span>
                 </div>
-                <span className="font-bold text-primary text-sm">{profitsDisplay}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Creators panel */}
+      <div
+        id="tab-panel-creators"
+        role="tabpanel"
+        aria-labelledby="tab-creators"
+        hidden={activeTab !== 'creators'}
+      >
+        {isLoading && creators.length === 0 ? (
+          <SkeletonRows />
+        ) : creators.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <Layers className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
+            <p>{error ? 'Unable to load leaderboard.' : 'No pool creators yet. Create the first market!'}</p>
+          </div>
+        ) : (
+          <div className="space-y-3" role="list" aria-label="Top creators">
+            {creators.map((entry) => {
+              const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
+              const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
+              return (
+                <div
+                  key={entry.address}
+                  role="listitem"
+                  className={`flex items-center justify-between p-4 rounded-lg transition-colors
+                    ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
+                  aria-current={isCurrentUser ? 'true' : undefined}
+                >
+                  <div className="flex items-center gap-4">
+                    <span className={`font-bold text-lg font-mono w-8 ${rankColor}`} aria-label={`Rank ${entry.rank}`}>
+                      #{entry.rank}
+                    </span>
+                    <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center text-xs font-bold text-primary" aria-hidden="true">
+                      {entry.address.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <span className="font-medium text-sm">
+                        {formatDisplayAddress(entry.address)}
+                        {isCurrentUser && <span className="ml-2 text-xs text-primary font-semibold">(you)</span>}
+                      </span>
+                      <p className="text-xs text-muted-foreground">
+                        {entry.totalPools} pools created
+                      </p>
+                    </div>
+                  </div>
+                  <span className="font-bold text-primary text-sm">{formatVolume(entry.totalVolume)}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 });

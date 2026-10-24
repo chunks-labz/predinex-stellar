@@ -2,11 +2,21 @@
 **/target/
 **/*.wasm
 
+# Generated CI artifacts — committed files cause PR churn (#1063).
+# Regenerated snapshots and benchmarks are published as CI artifacts instead.
+contracts/predinex/benchmark-results.json
+contracts/predinex/test_snapshots/
+contracts/pool/test_snapshots/
+
 # Node.js
 **/node_modules/
+dist/
+**/dist/
 .next/
 out/
 build/
+coverage/
+data/
 .env*
 npm-debug.log*
 yarn-debug.log*
@@ -19,3 +29,18 @@ Thumbs.db
 .vscode
 issue.md
 pr.md
+docs/api/
+
+# Removed one-off fix/refactor scripts (see issue #771)
+fix_pool_lifecycle.py
+fix_tests.py
+modify_test.py
+modify.py
+refactor.py
+refactor2.py
+
+# Bot local data
+bot/data/
+
+### IDEs
+# JetBrains IDEs

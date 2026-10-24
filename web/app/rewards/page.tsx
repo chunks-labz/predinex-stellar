@@ -1,20 +1,23 @@
 'use client';
 
-import Navbar from "../components/Navbar";
-import AuthGuard from "../components/AuthGuard";
+import Navbar from '@/components/Navbar';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../../components/ui/accordion";
-import { Info, Trophy } from "lucide-react";
+import { Info, Loader2, Trophy } from "lucide-react";
+import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Leaderboard from "../../components/Leaderboard";
-import { useWallet } from "../components/WalletAdapterProvider";
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useLeaderboard } from "../lib/hooks/useLeaderboard";
-import { TOKEN_SYMBOL } from "../lib/formatting";
+import { TOKEN_SYMBOL } from "@/app/lib/formatting";
 
 export default function RewardsPage() {
   const { address: stxAddress } = useWallet();
 
-  const { userRank, entries } = useLeaderboard(stxAddress);
+  // The hook exposes `userBettorRank` / `bettors`; destructuring the old
+  // `userRank` / `entries` names threw on every render and crashed the page.
+  const { userBettorRank: userRank, bettors, isLoading } = useLeaderboard(stxAddress);
 
-  const totalParticipants = entries.length;
+  const totalParticipants = bettors.length;
   const topPercent =
     userRank && totalParticipants > 0
       ? Math.ceil((userRank / totalParticipants) * 100)
@@ -23,7 +26,8 @@ export default function RewardsPage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
-      <AuthGuard>
+      <RouteErrorBoundary routeName="Rewards">
+      <WalletConnectGate>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <div className="glass-panel p-8 rounded-2xl mb-8">
             <h1 className="text-4xl font-extrabold mb-2 bg-linear-to-r from-primary to-purple-400 bg-clip-text text-transparent">
@@ -38,7 +42,12 @@ export default function RewardsPage() {
             </div>
             <div className="lg:col-span-1">
               <div className="glass-panel p-6 rounded-xl h-full flex flex-col justify-center items-center text-center">
-                {userRank ? (
+                {isLoading ? (
+                  <div role="status" className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+                    <span className="text-sm">Loading your rank…</span>
+                  </div>
+                ) : userRank ? (
                   <>
                     <h2 className="text-lg font-medium text-muted-foreground mb-2">Your Rank</h2>
                     <div className="text-5xl font-extrabold text-primary mb-2">#{userRank}</div>
@@ -86,7 +95,8 @@ export default function RewardsPage() {
             </Accordion>
           </div>
         </div>
-      </AuthGuard>
+      </WalletConnectGate>
+      </RouteErrorBoundary>
     </main>
   );
 }

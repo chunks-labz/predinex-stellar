@@ -3,7 +3,7 @@
  * Contains constants, thresholds, and configuration for the analytics system
  */
 
-import { CONTRACT_ADDRESS as STACKS_CONTRACT_ADDRESS, CONTRACT_NAME as STACKS_CONTRACT_NAME } from '../constants';
+import { NETWORK_CONFIG as SHARED_NETWORK_CONFIG } from '../constants';
 
 export const ANALYTICS_CONFIG = {
   // Performance thresholds
@@ -121,23 +121,21 @@ export const ANALYTICS_CONFIG = {
 } as const;
 
 // Contract addresses and network configuration
+// Derived from the shared constants to avoid duplication and stale values.
 export const NETWORK_CONFIG = {
   MAINNET: {
-    // Stacks contract principal + name in `<address>.<name>` form.
-    CONTRACT_ADDRESS: `${STACKS_CONTRACT_ADDRESS}.${STACKS_CONTRACT_NAME}`,
-    NETWORK_URL: 'https://soroban-testnet.stellar.org',
+    CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_SOROBAN_CONTRACT_ID || '',
+    NETWORK_URL: SHARED_NETWORK_CONFIG.mainnet.rpcUrl,
   },
   TESTNET: {
-    // Stacks contract principal + name in `<address>.<name>` form.
-    CONTRACT_ADDRESS: `${STACKS_CONTRACT_ADDRESS}.${STACKS_CONTRACT_NAME}`,
-    NETWORK_URL: 'https://soroban-testnet.stellar.org',
+    CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_SOROBAN_CONTRACT_ID || '',
+    NETWORK_URL: SHARED_NETWORK_CONFIG.testnet.rpcUrl,
   },
   DEVNET: {
-    // Stacks contract principal + name in `<address>.<name>` form.
-    CONTRACT_ADDRESS: `${STACKS_CONTRACT_ADDRESS}.${STACKS_CONTRACT_NAME}`,
+    CONTRACT_ADDRESS: process.env.NEXT_PUBLIC_SOROBAN_CONTRACT_ID || '',
     NETWORK_URL: 'http://localhost:8000',
   },
-} as const;
+};
 
 // Event types from the smart contract
 export const CONTRACT_EVENTS = {

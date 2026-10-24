@@ -3,7 +3,7 @@
  * All IDs, amounts, and addresses are fake but structurally valid.
  */
 
-import type { Pool } from '../../../app/lib/stacks-api';
+import type { Pool } from '../../../app/lib/market-types';
 import type { UserBetData } from '../../../app/lib/soroban-read-api';
 
 export const TEST_CONTRACT_ID = 'CTEST_PREDINEX_CONTRACT_ADDRESS_123456789012345678901234';

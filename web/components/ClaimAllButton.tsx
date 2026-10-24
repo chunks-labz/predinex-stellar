@@ -2,8 +2,8 @@
 
 import { Gift, Loader2 } from 'lucide-react';
 import { useClaimAll, CLAIM_ALL_MAX_POOLS } from '@/app/lib/hooks/useClaimAll';
-import { useWallet } from '../app/components/WalletAdapterProvider';
-import { TransactionFeeModal } from '../app/components/TransactionFeeModal';
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import ClaimAllProgressModal from './ClaimAllProgressModal';
 
 export interface ClaimablePool {
@@ -35,28 +35,51 @@ export default function ClaimAllButton({
     userAddress ?? address
   );
 
+  const modalOpen = state.status !== 'idle';
+  const titles: Record<number, string> = Object.fromEntries(
+    (claimablePools ?? []).map((p) => [p.poolId, p.marketTitle])
+  );
+
+  const progressModal = (
+    <ClaimAllProgressModal
+      isOpen={modalOpen && !feePrompt}
+      state={state}
+      titles={titles}
+      totalClaimableCount={claimablePools?.length}
+      onClose={() => {
+        const paidOut = state.status === 'success' || state.status === 'partial';
+        reset();
+        // Refresh the parent only once the user has seen the summary. Doing it
+        // as soon as the transaction landed removed the claimed pools, which
+        // unmounted this component (and the summary) straight away.
+        if (paidOut) onClaimSuccess?.();
+      }}
+    />
+  );
+
   if (!claimablePools || claimablePools.length === 0) {
     return (
-      <p data-testid="claim-all-empty" className="text-sm text-muted-foreground">
-        No claims available
-      </p>
+      <>
+        <p data-testid="claim-all-empty" className="text-sm text-muted-foreground">
+          No claims available
+        </p>
+        {progressModal}
+      </>
     );
   }
 
   const poolIds = claimablePools.slice(0, CLAIM_ALL_MAX_POOLS).map((p) => p.poolId);
-  const titles: Record<number, string> = Object.fromEntries(
-    claimablePools.map((p) => [p.poolId, p.marketTitle])
-  );
   const isClaiming = state.status === 'claiming';
-  const modalOpen = state.status !== 'idle';
+  const hasMorePools = claimablePools.length > CLAIM_ALL_MAX_POOLS;
+  const remainingCount = hasMorePools ? claimablePools.length - CLAIM_ALL_MAX_POOLS : 0;
 
   const handleClaimAll = () => {
     if (!isConnected || isClaiming) return;
-    void claimAll(poolIds, onClaimSuccess);
+    void claimAll(poolIds);
   };
 
   return (
-    <>
+    <div className="flex flex-col items-end">
       <button
         onClick={handleClaimAll}
         disabled={isClaiming || !isConnected}
@@ -68,6 +91,12 @@ export default function ClaimAllButton({
           ? 'Claiming…'
           : `Claim All (${Math.min(claimablePools.length, CLAIM_ALL_MAX_POOLS)})`}
       </button>
+
+      {hasMorePools && (
+        <p data-testid="claim-all-limit-warning" className="text-xs text-amber-600 dark:text-amber-400 mt-1 font-medium">
+          Capped at {CLAIM_ALL_MAX_POOLS} per batch. {remainingCount} pool{remainingCount === 1 ? '' : 's'} remaining for next batch.
+        </p>
+      )}
 
       <TransactionFeeModal
         isOpen={!!feePrompt}
@@ -85,15 +114,7 @@ export default function ClaimAllButton({
         isConfirming={stage === 'signing' || stage === 'submitting' || stage === 'polling'}
       />
 
-      <ClaimAllProgressModal
-        isOpen={modalOpen && !feePrompt}
-        state={state}
-        titles={titles}
-        onClose={() => {
-          reset();
-          if (state.status === 'success') onClaimSuccess?.();
-        }}
-      />
-    </>
+      {progressModal}
+    </div>
   );
 }

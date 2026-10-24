@@ -1,20 +1,25 @@
 'use client';
 
+import { useId, useRef } from 'react';
 import { CheckCircle2, Loader2, XCircle, Coins, Clock } from 'lucide-react';
 import type { ClaimAllState } from '@/app/lib/hooks/useClaimAll';
+import { useFocusTrap } from '@/app/lib/hooks/useFocusTrap';
+import { useEscapeDismiss } from '@/app/lib/hooks/useEscapeDismiss';
 
 interface ClaimAllProgressModalProps {
   isOpen: boolean;
   state: ClaimAllState;
   /** Pool id → market title, for friendlier per-pool labels. */
   titles?: Record<number, string>;
+  /** Total number of claimable pools available to user before batch slicing. */
+  totalClaimableCount?: number;
   onClose: () => void;
 }
 
 /**
  * Progress modal for the batched "Claim All" flow.
  *
- * Shows an overall `Claiming X/N…` counter plus a per-pool status list, and
+ * Shows an overall `Claiming N pools…` header plus a per-pool status list, and
  * resolves into success / partial-failure / failed states once the batched
  * transaction settles.
  */
@@ -22,19 +27,30 @@ export default function ClaimAllProgressModal({
   isOpen,
   state,
   titles = {},
+  totalClaimableCount,
   onClose,
 }: ClaimAllProgressModalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headingId = useId();
+  const inFlight = state.status === 'claiming';
+
+  useFocusTrap({ active: isOpen, containerRef });
+  // The batch can't be aborted once signed, so Escape only closes a settled modal.
+  useEscapeDismiss({ active: isOpen && !inFlight, onDismiss: onClose });
+
   if (!isOpen) return null;
 
   const total = state.pools.length;
-  const inFlight = state.status === 'claiming';
+  const hasMorePools = typeof totalClaimableCount === 'number' && totalClaimableCount > total;
+  const remainingCount = hasMorePools ? totalClaimableCount - total : 0;
   const isDone = state.status === 'success' || state.status === 'partial';
   const isFailed = state.status === 'failed';
 
-  // While the atomic batch is in flight we surface a "Claiming X/N…" counter;
-  // once it settles we show how many pools actually paid out.
+  // The batch is one atomic transaction, so there is no per-pool progress to
+  // count while it is in flight (a "1/N" counter just sat at 1). Once it
+  // settles we show how many pools actually paid out.
   const header = inFlight
-    ? `Claiming ${Math.min(state.claimedCount + 1, total)}/${total}…`
+    ? `Claiming ${total} pool${total === 1 ? '' : 's'}…`
     : isFailed
       ? 'Claim failed'
       : `Claimed ${state.claimedCount}/${total}`;
@@ -44,15 +60,20 @@ export default function ClaimAllProgressModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4"
       role="dialog"
       aria-modal="true"
-      aria-label="Claim all winnings progress"
+      aria-labelledby={headingId}
+      aria-busy={inFlight}
     >
-      <div className="bg-background border border-border rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
+      <div
+        ref={containerRef}
+        tabIndex={-1}
+        className="outline-none bg-background border border-border rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200"
+      >
         <div className="p-6">
           <div className="flex items-center gap-3 mb-4">
             {inFlight && <Loader2 className="w-5 h-5 animate-spin text-primary" />}
             {isDone && <CheckCircle2 className="w-5 h-5 text-green-500" />}
             {isFailed && <XCircle className="w-5 h-5 text-red-500" />}
-            <h2 className="text-xl font-bold" data-testid="claim-all-header">
+            <h2 id={headingId} className="text-xl font-bold" data-testid="claim-all-header" aria-live="polite">
               {header}
             </h2>
           </div>
@@ -97,14 +118,24 @@ export default function ClaimAllProgressModal({
             ))}
           </ul>
 
+          {hasMorePools && (
+            <div
+              data-testid="claim-all-limit-notice"
+              className="mt-4 p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-600 dark:text-amber-400"
+            >
+              Batch size is limited to {total} pools per transaction. {remainingCount} remaining pool{remainingCount === 1 ? '' : 's'} can be claimed in a subsequent transaction.
+            </div>
+          )}
+
           {isFailed && state.error && (
-            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-500">
+            <div role="alert" className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-sm text-red-500">
               {state.error}
             </div>
           )}
 
           {!inFlight && (
             <button
+              type="button"
               onClick={onClose}
               data-testid="claim-all-close"
               className="mt-6 w-full px-4 py-3 rounded-xl bg-primary text-primary-foreground font-bold hover:brightness-110 transition-all"

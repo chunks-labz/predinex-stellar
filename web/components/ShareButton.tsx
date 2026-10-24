@@ -1,11 +1,37 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Share2, Link, Check, X, QrCode } from 'lucide-react';
 import QRCode from 'qrcode';
 import { cn } from '../lib/utils';
+import { useFocusTrap } from '@/app/lib/hooks/useFocusTrap';
+import { useEscapeDismiss } from '@/app/lib/hooks/useEscapeDismiss';
 
-type FeedbackState = 'idle' | 'copied' | 'shared' | 'error';
+type FeedbackState = 'idle' | 'copied' | 'shared' | 'error' | 'copy-error';
+
+/**
+ * Legacy copy path for when the async Clipboard API is missing or rejects
+ * (insecure origin, denied permission, some embedded webviews).
+ */
+function copyWithSelection(value: string): boolean {
+  if (typeof document === 'undefined' || typeof document.execCommand !== 'function') {
+    return false;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
 
 interface ShareButtonProps {
   url: string;
@@ -23,12 +49,21 @@ export default function ShareButton({ url, title, text, className }: ShareButton
   const [feedback, setFeedbackState] = useState<FeedbackState>('idle');
   const [qrOpen, setQrOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  // Detected after mount: reading `navigator` during render made the server
+  // and client markup disagree (hydration mismatch) on share-capable devices.
+  const [canNativeShare, setCanNativeShare] = useState(false);
+  const qrPanelRef = useRef<HTMLDivElement>(null);
 
-  const canNativeShare =
-    typeof navigator !== 'undefined' &&
-    typeof navigator.share === 'function' &&
-    typeof navigator.canShare === 'function' &&
-    navigator.canShare({ url });
+  useEffect(() => {
+    setCanNativeShare(
+      typeof navigator.share === 'function' &&
+        typeof navigator.canShare === 'function' &&
+        navigator.canShare({ url })
+    );
+  }, [url]);
+
+  useFocusTrap({ active: qrOpen, containerRef: qrPanelRef });
+  useEscapeDismiss({ active: qrOpen, onDismiss: () => setQrOpen(false) });
 
   useEffect(() => {
     if (!qrOpen || !url) return;
@@ -47,7 +82,7 @@ export default function ShareButton({ url, title, text, className }: ShareButton
       await navigator.clipboard.writeText(url);
       showFeedback('copied');
     } catch {
-      showFeedback('error');
+      showFeedback(copyWithSelection(url) ? 'copied' : 'copy-error');
     }
   }
 
@@ -76,6 +111,7 @@ export default function ShareButton({ url, title, text, className }: ShareButton
     copied: 'Link copied!',
     shared: 'Shared!',
     error: 'Something went wrong',
+    'copy-error': "Couldn't copy — open QR to copy the link manually",
   };
 
   const feedbackColor: Record<FeedbackState, string> = {
@@ -83,6 +119,7 @@ export default function ShareButton({ url, title, text, className }: ShareButton
     copied: 'text-green-400',
     shared: 'text-green-400',
     error: 'text-red-400',
+    'copy-error': 'text-red-400',
   };
 
   return (
@@ -147,7 +184,7 @@ export default function ShareButton({ url, title, text, className }: ShareButton
       )}
 
       {/* Error / success feedback label */}
-      {feedback === 'error' && (
+      {(feedback === 'error' || feedback === 'copy-error') && (
         <span
           role="alert"
           className={cn('text-xs font-medium flex items-center gap-1', feedbackColor[feedback])}
@@ -173,7 +210,11 @@ export default function ShareButton({ url, title, text, className }: ShareButton
           />
 
           {/* Popover card */}
-          <div className="relative z-10 flex flex-col items-center gap-3 p-5 rounded-2xl bg-background border border-border shadow-xl">
+          <div
+            ref={qrPanelRef}
+            tabIndex={-1}
+            className="outline-none relative z-10 flex flex-col items-center gap-3 p-5 rounded-2xl bg-background border border-border shadow-xl"
+          >
             <div className="flex w-full items-center justify-between">
               <span className="text-sm font-semibold">Scan to open</span>
               <button
@@ -189,7 +230,8 @@ export default function ShareButton({ url, title, text, className }: ShareButton
             </div>
 
             {qrDataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
+              // Plain <img>, not next/image: the QR code is a runtime-generated
+              // data URL, which the Next image optimizer cannot process.
               <img
                 src={qrDataUrl}
                 alt={`QR code for ${url}`}
@@ -203,9 +245,15 @@ export default function ShareButton({ url, title, text, className }: ShareButton
               </div>
             )}
 
-            <p className="max-w-[200px] truncate text-center text-xs text-muted-foreground">
-              {url}
-            </p>
+            {/* Selectable, untruncated link: the manual fallback when copying fails. */}
+            <input
+              type="text"
+              readOnly
+              value={url}
+              aria-label="Market link"
+              onFocus={(e) => e.currentTarget.select()}
+              className="w-[200px] rounded-lg border border-border bg-muted/40 px-2 py-1 text-center text-xs text-muted-foreground"
+            />
           </div>
         </div>
       )}

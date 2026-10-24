@@ -1,0 +1,76 @@
+version: "3.9"
+
+services:
+  settlement-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: predinex-settlement-bot:latest
+    container_name: predinex-settlement-bot
+    restart: unless-stopped
+
+    environment:
+      # ── Required ─────────────────────────────────────────────────────────
+      - STELLAR_RPC_URL=${STELLAR_RPC_URL}
+      - STELLAR_NETWORK=${STELLAR_NETWORK:-testnet}
+      - CONTRACT_ID=${CONTRACT_ID}
+      - BOT_SECRET_KEY=${BOT_SECRET_KEY}
+
+      # ── Polling ───────────────────────────────────────────────────────────
+      - POLL_INTERVAL_MS=${POLL_INTERVAL_MS:-300000}
+      - BATCH_SIZE=${BATCH_SIZE:-100}
+
+      # ── Settlement ────────────────────────────────────────────────────────
+      - DRY_RUN=${DRY_RUN:-false}
+      - AUTO_SETTLE_ENABLED=${AUTO_SETTLE_ENABLED:-false}
+      - DEFAULT_WINNING_OUTCOME=${DEFAULT_WINNING_OUTCOME:-0}
+
+      # ── Retry ─────────────────────────────────────────────────────────────
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      - RETRY_BASE_DELAY_MS=${RETRY_BASE_DELAY_MS:-1000}
+
+      # ── Notifications ─────────────────────────────────────────────────────
+      - WEBHOOK_URL=${WEBHOOK_URL:-}
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+
+      # ── Health probes (#1429) ─────────────────────────────────────────────
+      # The health check server is enabled by default on port 3001 so the bot
+      # container can be reached by liveness and readiness probes without
+      # conflicting with the API service on port 3000.
+      # Override with HEALTH_CHECK_PORT if needed.
+      - HEALTH_CHECK_ENABLED=${HEALTH_CHECK_ENABLED:-true}
+      - HEALTH_CHECK_PORT=${HEALTH_CHECK_PORT:-3001}
+
+      # ── Logging ───────────────────────────────────────────────────────────
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - NODE_ENV=production
+
+    # Expose the health probe port so orchestrators and sidecars can reach it.
+    # The bot itself does not serve user traffic — only health/readiness probes.
+    ports:
+      - "${HEALTH_CHECK_PORT:-3001}:${HEALTH_CHECK_PORT:-3001}"
+
+    # ── Docker-native health probe (liveness, #1429) ───────────────────────
+    # Uses /healthz — always 200 while the process is alive.
+    # /readyz is used by external orchestrators for readiness gating.
+    # interval: how often Docker checks; timeout: max wait per check;
+    # retries: consecutive failures before marking "unhealthy";
+    # start_period: grace window after container start (bot needs time to
+    # connect to RPC before readiness is meaningful).
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://localhost:${HEALTH_CHECK_PORT:-3001}/healthz || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # Logs are JSON — route to stdout for collection by the container runtime
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

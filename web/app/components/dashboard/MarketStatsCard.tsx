@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { TrendingUp, Users, Clock, ExternalLink, CheckCircle, XCircle } from 'lucide-react';
-import { MarketStatistics } from '../../lib/dashboard-types';
+import { MarketStatistics } from '../../lib/market-types';
 import { formatCurrency, formatPercentage } from '../../lib/dashboard-utils';
 import { formatTimeRemaining } from '../../lib/market-utils';
 import { formatDisplayAddress } from '../../lib/address-display';

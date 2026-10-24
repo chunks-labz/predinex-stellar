@@ -1,10 +1,45 @@
 name: Security Audit
 
+# Dependency vulnerability auditing.
+#
+# The audits below were originally scheduled only, which meant a vulnerable
+# dependency could merge and sit on `main` for up to a week before anyone
+# noticed. They now also run on every pull request and on pushes to `main`, so
+# a vulnerable lockfile is blocked at the point it is introduced.
+#
+# A `paths` filter keeps that affordable: a PR that touches no manifest or
+# lockfile cannot have changed the audited dependency set, so the last run
+# still stands. The weekly schedule is unaffected by `paths` (it only applies
+# to `push` and `pull_request`) and re-audits the full tree, which is what
+# catches advisories published against dependencies nobody has touched.
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '.github/workflows/security-audit.yml'
   schedule:
     # Every Monday at 08:00 UTC
     - cron: '0 8 * * 1'
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-audit-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   npm-audit:
@@ -27,11 +62,7 @@ jobs:
         run: npm ci
 
       - name: Audit (high and critical only)
-        # --audit-level=high surfaces high/critical findings without blocking on moderate/low.
-        # The step is marked continue-on-error so unrelated PRs are never blocked;
-        # findings are still visible in the workflow summary.
         run: npm audit --audit-level=high
-        continue-on-error: true
 
       - name: Generate audit report
         run: npm audit --json > npm-audit-report.json || true
@@ -41,6 +72,70 @@ jobs:
         with:
           name: npm-audit-report
           path: web/npm-audit-report.json
+          retention-days: 30
+
+  bot-npm-audit:
+    name: Bot npm dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit (high and critical only)
+        run: npm audit --audit-level=high
+
+      - name: Generate audit report
+        run: npm audit --json > bot-npm-audit-report.json || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-npm-audit-report
+          path: bot/bot-npm-audit-report.json
+          retention-days: 30
+
+  api-npm-audit:
+    name: API npm dependency audit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit (high and critical only)
+        run: npm audit --audit-level=high
+
+      - name: Generate audit report
+        run: npm audit --json > api-npm-audit-report.json || true
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-npm-audit-report
+          path: api/api-npm-audit-report.json
           retention-days: 30
 
   cargo-audit:
@@ -55,14 +150,13 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
       - name: Audit
         run: cargo audit
-        continue-on-error: true
 
       - name: Generate audit report
         run: cargo audit --json > cargo-audit-report.json || true
@@ -73,3 +167,23 @@ jobs:
           name: cargo-audit-report
           path: contracts/predinex/cargo-audit-report.json
           retention-days: 30
+
+  # A single required status check, so branch protection needs one entry rather
+  # than four, and so a skipped audit can never read as a passing one.
+  audit-summary:
+    name: Dependency Audit
+    needs: [npm-audit, bot-npm-audit, api-npm-audit, cargo-audit]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every audit to pass
+        run: |
+          results="${{ needs.npm-audit.result }} ${{ needs.bot-npm-audit.result }} ${{ needs.api-npm-audit.result }} ${{ needs.cargo-audit.result }}"
+          echo "npm audit:      ${{ needs.npm-audit.result }}"
+          echo "bot npm audit:  ${{ needs.bot-npm-audit.result }}"
+          echo "api npm audit:  ${{ needs.api-npm-audit.result }}"
+          echo "cargo audit:    ${{ needs.cargo-audit.result }}"
+          if [ "$results" != "success success success success" ]; then
+            echo "::error::One or more dependency audits did not pass ($results)."
+            exit 1
+          fi

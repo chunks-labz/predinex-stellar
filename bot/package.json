@@ -1,0 +1,29 @@
+{
+  "name": "predinex-settlement-bot",
+  "version": "1.0.0",
+  "description": "Automated settlement bot for Predinex prediction pools on Stellar/Soroban",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node --esm src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "dry-run": "DRY_RUN=true node dist/index.js"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "16.0.1",
+    "dotenv": "^18.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.5.4",
+    "vitest": "^5.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

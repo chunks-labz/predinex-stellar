@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import dynamic from 'next/dynamic';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useWalletConnect } from '../lib/hooks/useWalletConnect';
 import { useUserDashboard } from '../lib/user-dashboard/useUserDashboard';
 import type { DashboardTabId } from '../lib/user-dashboard/types';
@@ -12,7 +12,7 @@ import { DashboardHeader } from './user-dashboard/DashboardHeader';
 import { DashboardStatsSections } from './user-dashboard/DashboardStatsSections';
 import { DashboardTabBar } from './user-dashboard/DashboardTabBar';
 import { DashboardOverviewPanel } from './user-dashboard/DashboardBetPanels';
-import StaleDataIndicator from './StaleDataIndicator';
+import StaleDataIndicator from '@/components/StaleDataIndicator';
 
 function PanelSkeleton() {
   return <div className="h-40 bg-card/20 animate-pulse rounded-xl border border-border" />;
@@ -39,7 +39,7 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<DashboardTabId>('overview');
 
   const sessionConnected = !!session?.isConnected;
-  const { stats, bets, isLoading, fetchUserData } = useUserDashboard(isConnected, sessionConnected);
+  const { stats, bets, isLoading, fetchUserData } = useUserDashboard(isConnected, sessionConnected, address || session?.address);
 
   if (!sessionConnected && !isConnected) {
     return <DashboardConnectPrompt />;
@@ -48,7 +48,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <DashboardHeader />
-      <DashboardStatsSections stats={stats} />
+      <DashboardStatsSections stats={stats} isLoading={isLoading} />
       <DashboardTabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
       {activeTab === 'overview' && <DashboardOverviewPanel bets={bets} isLoading={isLoading} />}

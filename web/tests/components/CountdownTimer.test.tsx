@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, act } from '@testing-library/react';
-import CountdownTimer from '../../app/components/CountdownTimer';
+import CountdownTimer from '@/components/CountdownTimer';
 
 describe('CountdownTimer', () => {
   beforeEach(() => {
@@ -37,9 +37,9 @@ describe('CountdownTimer', () => {
     expect(screen.getByRole('timer')).toHaveTextContent('Expired');
   });
 
-  it('renders the Expired state immediately for a null countdown', () => {
+  it('renders the loading state immediately for a null countdown', () => {
     render(<CountdownTimer secondsRemaining={null} />);
-    expect(screen.getByRole('timer')).toHaveTextContent('Expired');
+    expect(screen.getByRole('timer')).toHaveTextContent('--');
   });
 
   it('shows a static Settled label for settled pools', () => {
@@ -52,5 +52,27 @@ describe('CountdownTimer', () => {
     render(<CountdownTimer secondsRemaining={2 * 3600 + 30 * 60} />);
     // sr-only live region uses the verbose, minute-granular description.
     expect(screen.getByRole('timer')).toHaveTextContent('2 hours, 30 minutes remaining');
+  });
+
+  it('stops ticking once expired', () => {
+    const clearSpy = vi.spyOn(window, 'clearInterval');
+    render(<CountdownTimer secondsRemaining={2} />);
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(screen.getByRole('timer')).toHaveTextContent('Expired');
+    expect(clearSpy).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    clearSpy.mockRestore();
+  });
+
+  it('only exposes a live region when asked to announce', () => {
+    const { container, rerender } = render(<CountdownTimer secondsRemaining={600} />);
+    expect(container.querySelector('[aria-live]')).toBeNull();
+
+    rerender(<CountdownTimer secondsRemaining={600} announce />);
+    expect(container.querySelector('[aria-live="polite"]')).not.toBeNull();
   });
 });

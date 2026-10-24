@@ -1,59 +1,62 @@
+/**
+ * Playwright Configuration for PrediNx E2E Tests
+ *
+ * Supports headless Chromium and Firefox in CI.
+ * WebKit is optional and can be enabled if needed.
+ */
+
 import { defineConfig, devices } from '@playwright/test';
 
-/**
- * See https://playwright.dev/docs/test-configuration.
- */
 export default defineConfig({
-  testDir: './tests/visual',
-  /* Maximum time one test can run for. */
-  timeout: 30 * 1000,
+  testDir: './e2e',
+  timeout: 30_000,
   expect: {
-    /**
-     * Maximum time expect() should wait for the condition to be met.
-     * For example in `await expect(locator).toHaveText();`
-     */
     timeout: 5000,
-    toHaveScreenshot: {
-      threshold: 0.2,
-    },
   },
-  /* Run tests in files in parallel */
   fullyParallel: true,
-  /* Fail the build on CI if you accidentally left test.only in the source code. */
-  forbidOnly: !!process.env.CI,
-  /* Retry on CI only */
-  retries: process.env.CI ? 2 : 0,
-  /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 1 : undefined,
-  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: 'html',
-  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
-  use: {
-    /* Base URL to use in actions like `await page.goto('/')`. */
-    baseURL: 'http://localhost:3000',
+  workers: process.env.CI ? 1 : 4,
 
-    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+  ],
+
+  use: {
+    baseURL: process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000',
     trace: 'on-first-retry',
-    
-    /* Use dark mode as the app likely defaults to it or has it as a primary theme */
-    colorScheme: 'dark',
+    screenshot: 'only-on-failure',
+    headless: true,
+
+    // Chromium settings
+    channel: 'chrome', // Use system Chrome; override in CI if needed
+
+    // Device emulation (desktop by default)
+    ...devices['Desktop Chrome'],
   },
 
-  /* Configure projects for major browsers */
+  // CI configuration
   projects: [
     {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      name: 'Chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        headless: true,
+      },
+    },
+    {
+      name: 'Firefox',
+      use: {
+        ...devices['Desktop Firefox'],
+        headless: true,
+      },
     },
   ],
 
-  /* Run your local dev server before starting the tests */
+  // Run your experimental features enabled here.
   webServer: {
-    command: 'NEXT_PUBLIC_NETWORK=testnet NEXT_PUBLIC_SOROBAN_CONTRACT_ID=CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA npm run dev',
+    command: 'npm run dev',
     url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
-    stdout: 'pipe',
-    stderr: 'pipe',
-    timeout: 120000,
+    reuseExistingServer: true,
+    timeout: 120_000,
   },
 });

@@ -6,10 +6,79 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
+  migration-rollback:
+    name: Migration Rollback Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: predinex_ci
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d predinex_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migrations up and down, then verify schema identity
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_ci
+        run: bash scripts/verify-migrations.sh
+
+  lint-and-format:
+    name: Lint & Format Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.87.0"
+          components: rustfmt, clippy
+
+      - name: Check Rust formatting (fail with diff)
+        run: |
+          cargo fmt --all --check || {
+            echo "::error::Rust formatting check failed! Run 'cargo fmt' to auto-fix unformatted files."
+            git diff
+            exit 1
+          }
+
+      - name: Check Rust linting (Clippy)
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: ./web
+        run: npm ci
+
+      - name: Check Web linting (fail on violations)
+        working-directory: ./web
+        run: npm run lint
+
   web-checks:
     name: Web Checks
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: ./web
@@ -29,19 +98,46 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Verify workflow permissions and concurrency
+        working-directory: .
+        run: python3 scripts/verify-workflows.py
+
+      - name: Verify security disclosure policy
+        # The policy used to advertise a mailbox on a domain that no longer
+        # resolves, plus placeholder PGP blocks. This keeps SECURITY.md
+        # pointing at a working private channel.
+        working-directory: .
+        run: python3 scripts/verify-security-policy.py
+
       - name: Test
         run: npm run test -- --run
 
       - name: Build
         run: npm run build
 
+      - name: OpenAPI spec drift check
+        if: github.event_name == 'pull_request'
+        run: |
+          # Check if the OpenAPI spec has drifted from the route code
+          # This step regenerates the spec/SDK and fails the build if git diff shows changes
+          set -euo pipefail
+
+          # Generate SDK from spec
+          bash scripts/generate-sdk.sh
+
+          # Check if any files changed due to spec regeneration
+          # Only fails on pull requests to enforce spec/code sync
+          git diff --quiet || {
+            echo "::error::OpenAPI spec drift detected - route code and generated SDK/types are out of sync."
+            echo "Run './scripts/generate-sdk.sh' to regenerate the SDK, or update the spec to match the code."
+            exit 1
+          }
+
       - name: Bundle size budget check
         if: github.event_name == 'pull_request'
         run: |
           # Budget definitions (KB). Update intentionally with a comment explaining the reason.
-          # Mainline bundle increased after recent UI + data-surface additions (dashboard cards,
-          # transactions page, favorites hook, and related adapters). Keep a small buffer over the
-          # current baseline so PR checks stay stable; tighten again once we do chunk splitting.
+          # We start from the current build baseline and fail on regression so route-level growth remains visible.
           BUDGET_TOTAL_KB=5800
           BUDGET_JS_KB=5000
           BUDGET_CSS_KB=80
@@ -76,6 +172,20 @@ jobs:
           check_budget "JavaScript"   "$JS_SIZE"    "$BUDGET_JS_KB"
           check_budget "CSS"          "$CSS_SIZE"   "$BUDGET_CSS_KB"
 
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Per-route bundle sizes" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Route | Size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|------|" >> "$GITHUB_STEP_SUMMARY"
+          if [ -d ".next/server/app" ]; then
+            find .next/server/app -mindepth 1 -maxdepth 2 -type d 2>/dev/null | sort | while read -r dir; do
+              size=$(find "$dir" -type f -exec du -k {} + 2>/dev/null | awk '{s+=$1} END {printf "%d", s + 0}')
+              if [ -n "$size" ] && [ "$size" -gt 0 ]; then
+                route="${dir#./.next/server/app/}"
+                printf "| %s | %sKB |\n" "$route" "$size" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            done
+          fi
+
           if [ "$FAILED" -eq 1 ]; then
             echo ""
             echo "Bundle size budget exceeded. To update a budget intentionally, edit"
@@ -83,6 +193,165 @@ jobs:
             echo "explaining why the increase is justified."
             exit 1
           fi
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      artifacts: write
+    defaults:
+      run:
+        working-directory: ./web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run Playwright tests
+        run: npx playwright test
+
+      - name: Upload Playwright test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: ./web/.playwright-report
+          retention-days: 30
+
+  bot-checks:
+    name: Bot Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./bot
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: bot/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (also type-checks oracle/ via oracle/tsconfig.json)
+        run: npm run build
+
+      - name: Test (also covers oracle/ via the vitest include path)
+        run: npm test
+
+  api-checks:
+    name: API Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check API schema snapshot
+        run: npm run schema:check
+
+  oracle-checks:
+    name: Oracle Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./oracle
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: oracle/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  widget-checks:
+    name: Widget Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./packages/widget
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+          cache-dependency-path: packages/widget/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test -- --run
+
+      - name: Build
+        run: npm run build
 
   contract-checks:
     name: Contract Checks
@@ -112,20 +381,97 @@ jobs:
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: stable
+          toolchain: "1.87.0"
           components: rustfmt, clippy
 
       - name: Add Soroban WASM target
         run: rustup target add wasm32v1-none
 
-      - name: Format check
-        run: cargo fmt --check
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
 
-      - name: Clippy
-        run: cargo clippy -- -D warnings
+      # #1305 — `cargo test --workspace` passing says nothing about whether a
+      # crate's tests were compiled: tests behind a module the crate never
+      # declares are invisible to the runner, so the step goes green while the
+      # crate contributes zero. contracts/pool shipped that way, with a full
+      # test file and a `testutils` dev-dependency paid for but never used.
+      #
+      # Runs before fmt/clippy/test so the assertion is not left unreachable
+      # behind whatever else is currently red on main. Crates that declare no
+      # tests are skipped, so this asserts "tests written must be tests that
+      # run", not "every crate must have tests".
+      - name: Assert declared tests are actually compiled and run
+        working-directory: .
+        run: python3 scripts/verify-declared-tests.py
 
-      - name: Run tests
-        run: cargo test
+      - name: Format check (workspace)
+        working-directory: .
+        run: cargo fmt --all --check
+
+      - name: Clippy (workspace)
+        working-directory: .
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run tests (workspace)
+        working-directory: .
+        run: cargo test --workspace
+
+      - name: Verify reproducible contract builds (#1431)
+        working-directory: .
+        run: |
+          set -euo pipefail
+
+          # Build the contract
+          stellar contract build --manifest-path contracts/predinex/Cargo.toml \
+            --out-dir "$RUNNER_TEMP/build1" --release
+
+          # Clean build artifacts to ensure a fresh build
+          cargo clean -p predinex_contract --release
+
+          # Build again
+          stellar contract build --manifest-path contracts/predinex/Cargo.toml \
+            --out-dir "$RUNNER_TEMP/build2" --release
+
+          # Compare checksums
+          HASH1=$(sha256sum "$RUNNER_TEMP/build1/predinex_contract.wasm" | cut -d' ' -f1)
+          HASH2=$(sha256sum "$RUNNER_TEMP/build2/predinex_contract.wasm" | cut -d' ' -f1)
+
+          if [ "$HASH1" != "$HASH2" ]; then
+            echo "::error::Contract builds are not reproducible. HASH1=$HASH1 HASH2=$HASH2"
+            exit 1
+          fi
+
+          echo "✓ Contract builds are reproducible (hash: $HASH1)"
+
+      - name: Verify Rust module declarations
+        # #1310 — a file in src/ with no `mod` declaration is never compiled, so
+        # it can never break CI and quietly rots. Scoped to the crates that
+        # have been audited: contracts/pool is clean as of this commit, while
+        # contracts/predinex still carries three pre-existing orphans
+        # (events.rs, events_test.rs, referral_tests.rs) that need a
+        # register-or-delete decision. Widen the argument list as those are
+        # resolved; the script is already workspace-capable.
+        run: python3 scripts/verify-module-declarations.py contracts/pool
+      - name: Cache stellar-cli
+        id: stellar-cli-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/stellar
+          key: stellar-cli-v22-${{ runner.os }}
+
+      - name: Install stellar-cli
+        if: steps.stellar-cli-cache.outputs.cache-hit != 'true'
+        run: cargo install --locked stellar-cli@22.0.1
+
+      - name: Lint deployment docs
+        working-directory: .
+        run: bash scripts/lint-deploy-docs.sh
+
+      - name: Lint Contract API Docs
+        working-directory: .
+        run: python3 scripts/lint-contract-api.py
 
       - name: Measure current contract WASM size
         id: wasm_size_head
@@ -325,7 +671,7 @@ jobs:
           echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
 
       - name: Comment PR with WASM size trend
-        if: always() && github.event_name == 'pull_request' && steps.wasm_size_summary.outputs.comment_path != ''
+        if: always() && github.event_name == 'pull_request' && steps.wasm_size_summary.outputs.comment_path != '' && github.event.pull_request.head.repo.full_name == github.repository
         uses: actions/github-script@v7
         env:
           WASM_SIZE_COMMENT_PATH: ${{ steps.wasm_size_summary.outputs.comment_path }}
@@ -368,95 +714,5 @@ jobs:
         with:
           name: contract-wasm-size-report-${{ github.run_id }}
           path: ${{ steps.wasm_size_artifacts.outputs.artifact_dir }}
-          if-no-files-found: warn
-          retention-days: 30
-
-  contract-benchmarks:
-    name: Contract Benchmarks
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    permissions:
-      contents: read
-      pull-requests: write
-    defaults:
-      run:
-        working-directory: ./contracts/predinex
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Run benchmarks
-        id: benchmarks
-        run: |
-          rm -f benchmark-results.json
-          cargo test --release bench_ -- --nocapture 2>&1 | tee bench-output.txt
-          echo "bench_output_path=$PWD/bench-output.txt" >> "$GITHUB_OUTPUT"
-          echo "results_path=$PWD/benchmark-results.json" >> "$GITHUB_OUTPUT"
-
-      - name: Build PR comment
-        if: always() && steps.benchmarks.outcome != 'skipped'
-        id: bench_comment
-        run: |
-          comment_path="$RUNNER_TEMP/bench-comment.md"
-          {
-            echo "<!-- contract-benchmarks -->"
-            echo "## Contract Benchmark Results"
-            echo ""
-            echo "| Operation | Iterations | Avg (ms) | Total (ms) |"
-            echo "|-----------|-----------|----------|------------|"
-            if [ -f benchmark-results.json ]; then
-              node -e "
-                const r = JSON.parse(require('fs').readFileSync('benchmark-results.json','utf8'));
-                r.forEach(e => console.log('| ' + e.operation + ' | ' + e.iterations + ' | ' + e.avg_wall_ms.toFixed(3) + ' | ' + e.total_wall_ms.toFixed(3) + ' |'));
-              " 2>/dev/null || echo "| (parse error) | - | - | - |"
-            else
-              echo "| (no results) | - | - | - |"
-            fi
-          } > "$comment_path"
-          echo "comment_path=$comment_path" >> "$GITHUB_OUTPUT"
-
-      - name: Post benchmark comment
-        if: always() && steps.bench_comment.outputs.comment_path != ''
-        uses: actions/github-script@v7
-        env:
-          BENCH_COMMENT_PATH: ${{ steps.bench_comment.outputs.comment_path }}
-        with:
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync(process.env.BENCH_COMMENT_PATH, 'utf8');
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c =>
-              c.user.type === 'Bot' && c.body.includes('<!-- contract-benchmarks -->')
-            );
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
-
-      - name: Upload benchmark results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: benchmark-results-${{ github.run_id }}
-          path: contracts/predinex/benchmark-results.json
           if-no-files-found: warn
           retention-days: 30

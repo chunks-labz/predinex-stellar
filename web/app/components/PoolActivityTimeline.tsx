@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useEffect, useState, useMemo } from 'react';
 import {
   Plus,
@@ -15,6 +16,8 @@ import {
 } from 'lucide-react';
 import { TruncatedAddress } from '../../components/TruncatedAddress';
 import { usePoolActivity } from '../hooks/usePoolActivity';
+import { areActivityFixturesEnabled } from '../lib/feature-flags';
+import { DemoDataBanner } from './DemoDataBanner';
 import {
   POOL_ACTIVITY_EVENT_META,
   POOL_ACTIVITY_EVENT_ACCENT,
@@ -32,7 +35,7 @@ interface PoolActivityTimelineProps {
   maxInitialEvents?: number;
 }
 
-const EVENT_ICON: Record<PoolActivityEventType, React.ComponentType<any>> = {
+const EVENT_ICON: Record<PoolActivityEventType, React.ComponentType<{ className?: string }>> = {
   'pool-created': Plus,
   'bet-placed': TrendingUp,
   'bet-cancelled': X,
@@ -168,7 +171,7 @@ function PoolActivityItem({
           {event.amount !== undefined && (
             <div className="flex items-center justify-between">
               <span>Amount</span>
-              <span className="text-foreground/70">{formatAmount(event.amount)} STX</span>
+              <span className="text-foreground/70">{formatAmount(event.amount)} {TOKEN_SYMBOL}</span>
             </div>
           )}
 
@@ -225,12 +228,24 @@ export default function PoolActivityTimeline({
   }, [events, displayedCount]);
 
   const handleLoadMore = () => {
-    setDisplayedCount((prev) => Math.min(prev + 20, maxInitialEvents));
-    loadMore();
+    if (displayedCount < events.length) {
+      setDisplayedCount((prev) => prev + 20);
+    } else if (hasMore && !isLoading) {
+      loadMore();
+      setDisplayedCount((prev) => prev + 20);
+    }
   };
 
   return (
     <section className="mt-8" aria-label="Pool activity timeline">
+      {/* #1306 — seeded rows are indistinguishable from real on-chain events at a
+          glance, so say so whenever the fixture source is in use. */}
+      {areActivityFixturesEnabled() && (
+        <div className="mb-4">
+          <DemoDataBanner source="pool activity" />
+        </div>
+      )}
+
       {/* Section header */}
       <div className="flex items-center gap-2 mb-6">
         <Clock className="w-5 h-5 text-primary" aria-hidden="true" />
@@ -273,23 +288,34 @@ export default function PoolActivityTimeline({
           </ol>
 
           {/* Load more button */}
-          {displayedCount < events.length && (
+          {(displayedCount < events.length || hasMore) && (
             <div className="mt-6 flex justify-center">
               <button
                 onClick={handleLoadMore}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted/50 text-sm font-medium transition-colors"
-                aria-label={`Load more events (${events.length - displayedCount} remaining)`}
+                disabled={isLoading}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-card hover:bg-muted/50 text-sm font-medium transition-colors disabled:opacity-50"
+                aria-label="Load more events"
               >
-                Load more
-                <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                {isLoading ? (
+                  <>
+                    <span>Loading...</span>
+                    <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                  </>
+                ) : (
+                  <>
+                    <span>Load more</span>
+                    <ChevronDown className="w-4 h-4" aria-hidden="true" />
+                  </>
+                )}
               </button>
             </div>
           )}
 
           {/* Pagination info */}
-          {events.length >= maxInitialEvents && (
+          {events.length > 0 && (
             <div className="mt-4 text-center text-xs text-muted-foreground">
-              Showing {displayedCount} of {Math.min(events.length, maxInitialEvents)} events
+              Showing {Math.min(displayedCount, events.length)} of {events.length} event{events.length !== 1 ? 's' : ''}
+              {events.length >= 200 ? ' (maximum 200 events reached)' : ''}
             </div>
           )}
         </>

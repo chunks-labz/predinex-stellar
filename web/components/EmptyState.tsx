@@ -1,34 +1,105 @@
-import { FileQuestion, Sparkles } from 'lucide-react';
+'use client';
 
-interface EmptyStateProps {
-  message: string;
+import React from 'react';
+import Link from 'next/link';
+import { useI18n } from '@/app/lib/i18n';
+import { FolderOpen } from 'lucide-react';
+
+export interface EmptyStateProps {
+  /** Optional override message or description. Falls back to i18n default if neither title nor description provided. */
+  message?: string;
+  /** Primary title for the empty state */
+  title?: string;
+  /** Explanatory description */
   description?: string;
-  showIcon?: boolean;
+  /** Custom icon component */
+  icon?: React.ComponentType<{ className?: string }>;
+  /** Primary action button label */
+  actionLabel?: string;
+  /** Primary action link destination */
+  actionHref?: string;
+  /** Primary action click handler */
+  onAction?: () => void;
+  /** Secondary action button label */
+  secondaryActionLabel?: string;
+  /** Secondary action click handler */
+  onSecondaryAction?: () => void;
+  /** Additional container classes */
+  className?: string;
 }
 
-export function EmptyState({ message, description, showIcon = true }: EmptyStateProps) {
+export function EmptyState({
+  message,
+  title,
+  description,
+  icon: Icon = FolderOpen,
+  actionLabel,
+  actionHref,
+  onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
+  className = '',
+}: EmptyStateProps) {
+  const { t } = useI18n();
+
+  const displayTitle = title || (message ? undefined : undefined);
+  const displayDescription = description || message || t('emptyState.defaultMessage');
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 px-4 text-center animate-in fade-in slide-in-from-bottom-4 duration-700">
-      {showIcon && (
-        <div className="mb-8 relative">
-          <div className="absolute inset-0 bg-primary/10 blur-3xl rounded-full animate-pulse" />
-          <div className="relative bg-gradient-to-br from-card/80 to-card/60 p-8 rounded-3xl border border-border/50 backdrop-blur shadow-xl">
-            <FileQuestion className="h-16 w-16 text-muted-foreground/60" strokeWidth={1.5} />
-          </div>
-        </div>
+    <div
+      className={`flex flex-col items-center justify-center p-8 sm:p-12 text-center rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm shadow-sm ${className}`}
+      role="status"
+    >
+      <div className="w-16 h-16 rounded-2xl bg-muted/60 flex items-center justify-center mb-5 text-muted-foreground ring-1 ring-border/20 shadow-inner">
+        <Icon className="w-8 h-8" />
+      </div>
+
+      {displayTitle && (
+        <h3 className="text-xl font-bold tracking-tight text-foreground mb-2">
+          {displayTitle}
+        </h3>
       )}
-      <h3 className="text-2xl font-black text-foreground mb-3 bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-        {message}
-      </h3>
-      {description && (
-        <p className="text-base text-muted-foreground max-w-md leading-relaxed mb-6">
-          {description}
+
+      {displayDescription && (
+        <p className="text-sm sm:text-base text-muted-foreground max-w-md mb-6 leading-relaxed">
+          {displayDescription}
         </p>
       )}
-      <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground/50 font-medium">
-        <Sparkles className="h-4 w-4" />
-        <span>Check back soon for new opportunities</span>
-      </div>
+
+      {(actionLabel || secondaryActionLabel) && (
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          {secondaryActionLabel && onSecondaryAction && (
+            <button
+              type="button"
+              onClick={onSecondaryAction}
+              className="inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-xl border border-border/60 bg-background/50 hover:bg-muted/80 text-foreground transition-all duration-200 cursor-pointer shadow-xs"
+            >
+              {secondaryActionLabel}
+            </button>
+          )}
+
+          {actionLabel && actionHref && (
+            <Link
+              href={actionHref}
+              className="inline-flex items-center justify-center px-5 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-200 shadow-sm hover:shadow"
+            >
+              {actionLabel}
+            </Link>
+          )}
+
+          {actionLabel && !actionHref && onAction && (
+            <button
+              type="button"
+              onClick={onAction}
+              className="inline-flex items-center justify-center px-5 py-2 text-sm font-semibold rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-200 cursor-pointer shadow-sm hover:shadow"
+            >
+              {actionLabel}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
+
+export default EmptyState;

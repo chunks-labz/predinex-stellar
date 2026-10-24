@@ -3,6 +3,14 @@
 ## Overview
 Predinex is a decentralized prediction market built on the **Stellar blockchain** (via Soroban). The frontend is a modern Next.js application that prioritizes performance, type safety, and a premium user experience in the Stellar ecosystem.
 
+> **Canonical frontend location.** `web/` is the single canonical Next.js
+> application. It is the only frontend built, tested, and deployed by CI
+> (`.github/workflows/ci.yml`, `working-directory: ./web`). A former
+> `apps/web/` directory held an unwired skeleton that duplicated components
+> already present here; it was removed and its one unique feature — the
+> embeddable pool widget — was consolidated into this app (see below). Add new
+> frontend code here, not in a second top-level app.
+
 ## Tech Stack
 - **Framework**: Next.js 16 (App Router)
 - **React**: React 19
@@ -29,6 +37,10 @@ Predinex is a decentralized prediction market built on the **Stellar blockchain*
 - `providers/`: Context providers for global state.
 - `tests/`: Vitest test suites for components and utilities.
 - `public/`: Static assets.
+- `app/embed/pool/[poolId]/`: Standalone, iframe-friendly pool widget route
+  used for embedding a single pool on external sites. Renders
+  `components/PoolEmbedWidget`; `components/EmbedCodeSnippet` produces the
+  copyable `<iframe>` markup.
 
 ## Component Documentation
 

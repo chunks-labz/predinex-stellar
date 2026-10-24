@@ -1,12 +1,15 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('PoolIntegration');
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { useWallet } from './WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { Loader2, AlertCircle, CheckCircle, TrendingUp, Users, RefreshCw } from 'lucide-react';
 import { formatDisplayAddress } from '../lib/address-display';
-import { getMarkets, type Pool } from '../lib/stacks-api';
+import { getMarkets } from '../lib/soroban-read-api';
+import type { Pool } from '../lib/market-types';
 
 interface PoolStats {
   totalPools: number;
@@ -49,7 +52,7 @@ export default function PoolIntegration() {
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch pools');
-      console.error('Error fetching pools:', err);
+      log.error('Error fetching pools:', err);
     } finally {
       setIsLoading(false);
     }
@@ -208,7 +211,7 @@ export default function PoolIntegration() {
                   {!pool.settled && (
                     <div className="space-y-2">
                       <button 
-                        onClick={isMismatch ? undefined : (isConnected ? () => {} : connect)}
+                        onClick={isMismatch ? undefined : (isConnected ? () => router.push(`/markets/${pool.id}`) : connect)}
                         disabled={isMismatch}
                         className="w-full py-2 bg-primary hover:bg-violet-600 text-white font-bold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >

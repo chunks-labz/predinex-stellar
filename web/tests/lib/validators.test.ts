@@ -7,44 +7,53 @@ import {
   validateDuration,
   validateStellarAddress,
   validateStellarContractAddress,
+  validateOutcomesList,
   MAX_TITLE_LENGTH,
   MAX_DESCRIPTION_LENGTH,
   MAX_OUTCOME_LENGTH,
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
+  MAX_OUTCOME_COUNT,
+  clampBetAmount,
 } from '../../app/lib/validators';
 
 describe('validateContractId', () => {
-  it('accepts a valid mainnet contract identifier', () => {
+  it('accepts a valid contract identifier', () => {
     const result = validateContractId(
-      'SPENV2J0V4BHRFAZ6FVF97K9ZGQJ0GT19RC3JFN7.predinex-pool',
+      'SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool',
       'mainnet'
     );
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('accepts a valid testnet contract identifier', () => {
-    const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
-      'testnet'
-    );
+  it('does not enforce network-specific prefixes when no network is given', () => {
+    const result = validateContractId('SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool');
     expect(result.valid).toBe(true);
   });
 
-  it('rejects missing separators', () => {
-    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM');
-    expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/format/i);
-  });
-
-  it('rejects a network/address mismatch', () => {
+  it('rejects bare Stellar contract addresses without a <address>.<name> structure', () => {
     const result = validateContractId(
-      'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool',
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
       'mainnet'
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/mainnet/i);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
+  });
+
+  it('rejects account public keys', () => {
+    const result = validateContractId('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ');
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
+  });
+
+  it('rejects invalid Stellar contract address prefixes', () => {
+    const result = validateContractId(
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA.escrow',
+      'testnet'
+    );
+    expect(result.valid).toBe(false);
+    expect(result.error).toBe('Invalid Stacks contract address format');
   });
 });
 
@@ -240,5 +249,80 @@ describe('metadata length validation (issue #154)', () => {
     const result = validateOutcome('A'.repeat(MAX_OUTCOME_LENGTH + 1));
     expect(result.valid).toBe(false);
     expect(result.error).toMatch(/50.*fewer/i);
+  });
+});
+
+describe('validateOutcomesList (issue #1001)', () => {
+  it('rejects fewer than two outcomes', () => {
+    const result = validateOutcomesList(['Yes']);
+    expect(result.valid).toBe(false);
+  });
+
+  it('accepts a two-outcome pool', () => {
+    const result = validateOutcomesList(['Yes', 'No']);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts a 20-outcome pool (contract maximum)', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects more than 20 outcomes', () => {
+    const outcomes = Array.from({ length: MAX_OUTCOME_COUNT + 1 }, (_, i) => `Option ${i + 1}`);
+    const result = validateOutcomesList(outcomes);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/at most 20/i);
+  });
+
+  it('rejects duplicate outcomes', () => {
+    const result = validateOutcomesList(['Yes', 'yes']);
+    expect(result.valid).toBe(false);
+    expect(result.error).toMatch(/unique/i);
+  });
+
+  it('rejects an invalid outcome label', () => {
+    const result = validateOutcomesList(['Yes', 'x']);
+    expect(result.valid).toBe(false);
+  });
+});
+
+describe('clampBetAmount', () => {
+  it('returns the requested amount when it is within every limit', () => {
+    expect(clampBetAmount(2, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(2);
+  });
+
+  it('raises an amount below the pool minimum up to the minimum', () => {
+    // A quick-select button picking 10% of a 20 XLM wallet on a pool with a
+    // 5 XLM minimum used to produce 2 XLM, which failed validation.
+    expect(clampBetAmount(2, { minBet: 5, maxBet: 50, balance: 20 })).toBe(5);
+  });
+
+  it('lowers an amount above the pool maximum down to the maximum', () => {
+    expect(clampBetAmount(20, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(5);
+  });
+
+  it('never exceeds the wallet balance', () => {
+    expect(clampBetAmount(50, { minBet: 0.1, maxBet: 100, balance: 12.5 })).toBe(12.5);
+  });
+
+  it('returns null when the balance is below the pool minimum', () => {
+    expect(clampBetAmount(1, { minBet: 5, maxBet: 50, balance: 2 })).toBeNull();
+  });
+
+  it('returns null for a non-positive or non-finite amount', () => {
+    expect(clampBetAmount(0, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(-3, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(Number.NaN, { minBet: 0.1, balance: 10 })).toBeNull();
+  });
+
+  it('treats missing limits as unbounded', () => {
+    expect(clampBetAmount(7.5, {})).toBe(7.5);
+  });
+
+  it('rounds down to two decimals so the amount never exceeds the cap', () => {
+    expect(clampBetAmount(1.239, { minBet: 0.1, maxBet: 1.1, balance: 100 })).toBe(1.1);
+    expect(clampBetAmount(0.129, { minBet: 0.1, balance: 100 })).toBe(0.12);
   });
 });

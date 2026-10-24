@@ -14,6 +14,8 @@
  * amount (if applicable), and outcome information.
  */
 
+import { TOKEN_CONFIG } from './config';
+
 export type PoolActivityEventType = 
   | 'pool-created' 
   | 'bet-placed' 
@@ -154,12 +156,17 @@ export function formatAbsoluteTime(timestamp: number): string {
 }
 
 /**
- * Convert microSTX to STX.
- * @param microSTX Amount in microSTX
- * @returns Amount in STX
+ * Convert stroops to token units.
+ *
+ * The legacy "micro-STX" name is kept for API compatibility, but amounts here
+ * are stroops (10^7 per token, TOKEN_CONFIG.STROOPS_PER_UNIT). The old 10^6
+ * divisor made every timeline amount read 10x too large.
+ *
+ * @param microSTX Amount in stroops
+ * @returns Amount in token units
  */
 export function microSTXToSTX(microSTX: number): number {
-  return microSTX / 1_000_000;
+  return microSTX / TOKEN_CONFIG.STROOPS_PER_UNIT;
 }
 
 /**

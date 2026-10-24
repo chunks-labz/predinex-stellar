@@ -1,16 +1,13 @@
 /**
  * Fixtures for PoolIntegration component.
  *
- * The PoolIntegration component fetches live data from the Stacks blockchain
- * via `stacks-api.ts`. This file is retained for test compatibility and provides
+ * The PoolIntegration component fetches live data from the Soroban blockchain.
+ * This file is retained for test compatibility and provides
  * a single source-of-truth re-export of the `Pool` type alongside an empty
  * mock list.
- *
- * Do NOT duplicate the Pool interface here — import it from stacks-api instead
- * so both stay in sync automatically.
  */
 
-import type { Pool } from '../stacks-api';
+import type { Pool } from '../market-types';
 
 export type { Pool };
 

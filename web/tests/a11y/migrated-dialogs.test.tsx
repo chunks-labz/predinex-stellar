@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import WalletModal from '../../app/components/WalletModal';
-import { TransactionFeeModal } from '../../app/components/TransactionFeeModal';
+import WalletModal from '@/components/WalletModal';
+import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 
 describe('WalletModal — a11y migration (#236)', () => {
   beforeEach(() => {

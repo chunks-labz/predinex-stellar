@@ -95,3 +95,106 @@ describe('DISPUTE_EVENT_NAMES', () => {
     expect(DISPUTE_EVENT_NAMES).toEqual(['pool_frozen', 'pool_disputed', 'pool_unfrozen']);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1309 — pool_unfrozen must say whether an admin or a bettor caused the thaw
+// ---------------------------------------------------------------------------
+
+/** A `pool_unfrozen` event using the post-fix struct payload. */
+function unfrozenStructEvent(
+  actor: string,
+  trigger: string,
+  hadCoolingDeadline: boolean,
+  opts: { rpcMapForm?: boolean } = {}
+) {
+  const topics = [
+    { type: 'symbol', value: 'pool_unfrozen' },
+    { type: 'symbol', value: 'v1' },
+    { type: 'u32', value: 7 },
+  ];
+
+  const plain = {
+    actor: { type: 'address', value: actor },
+    trigger: { type: 'symbol', value: trigger },
+    had_cooling_deadline: { type: 'bool', value: hadCoolingDeadline },
+  };
+
+  const value = opts.rpcMapForm
+    ? {
+        map: [
+          { key: { symbol: 'actor' }, val: { address: actor } },
+          { key: { symbol: 'trigger' }, val: { symbol: trigger } },
+          { key: { symbol: 'had_cooling_deadline' }, val: { bool: hadCoolingDeadline } },
+        ],
+      }
+    : plain;
+
+  return { txHash: 'tx-unfrozen', ledgerClosedAt: '2026-03-01T10:00:00Z', topic: topics, value };
+}
+
+describe('decodeDisputeEvent — pool_unfrozen trigger (#1309)', () => {
+  it('reports an admin-initiated unfreeze', () => {
+    const decoded = decodeDisputeEvent(
+      unfrozenStructEvent('GADMIN', 'Admin', false),
+      EXPLORER
+    );
+    expect(decoded?.actor).toBe('GADMIN');
+    expect(decoded?.trigger).toBe('admin');
+  });
+
+  it('reports a cooling-period auto-thaw, not an admin action', () => {
+    // This is the exact ambiguity from #1309: the actor is a bettor whose bet
+    // landed after the cooling period elapsed, and consumers must not read it as
+    // an administrative unfreeze.
+    const decoded = decodeDisputeEvent(
+      unfrozenStructEvent('GBETTOR', 'AutoThaw', true),
+      EXPLORER
+    );
+    expect(decoded?.actor).toBe('GBETTOR');
+    expect(decoded?.trigger).toBe('autoThaw');
+    expect(decoded?.trigger).not.toBe('admin');
+  });
+
+  it('decodes the RPC map form of the payload', () => {
+    const decoded = decodeDisputeEvent(
+      unfrozenStructEvent('GADMIN', 'Admin', true, { rpcMapForm: true }),
+      EXPLORER
+    );
+    expect(decoded?.actor).toBe('GADMIN');
+    expect(decoded?.trigger).toBe('admin');
+  });
+
+  it('never renders a struct payload as the string "[object Object]"', () => {
+    // Regression guard: the pre-existing scValToNative helper stringifies
+    // unrecognised objects, which would have leaked into the actor field.
+    const decoded = decodeDisputeEvent(unfrozenStructEvent('GADMIN', 'Admin', false), EXPLORER);
+    expect(decoded?.actor).not.toBe('[object Object]');
+  });
+
+  it('still decodes legacy events that carry a bare Address payload', () => {
+    // On-chain history is immutable, so events emitted before the fix must keep
+    // decoding. These have no trigger, and it must not be invented.
+    const decoded = decodeDisputeEvent(
+      rawEvent('pool_unfrozen', 9, '2026-01-01T00:00:00Z', 'GLEGACY'),
+      EXPLORER
+    );
+    expect(decoded?.actor).toBe('GLEGACY');
+    expect(decoded?.trigger).toBeUndefined();
+  });
+
+  it('does not add a trigger to frozen or disputed events', () => {
+    for (const name of ['pool_frozen', 'pool_disputed'] as const) {
+      const decoded = decodeDisputeEvent(rawEvent(name, 3, '2026-01-01T00:00:00Z'), EXPLORER);
+      expect(decoded?.actor).toBe('GACTOR');
+      expect(decoded?.trigger).toBeUndefined();
+    }
+  });
+
+  it('degrades to no trigger for an unrecognised future enum variant', () => {
+    // Guessing "admin" for an unknown variant would reintroduce the exact
+    // misattribution #1309 is about.
+    const decoded = decodeDisputeEvent(unfrozenStructEvent('GADMIN', 'SomethingNew', false), EXPLORER);
+    expect(decoded?.actor).toBe('GADMIN');
+    expect(decoded?.trigger).toBeUndefined();
+  });
+});

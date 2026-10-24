@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Bell, ChevronLeft, LoaderCircle, RotateCcw } from 'lucide-react';
-import Navbar from '../../components/Navbar';
+import Navbar from '@/components/Navbar';
 import { useWalletConnect } from '../../lib/hooks/useWalletConnect';
 import { useNotificationPreferences } from '../../lib/hooks/useNotificationPreferences';
 import { useBrowserNotifications, updatePushPreferences } from '../../lib/notifications';
@@ -64,17 +64,26 @@ export default function NotificationPreferencesPage() {
   };
 
   const handleToggle = async (key: keyof typeof preferences) => {
-    const nextPreferences = { ...preferences, [key]: !preferences[key] };
+    const prevValue = preferences[key];
     togglePreference(key);
 
-    if (!session?.address || notifications.permission !== 'granted') return;
+    if (!session?.address || notifications.permission !== 'granted') {
+      if (saveStatus === 'saved') {
+        setSaveStatus('idle');
+      }
+      return;
+    }
 
     setSaveStatus('saving');
     try {
-      await updatePushPreferences(session.address, nextPreferences);
+      await updatePushPreferences(session.address, { ...preferences, [key]: !prevValue });
       setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2500);
     } catch {
+      // revert on failure
+      togglePreference(key);
       setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
     }
   };
 
@@ -129,9 +138,15 @@ export default function NotificationPreferencesPage() {
               <p className="font-medium text-foreground">Push permission: {notifications.permission}</p>
               <p className="mt-1 text-sm text-muted-foreground">{statusLabel}</p>
               {notifications.error && <p className="mt-2 text-sm text-red-400">{notifications.error}</p>}
-              {saveStatus === 'saved' && <p className="mt-2 text-sm text-green-400">Preferences saved.</p>}
+              {saveStatus === 'saved' && (
+                <p className="mt-2 text-sm text-green-400" role="status" aria-live="polite">
+                  Preferences saved.
+                </p>
+              )}
               {saveStatus === 'error' && (
-                <p className="mt-2 text-sm text-red-400">Could not save preferences. Try again shortly.</p>
+                <p className="mt-2 text-sm text-red-400" role="alert" aria-live="assertive">
+                  Could not save preferences. Try again shortly.
+                </p>
               )}
             </div>
             <button

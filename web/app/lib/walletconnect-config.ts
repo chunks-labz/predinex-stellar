@@ -1,6 +1,6 @@
 /**
  * WalletConnect Configuration
- * Enhanced configuration for Stacks wallet integration
+ * Configuration for Stellar wallet integration via WalletConnect
  */
 
 export const WALLETCONNECT_CONFIG = {
@@ -10,26 +10,26 @@ export const WALLETCONNECT_CONFIG = {
   // App metadata for wallet display
   metadata: {
     name: 'Predinex',
-    description: 'Decentralized Prediction Market on Stacks',
+    description: 'Decentralized Prediction Market on Stellar',
     url: process.env.NEXT_PUBLIC_APP_URL || 'https://predinex.app',
     icons: ['https://predinex.app/logo.png'],
   },
 
-  // Supported Stacks networks
+  // Supported Stellar/Soroban networks
   networks: {
     mainnet: {
-      chainId: 'stacks:mainnet',
-      name: 'Stacks Mainnet',
-      rpcUrl: 'https://api.mainnet.hiro.so',
-      explorerUrl: 'https://explorer.hiro.so',
-      coreApiUrl: 'https://api.mainnet.hiro.so',
+      chainId: 'stellar:mainnet',
+      name: 'Stellar Mainnet',
+      rpcUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
+      explorerUrl: 'https://stellar.expert/explorer/public',
+      coreApiUrl: 'https://mainnet.stellar.validationcloud.io/v1/soroban/rpc',
     },
     testnet: {
-      chainId: 'stacks:testnet', 
-      name: 'Stacks Testnet',
-      rpcUrl: 'https://api.testnet.hiro.so',
-      explorerUrl: 'https://explorer.hiro.so?chain=testnet',
-      coreApiUrl: 'https://api.testnet.hiro.so',
+      chainId: 'stellar:testnet',
+      name: 'Stellar Testnet',
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      explorerUrl: 'https://stellar.expert/explorer/testnet',
+      coreApiUrl: 'https://soroban-testnet.stellar.org',
     },
   },
 
@@ -45,14 +45,14 @@ export const WALLETCONNECT_CONFIG = {
     },
   },
 
-  // Supported wallet methods
+  // Stellar-compatible WalletConnect RPC methods.
+  // 'stellar_signAndSubmitXDR' covers transaction signing + broadcast;
+  // 'stellar_signXDR' covers offline signing (wallet returns signed XDR to the app).
+  // These match the SEP-43 / Stellar WalletConnect standard used by wallets
+  // such as Freighter, Lobstr, and xBull.
   methods: [
-    'stx_call_read_only',
-    'stx_call_contract_function',
-    'stx_transfer',
-    'stx_sign_message',
-    'stx_get_accounts',
-    'stx_get_balance',
+    'stellar_signAndSubmitXDR',
+    'stellar_signXDR',
   ],
 
   // Supported wallet events
