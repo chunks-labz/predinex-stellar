@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useState, useEffect } from 'react';
 import { useDisputes } from '../lib/hooks/useDisputes';
 import { AlertCircle, Vote, TrendingUp, Lock } from 'lucide-react';
@@ -7,12 +8,17 @@ import { AlertCircle, Vote, TrendingUp, Lock } from 'lucide-react';
 interface DisputeCenterProps {
   poolId?: number;
   userId?: string;
+  /** Voter's STX balance. Used to calculate voting power and validate eligibility.
+   *  Must be provided by wallet integration. */
+  voterBalance?: number;
 }
 
-export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
-  const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted } = useDisputes();
+export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeCenterProps) {
+  const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted, addVote } = useDisputes();
   const [selectedTab, setSelectedTab] = useState<'active' | 'resolved'>('active');
   const [selectedDispute, setSelectedDispute] = useState<string | null>(null);
+  const [voteError, setVoteError] = useState<string | null>(null);
+  const [votingDisputeId, setVotingDisputeId] = useState<string | null>(null);
 
   if (!poolId) {
     return (
@@ -26,6 +32,22 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
   const poolDisputes = getPoolDisputes(poolId);
   const activeDisputes = poolDisputes.filter(d => d.status === 'active' || d.status === 'voting');
   const resolvedDisputes = poolDisputes.filter(d => d.status === 'resolved');
+
+  const handleVote = (e: React.MouseEvent, disputeId: string, vote: boolean) => {
+    // Prevent the card's onClick from toggling collapse while voting
+    e.stopPropagation();
+    if (!userId) return;
+
+    setVoteError(null);
+    setVotingDisputeId(disputeId);
+    try {
+      addVote(disputeId, userId, vote, voterBalance);
+    } catch (err) {
+      setVoteError(err instanceof Error ? err.message : 'Failed to cast vote');
+    } finally {
+      setVotingDisputeId(null);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -73,7 +95,7 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
         <div className="glass p-4 rounded-lg border border-border">
           <p className="text-sm text-muted-foreground">Bond Locked</p>
           <p className="text-2xl font-bold text-blue-400">
-            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} STX
+            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} {TOKEN_SYMBOL}
           </p>
         </div>
       </div>
@@ -155,20 +177,36 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
                         {/* Bond Info */}
                         <div className="flex items-center gap-2 text-sm">
                           <Lock className="w-4 h-4" />
-                          <span>Bond: {dispute.bond.toFixed(2)} STX</span>
+                          <span>Bond: {dispute.bond.toFixed(2)} {TOKEN_SYMBOL}</span>
                         </div>
 
                         {/* Vote Button */}
                         {userId && !userVoted && (
-                          <div className="flex gap-2">
-                            <button className="flex-1 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-bold rounded transition-all">
-                              <Vote className="w-4 h-4 inline mr-1" />
-                              Uphold
-                            </button>
-                            <button className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded transition-all">
-                              <Vote className="w-4 h-4 inline mr-1" />
-                              Reject
-                            </button>
+                          <div className="space-y-2">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={(e) => handleVote(e, dispute.id, true)}
+                                disabled={votingDisputeId === dispute.id}
+                                className="flex-1 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded transition-all"
+                              >
+                                <Vote className="w-4 h-4 inline mr-1" />
+                                Uphold
+                              </button>
+                              <button
+                                onClick={(e) => handleVote(e, dispute.id, false)}
+                                disabled={votingDisputeId === dispute.id}
+                                className="flex-1 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold rounded transition-all"
+                              >
+                                <Vote className="w-4 h-4 inline mr-1" />
+                                Reject
+                              </button>
+                            </div>
+                            {voteError && selectedDispute === dispute.id && (
+                              <p className="text-xs text-red-400 text-center flex items-center justify-center gap-1">
+                                <AlertCircle className="w-3 h-3" />
+                                {voteError}
+                              </p>
+                            )}
                           </div>
                         )}
 
@@ -219,7 +257,7 @@ export default function DisputeCenter({ poolId, userId }: DisputeCenterProps) {
       {/* Info */}
       <div className="glass p-4 rounded-lg border border-border/50 bg-primary/5">
         <p className="text-sm text-muted-foreground">
-          💡 Disputes allow the community to challenge pool settlements. Vote with your STX balance to uphold or reject disputes.
+          💡 Disputes allow the community to challenge pool settlements. Vote with your {TOKEN_SYMBOL} balance to uphold or reject disputes.
         </p>
       </div>
     </div>

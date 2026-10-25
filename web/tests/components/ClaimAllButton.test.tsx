@@ -4,10 +4,10 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ClaimAllButton, { type ClaimablePool } from '../../components/ClaimAllButton';
 import { renderWithProviders } from '../helpers/renderWithProviders';
-import { useWallet } from '../../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
 
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
@@ -84,9 +84,9 @@ describe('ClaimAllButton', () => {
 
     await userEvent.click(screen.getByTestId('claim-all-button'));
 
-    // In-flight: modal shows the "Claiming 1/2…" counter and per-pool rows.
+    // In-flight: modal shows the "Claiming 2 pools…" header and per-pool rows.
     await waitFor(() => {
-      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claiming 1/2…');
+      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claiming 2 pools…');
     });
     expect(screen.getByTestId('claim-all-pool-1')).toHaveTextContent('BTC > 100k?');
     expect(screen.getByTestId('claim-all-pool-2')).toHaveTextContent('ETH > 5k?');
@@ -103,7 +103,40 @@ describe('ClaimAllButton', () => {
     });
     expect(screen.getByTestId('claim-all-pool-1')).toHaveTextContent('Claimed');
     expect(screen.getByTestId('claim-all-pool-2')).toHaveTextContent('Claimed');
-    expect(onSuccess).toHaveBeenCalled();
+
+    // The parent is refreshed only once the user dismisses the summary.
+    expect(onSuccess).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByTestId('claim-all-close'));
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('claim-all-header')).not.toBeInTheDocument();
+  });
+
+  it('keeps the summary open when the claimed pools drop out of the list', async () => {
+    mockClaimAll.mockResolvedValue({ txHash: 'abc123', claimedPoolIds: [1, 2] });
+
+    const { rerender } = renderWithProviders(
+      <ClaimAllButton claimablePools={POOLS} userAddress="GTESTADDRESS" />
+    );
+    await userEvent.click(screen.getByTestId('claim-all-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claimed 2/2');
+    });
+
+    // e.g. a background refetch removes the now-claimed pools.
+    rerender(<ClaimAllButton claimablePools={[]} userAddress="GTESTADDRESS" />);
+    expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claimed 2/2');
+  });
+
+  it('returns to idle without a failure dialog when the fee prompt is declined', async () => {
+    mockClaimAll.mockRejectedValue(new Error('Transaction cancelled by user'));
+
+    renderWithProviders(<ClaimAllButton claimablePools={POOLS} userAddress="GTESTADDRESS" />);
+    await userEvent.click(screen.getByTestId('claim-all-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-all-button')).toHaveTextContent('Claim All (2)');
+    });
+    expect(screen.queryByTestId('claim-all-header')).not.toBeInTheDocument();
   });
 
   it('shows a partial state when only some pools pay out', async () => {
@@ -133,7 +166,7 @@ describe('ClaimAllButton', () => {
     expect(screen.getAllByText('Simulation failed').length).toBeGreaterThan(0);
   });
 
-  it('caps the batch at 20 pools', async () => {
+  it('caps the batch at 20 pools and displays batch limit warning/notice', async () => {
     const many: ClaimablePool[] = Array.from({ length: 25 }, (_, i) => ({
       poolId: i + 1,
       marketTitle: `Pool ${i + 1}`,
@@ -143,10 +176,15 @@ describe('ClaimAllButton', () => {
 
     renderWithProviders(<ClaimAllButton claimablePools={many} userAddress="GTESTADDRESS" />);
     expect(screen.getByTestId('claim-all-button')).toHaveTextContent('Claim All (20)');
+    expect(screen.getByTestId('claim-all-limit-warning')).toHaveTextContent('Capped at 20 per batch. 5 pools remaining for next batch.');
 
     await userEvent.click(screen.getByTestId('claim-all-button'));
     await waitFor(() => expect(mockClaimAll).toHaveBeenCalledTimes(1));
     expect(mockClaimAll.mock.calls[0][0].poolIds).toHaveLength(20);
+
+    expect(screen.getByTestId('claim-all-limit-notice')).toHaveTextContent(
+      'Batch size is limited to 20 pools per transaction. 5 remaining pools can be claimed in a subsequent transaction.'
+    );
 
     deferred.resolve({ txHash: 'ok', claimedPoolIds: many.slice(0, 20).map((p) => p.poolId) });
   });

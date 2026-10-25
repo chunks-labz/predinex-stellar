@@ -3,6 +3,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RotateCcw, Home } from 'lucide-react';
 import Link from 'next/link';
+import { logger } from '@/app/lib/logger';
 
 interface RouteErrorBoundaryProps {
   children: ReactNode;
@@ -70,10 +71,10 @@ export class RouteErrorBoundary extends Component<
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error(
-      `[RouteErrorBoundary] Uncaught error in route "${this.props.routeName ?? 'unknown'}":`,
-      error,
-      errorInfo
+    logger.error(
+      `Uncaught error in route "${this.props.routeName ?? 'unknown'}"`,
+      'RouteErrorBoundary',
+      { message: error.message, componentStack: errorInfo.componentStack }
     );
     import('@/app/lib/error-reporter').then(({ reportError }) =>
       reportError(error, {

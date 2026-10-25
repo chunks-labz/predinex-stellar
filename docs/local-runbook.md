@@ -196,6 +196,48 @@ Refresh the Markets page — the new pool should appear within one polling cycle
 
 ---
 
+## 5b. Seed demo markets and wagers (optional)
+
+Instead of creating pools by hand, seed a fixed set of demo markets (and
+wagers) with the seed script. It is idempotent — re-running never duplicates
+data — and refuses to run against production.
+
+```bash
+# From the repository root (web dependencies installed: cd web && npm install)
+./scripts/seed-demo-markets.sh \
+  --contract-id <your-contract-id> \
+  --source-identity deployer          # reads ~/.config/stellar/identity/deployer.toml
+
+# Preview what would be created without submitting anything
+./scripts/seed-demo-markets.sh --contract-id <your-contract-id> --source S... --dry-run
+
+# Testnet with two explicit bettors
+./scripts/seed-demo-markets.sh --network testnet --contract-id <your-contract-id> \
+  --source S... --bettor S... --bettor S...
+```
+
+> **Local standalone node:** the default network is `local`
+> (`http://localhost:8000/soroban/rpc`, `Standalone Network ; February 2017`).
+> Start it with `stellar container start local` before seeding.
+
+What it does:
+
+1. Refuses `mainnet`/`public` — and refuses any RPC URL or network passphrase
+   that points at mainnet.
+2. Reads the pools already on-chain and matches demo markets **by title**, so
+   a re-run reuses the markets it created before and prints their ids again.
+3. Creates any missing `[demo]` markets (10 XLM creator deposit each by
+   default; override with `--deposit`).
+4. Places one demo wager per market from each bettor (default: one generated,
+   friendbot-funded account; override with `--bettor`, size with
+   `--bet-amount`). Wagers already recorded on-chain are skipped.
+5. Prints every created market id and transaction hash, plus a summary.
+
+Pass `--help` for the full option list and environment fallbacks
+(`PREDINEX_CONTRACT_ID`, `PREDINEX_SEED_SOURCE_SECRET`, ...).
+
+---
+
 ## 6. Run the full test suite
 
 ### Contract tests
@@ -252,6 +294,62 @@ npm run build
 | `stellar: command not found` | Stellar CLI not installed | Follow the [CLI setup guide](https://developers.stellar.org/docs/build/smart-contracts/getting-started/setup) |
 
 ---
+
+---
+
+## 7. Mainnet deployment
+
+> ⚠️ **Mainnet deployments are automated via the CI/CD pipeline. Only run this manually if the pipeline is unavailable.**
+
+### 7a. Automated pipeline (recommended)
+
+The pipeline in `.github/workflows/mainnet-deploy.yml` triggers on any tag matching `v<major>.<minor>.<patch>`:
+
+```bash
+# Create and push a release tag
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+```
+
+Pipeline stages:
+1. **Safety checks** — `cargo fmt --check`, `cargo clippy`, `cargo test`, WASM build, deployer balance check (≥ 20 XLM required)
+2. **Deploy** (requires manual approval in GitHub → Environments → `mainnet`) — deploys WASM, initializes contract, saves deployment record to `deployments/`
+3. **Smoke tests** — `get_pool_count`, `create_pool`, `get_pool`
+4. **Notify** — posts status to Slack / Discord
+
+Required GitHub secrets:
+
+| Secret | Description |
+|---|---|
+| `MAINNET_DEPLOYER_SECRET` | Stellar secret key of the deploy account |
+| `MAINNET_XLM_SAC` | XLM Stellar Asset Contract address on mainnet |
+| `MAINNET_TREASURY_ADDRESS` | Treasury recipient address |
+| `VALIDATION_CLOUD_KEY` | Validation Cloud RPC API key |
+| `SLACK_WEBHOOK_URL` | (optional) Slack incoming webhook |
+| `DISCORD_WEBHOOK_URL` | (optional) Discord webhook |
+
+After a successful deploy, the contract ID is recorded in `deployments/v<version>.json` and committed to `main`.
+
+### 7b. Emergency rollback
+
+If a bad deployment needs to be reverted, redeploy an older verified WASM:
+
+```bash
+export MAINNET_DEPLOYER_SECRET=S...
+export MAINNET_XLM_SAC=C...
+export MAINNET_TREASURY_ADDRESS=G...
+
+./scripts/rollback.sh v1.0.1   # version to roll back TO
+```
+
+The script:
+1. Loads `deployments/v1.0.1.json` and verifies the WASM SHA-256 hash
+2. Asks for typed confirmation before touching mainnet
+3. Redeploys the verified WASM as a new contract ID
+4. Initializes the new contract
+5. Prints the steps to update `NEXT_PUBLIC_CONTRACT_ADDRESS`
+
+> Soroban contracts are immutable — rollback deploys a new contract ID. Update your env vars and redeploy the web app after running the rollback.
 
 ## Further reading
 

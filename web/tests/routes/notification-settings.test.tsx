@@ -7,7 +7,7 @@ const updatePushPreferences = vi.fn();
 const requestPermission = vi.fn();
 const syncSubscription = vi.fn();
 
-vi.mock('../../app/components/Navbar', () => ({
+vi.mock('@/components/Navbar', () => ({
   default: () => <nav aria-label="Main navigation" />,
 }));
 

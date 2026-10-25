@@ -1,18 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
-import { NetworkMismatchWarning } from '../../app/components/NetworkMismatchWarning';
+import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
 const mockSwitchNetwork = vi.fn();
 
-vi.mock('@reown/appkit/react', () => ({
-  useAppKitAccount: vi.fn(() => ({ isConnected: true })),
-  useAppKitNetwork: vi.fn(() => ({
-    caipNetwork: { id: 'stellar:testnet', name: 'Stellar Testnet' },
-    switchNetwork: mockSwitchNetwork,
-  })),
+// Mock WalletAdapterProvider so component can consume useWallet
+vi.mock('@/components/WalletAdapterProvider', () => ({
+  useWallet: vi.fn(() => ({ isConnected: true })),
 }));
 
 vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
@@ -37,13 +34,6 @@ vi.mock('../../app/lib/runtime-config', () => ({
   })),
 }));
 
-vi.mock('../../lib/appkit-config', () => ({
-  stellarNetworks: {
-    mainnet: { id: 'stellar:pubnet', name: 'Stellar Mainnet' },
-    testnet: { id: 'stellar:testnet', name: 'Stellar Testnet' },
-  },
-}));
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe('NetworkMismatchWarning', () => {
@@ -55,7 +45,8 @@ describe('NetworkMismatchWarning', () => {
     render(<NetworkMismatchWarning />);
     expect(screen.getByText(/network mismatch/i)).toBeInTheDocument();
     expect(screen.getByText(/Stellar Testnet/i)).toBeInTheDocument();
-    expect(screen.getByText(/Stellar Mainnet/i)).toBeInTheDocument();
+    // "Stellar Mainnet" appears in the message and in the button text
+    expect(screen.getAllByText(/Stellar Mainnet/i).length).toBeGreaterThan(0);
   });
 
   it('shows a switch button with the expected network name', () => {
@@ -81,7 +72,7 @@ describe('NetworkMismatchWarning', () => {
     await waitFor(() => expect(switchBtn).toBeDisabled());
   });
 
-  it('does not render when there is no mismatch', () => {
+  it('does not render when there is no mismatch', async () => {
     const { useNetworkMismatch } = vi.mocked(
       await import('../../lib/hooks/useNetworkMismatch')
     );
@@ -92,6 +83,13 @@ describe('NetworkMismatchWarning', () => {
       expectedNetworkType: 'testnet',
       switchNetwork: mockSwitchNetwork,
     });
+    const { container } = render(<NetworkMismatchWarning />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('does not render when wallet is not connected', async () => {
+    const { useWallet } = vi.mocked(await import('@/components/WalletAdapterProvider'));
+    (useWallet as ReturnType<typeof vi.fn>).mockReturnValue({ isConnected: false });
     const { container } = render(<NetworkMismatchWarning />);
     expect(container.firstChild).toBeNull();
   });

@@ -1,93 +1,106 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('page');
 
 import Link from "next/link";
-import Navbar from "../../components/Navbar";
-import BettingSection from "../../components/BettingSection";
+import Navbar from '@/components/Navbar';
+import BettingSection from '@/components/BettingSection';
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import SettledPoolSummary from "../../components/SettledPoolSummary";
-import { useWallet } from "../../components/WalletAdapterProvider";
-import { useEffect, useState, useCallback } from "react";
+import { useWallet } from '@/components/WalletAdapterProvider';
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useUserActivity } from "../../hooks/useUserActivity";
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
-import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
-import { blocksToSeconds } from "../../lib/countdown-utils";
-import CountdownTimer from "../../components/CountdownTimer";
+import { secondsUntil } from "../../lib/countdown-utils";
+import CountdownTimer from '@/components/CountdownTimer';
 import DisputeHistoryTimeline from "../../components/DisputeHistoryTimeline";
 import { useDisputeHistory } from "../../lib/hooks/useDisputeHistory";
 import PoolActivityTimeline from "../../components/PoolActivityTimeline";
-import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff } from "lucide-react";
+import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff, ArrowLeft } from "lucide-react";
 import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
+import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { parsePoolId } from '@/app/lib/market-types';
+import DepthChart from '@/components/DepthChart';
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
-    const poolId = parseInt(id);
+    // #1535 — a hand-edited or truncated URL ("/markets/abc") used to become
+    // NaN and be handed to the contract read API, which surfaced as a generic
+    // "Failed to Load Pool" error. Parse the id once and show a dedicated
+    // "invalid link" state instead of querying for a pool that cannot exist.
+    const parsedPoolId = parsePoolId(id);
+    const isInvalidPoolId = parsedPoolId === null;
+    const poolId = parsedPoolId ?? 0;
 
     const { address: stxAddress } = useWallet();
     const { activities, refresh: refreshActivity } = useUserActivity(stxAddress ?? undefined, 50);
     const { isFavorite, toggleFavorite } = usePoolFavorites();
+    const { showError } = useTransactionToast();
     const favorite = isFavorite(poolId);
     const {
         events: disputeEvents,
         isLoading: isLoadingDisputes,
         error: disputeError,
-    } = useDisputeHistory(Number.isNaN(poolId) ? undefined : poolId);
+    } = useDisputeHistory(isInvalidPoolId ? undefined : parsedPoolId ?? undefined);
 
     const [pool, setPool] = useState<Pool | null>(null);
-    const [currentBlockHeight, setCurrentBlockHeight] = useState<number | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
+    
+    const snapshotRef = useRef<{ pool: Pool; userBet: { amountA: number; amountB: number } } | null>(null);
+    const pendingBetsRef = useRef(0);
+    const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isRefreshingRef = useRef(false);
+    const rerunPendingRef = useRef(false);
 
     useEffect(() => {
+        if (isInvalidPoolId || parsedPoolId === null) {
+            // Nothing to read for an invalid id — skip the contract call.
+            setIsLoading(false);
+            setPool(null);
+            return;
+        }
+
         const loadPool = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                const data = await predinexReadApi.getPool(poolId);
+                const data = await predinexReadApi.getPool(parsedPoolId);
                 setPool(data);
             } catch (e) {
                 setError(e instanceof Error ? e.message : 'Failed to load pool');
-                console.error(`Failed to load pool ${poolId}:`, e);
+                log.error(`Failed to load pool ${parsedPoolId}:`, e);
             } finally {
                 setIsLoading(false);
             }
         };
         loadPool();
-    }, [poolId]);
-
-    // Fetch the chain tip so the expiry block can be rendered as a live countdown.
-    useEffect(() => {
-        let cancelled = false;
-        fetchCurrentBlockHeightLive()
-            .then(({ height }) => {
-                if (!cancelled && height > 0) setCurrentBlockHeight(height);
-            })
-            .catch(() => {
-                /* Non-blocking: fall back to a plain expiry block label. */
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+    }, [parsedPoolId, isInvalidPoolId]);
 
     useEffect(() => {
-        if (!stxAddress || !poolId) {
+        if (!stxAddress || !parsedPoolId) {
             setUserBet(null);
             return;
         }
 
-        predinexReadApi.getUserBet(poolId, stxAddress).then(bet => {
+        predinexReadApi.getUserBet(parsedPoolId, stxAddress).then(bet => {
             setUserBet(bet);
         }).catch(() => setUserBet(null));
-    }, [stxAddress, poolId]);
+    }, [stxAddress, parsedPoolId]);
 
     const refreshPoolData = useCallback(async () => {
-        if (isRefreshing) return;
+        if (isRefreshingRef.current) {
+            rerunPendingRef.current = true;
+            return;
+        }
+        isRefreshingRef.current = true;
         setIsRefreshing(true);
         setError(null);
 
@@ -97,26 +110,55 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                 stxAddress ? predinexReadApi.getUserBet(poolId, stxAddress) : Promise.resolve(null)
             ]);
 
+            if (pendingBetsRef.current > 0) {
+                // Keep optimistic state; reconcile will retry
+                return;
+            }
+
             if (newPool) setPool(newPool);
             setUserBet(newBet);
             if (stxAddress) {
                 await refreshActivity();
             }
+            snapshotRef.current = null;
+            pendingBetsRef.current = 0;
             // Clear error if refresh succeeds
             setError(null);
         } catch (err) {
             const msg = err instanceof Error ? err.message : 'Failed to refresh pool data';
-            console.error("Failed to refresh pool data:", err);
-            // Don't overwrite existing pool data on refresh error
-            setError(msg);
+            log.error("Failed to refresh pool data:", err);
+            if (pendingBetsRef.current > 0 && snapshotRef.current) {
+                setPool(snapshotRef.current.pool);
+                setUserBet(snapshotRef.current.userBet);
+                snapshotRef.current = null;
+                pendingBetsRef.current = 0;
+                showError('Bet could not be confirmed. Your position has been restored.');
+                setError(null);
+            } else {
+                // Don't overwrite existing pool data on refresh error
+                setError(msg);
+            }
         } finally {
+            isRefreshingRef.current = false;
             setIsRefreshing(false);
+            if (rerunPendingRef.current) {
+                rerunPendingRef.current = false;
+                setTimeout(() => void refreshPoolData(), 0);
+            }
         }
-    }, [poolId, refreshActivity, stxAddress, isRefreshing]);
+    }, [poolId, refreshActivity, stxAddress, showError]);
 
     const handleBetSuccess = (outcome: number, amountMicroSTX: number) => {
-        // Optimistic update
-        const amount = amountMicroSTX; // Since pool totals are in microSTX as well (verified in stacks-api.ts)
+        const amount = amountMicroSTX;
+        if (pool && userBet) {
+            if (!snapshotRef.current) {
+                snapshotRef.current = {
+                    pool,
+                    userBet: { amountA: userBet.amountA, amountB: userBet.amountB }
+                };
+            }
+        }
+        pendingBetsRef.current += 1;
         setPool(prev => {
             if (!prev) return prev;
             return {
@@ -125,12 +167,20 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                 totalB: outcome === 1 ? prev.totalB + amount : prev.totalB,
             };
         });
-
-        // Trigger real refresh after a small delay to allow on-chain propagation
-        // and handle potential backend indexing delays.
-        setTimeout(refreshPoolData, 3000);
-        // Also refresh immediately to catch any mempool updates if supported by the node
-        refreshPoolData();
+        setUserBet(prev => {
+            const base = prev || { amountA: 0, amountB: 0 };
+            return {
+                amountA: outcome === 0 ? base.amountA + amount : base.amountA,
+                amountB: outcome === 1 ? base.amountB + amount : base.amountB,
+            };
+        });
+        if (reconcileTimerRef.current) {
+            clearTimeout(reconcileTimerRef.current);
+        }
+        reconcileTimerRef.current = setTimeout(() => {
+            reconcileTimerRef.current = null;
+            void refreshPoolData();
+        }, 3000);
     };
 
     const hasClaimedWinnings = activities.some(
@@ -143,14 +193,59 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
 
 
-    // Loading state
+    // Invalid market link (e.g. "/markets/abc") — no contract call is made.
+    if (isInvalidPoolId) {
+        return (
+            <main className="min-h-screen bg-background text-foreground">
+                <Navbar />
+                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
+                    <AlertCircle className="w-12 h-12 text-yellow-500 mb-4" />
+                    <h2 className="text-xl font-semibold mb-2">Invalid Market Link</h2>
+                    <p className="text-muted-foreground text-center max-w-md mb-6">
+                        &quot;{id}&quot; is not a valid market id. Market links look like /markets/12.
+                    </p>
+                    <Link
+                        href="/markets"
+                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+                    >
+                        Back to Markets
+                    </Link>
+                </div>
+            </main>
+        );
+    }
+
+    // Loading state - skeleton shaped like the resolved pool detail layout
     if (isLoading) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
-                <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh]">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4" />
-                    <p className="text-muted-foreground">Loading pool from Soroban...</p>
+                <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6 animate-fade-in" role="status" aria-busy="true">
+                    <span className="sr-only">Loading pool from Soroban…</span>
+                    <div className="glass p-8 rounded-2xl border border-border animate-pulse" aria-hidden="true">
+                        {/* Header */}
+                        <div className="flex justify-between items-center mb-6">
+                            <div className="h-4 w-24 bg-muted/50 rounded" />
+                            <div className="h-6 w-20 bg-muted/50 rounded-full" />
+                        </div>
+                        {/* Title + description */}
+                        <div className="h-8 w-3/4 bg-muted/60 rounded mb-3" />
+                        <div className="h-4 w-full bg-muted/40 rounded mb-2" />
+                        <div className="h-4 w-5/6 bg-muted/40 rounded mb-8" />
+                        {/* Stat cards */}
+                        <div className="grid grid-cols-3 gap-4 mb-8">
+                            {Array.from({ length: 3 }).map((_, i) => (
+                                <div key={i} className="bg-muted/40 p-4 rounded-lg h-24" />
+                            ))}
+                        </div>
+                        {/* Odds bar */}
+                        <div className="mb-8">
+                            <div className="h-3 w-24 bg-muted/40 rounded mb-2" />
+                            <div className="h-4 w-full bg-muted/50 rounded-full" />
+                        </div>
+                        {/* Betting section */}
+                        <div className="h-40 w-full bg-muted/30 rounded-xl" />
+                    </div>
                 </div>
             </main>
         );
@@ -208,7 +303,17 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         <main className="min-h-screen bg-background text-foreground">
             <Navbar />
 
-            <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6">
+            <div className="pt-32 pb-20 max-w-3xl mx-auto px-4 sm:px-6 animate-fade-in">
+                {/* #1535 — the only way back to the market list was the navbar,
+                    which is easy to miss on mobile and impossible to use when
+                    the market was opened from a shared link. */}
+                <Link
+                    href="/markets"
+                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors mb-4"
+                >
+                    <ArrowLeft className="w-4 h-4" aria-hidden="true" />
+                    Back to markets
+                </Link>
                 <div className="glass p-8 rounded-2xl border border-border">
                     {/* Header */}
                     <div className="flex justify-between items-start mb-6">
@@ -236,8 +341,18 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                 title={pool.title}
                                 text={`Check out this prediction market: ${pool.title}`}
                             />
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${pool.settled ? 'bg-zinc-800 text-zinc-400' : 'bg-green-500/10 text-green-500'}`}>
-                                {pool.settled ? 'Settled' : 'Active'}
+                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                pool.settled ? 'bg-zinc-800 text-zinc-400'
+                                    : pool.status === 'expired' ? 'bg-yellow-500/10 text-yellow-500'
+                                    : pool.status === 'frozen' ? 'bg-blue-500/10 text-blue-500'
+                                    : pool.status === 'disputed' ? 'bg-orange-500/10 text-orange-500'
+                                    : 'bg-green-500/10 text-green-500'
+                            }`}>
+                                {pool.settled ? 'Settled'
+                                    : pool.status === 'expired' ? 'Expired'
+                                    : pool.status === 'frozen' ? 'Frozen'
+                                    : pool.status === 'disputed' ? 'Disputed'
+                                    : 'Active'}
                             </span>
                         </div>
                     </div>
@@ -250,7 +365,7 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <TrendingUp className="w-5 h-5 mx-auto mb-2 text-primary" />
                             <p className="text-sm text-muted-foreground">Total Volume</p>
-                            <p className="font-bold">{(totalVolume / 1_000_000).toLocaleString()} STX</p>
+                            <p className="font-bold">{stroopsToUnits(BigInt(Math.round(totalVolume))).toLocaleString()} {TOKEN_SYMBOL}</p>
                         </div>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Users className="w-5 h-5 mx-auto mb-2 text-accent" />
@@ -262,35 +377,49 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Clock className="w-5 h-5 mx-auto mb-2 text-yellow-500" />
                             <p className="text-sm text-muted-foreground">Expires</p>
-                            {currentBlockHeight !== null ? (
-                                <CountdownTimer
-                                    className="font-bold justify-center"
-                                    secondsRemaining={blocksToSeconds(pool.expiry - currentBlockHeight)}
-                                    settled={pool.settled}
-                                />
-                            ) : (
-                                <p className="font-bold">Block {pool.expiry}</p>
-                            )}
+                            <CountdownTimer
+                                className="font-bold justify-center"
+                                secondsRemaining={secondsUntil(pool.expiry)}
+                                settled={pool.settled}
+                                announce
+                            />
                         </div>
                     </div>
 
                     {/* Odds Display */}
                     <div className="mb-8">
-                        <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
-                        <div className="flex h-4 rounded-full overflow-hidden">
+                        <p className="text-sm text-muted-foreground mb-2" id="odds-bar-label">Current Odds</p>
+                        <div
+                            className="flex h-4 rounded-full overflow-hidden"
+                            role="progressbar"
+                            aria-labelledby="odds-bar-label"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={Number(oddsA)}
+                            aria-valuetext={`${pool.outcomeA}: ${oddsA}%, ${pool.outcomeB}: ${oddsB}%`}
+                        >
                             <div
                                 className="bg-green-500 transition-all"
                                 style={{ width: `${oddsA}%` }}
+                                aria-hidden="true"
                             />
                             <div
                                 className="bg-red-500 transition-all"
                                 style={{ width: `${oddsB}%` }}
+                                aria-hidden="true"
                             />
                         </div>
                         <div className="flex justify-between mt-2 text-sm">
                             <span className="text-green-400">{pool.outcomeA}: {oddsA}%</span>
                             <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
                         </div>
+                    </div>
+
+                    <div className="mb-8">
+                        <DepthChart
+                            bids={pool.totalA > 0 ? [{ price: Number(oddsA), quantity: pool.totalA }] : []}
+                            asks={pool.totalB > 0 ? [{ price: Number(oddsB), quantity: pool.totalB }] : []}
+                        />
                     </div>
 
                     {/* User Bet Summary Card */}
@@ -300,16 +429,16 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>
-                                    <p className="text-xl font-bold">{(userBet.amountA / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{stroopsToUnits(BigInt(Math.round(userBet.amountA))).toFixed(2)} {TOKEN_SYMBOL}</p>
                                 </div>
                                 <div className={`p-3 rounded-lg ${userBet.amountB > 0 ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeB}</p>
-                                    <p className="text-xl font-bold">{(userBet.amountB / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{stroopsToUnits(BigInt(Math.round(userBet.amountB))).toFixed(2)} {TOKEN_SYMBOL}</p>
                                 </div>
                             </div>
                             <div className="mt-3 pt-3 border-t border-primary/20 flex justify-between items-center">
                                 <span className="text-sm text-muted-foreground">Total Staked</span>
-                                <span className="font-bold">{((userBet.amountA + userBet.amountB) / 1_000_000).toFixed(2)} STX</span>
+                                <span className="font-bold">{stroopsToUnits(BigInt(Math.round(userBet.amountA + userBet.amountB))).toFixed(2)} {TOKEN_SYMBOL}</span>
                             </div>
                             {pool.settled && userHasWinnings && (
                                 <div className="mt-2 text-sm text-green-400">
@@ -335,6 +464,24 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                 userAddress={stxAddress}
                                 onClaimSuccess={refreshPoolData}
                             />
+                        </div>
+                    ) : pool.status === 'expired' ? (
+                        <div className="mt-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl">
+                            <p className="text-sm text-yellow-400">
+                                Betting is closed. This pool has expired and is awaiting settlement.
+                            </p>
+                        </div>
+                    ) : pool.status === 'frozen' ? (
+                        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                            <p className="text-sm text-blue-400">
+                                Betting is closed. This pool is frozen.
+                            </p>
+                        </div>
+                    ) : pool.status === 'disputed' ? (
+                        <div className="mt-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-xl">
+                            <p className="text-sm text-orange-400">
+                                Betting is paused. This pool is under dispute and awaiting resolution.
+                            </p>
                         </div>
                     ) : (
                         <div className="relative">
@@ -368,3 +515,6 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
         </main>
     );
 }
+
+
+

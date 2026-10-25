@@ -42,7 +42,7 @@ export function downloadTextFile(filename: string, contents: string, mimeType: s
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  window.URL.revokeObjectURL(url);
+  setTimeout(() => window.URL.revokeObjectURL(url), 100);
 }
 
 export function buildExportFilename(baseName: string, format: ExportFormat): string {

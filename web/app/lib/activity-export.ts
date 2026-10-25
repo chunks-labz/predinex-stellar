@@ -6,7 +6,8 @@
  * tx hash and pool title.
  */
 
-import type { ActivityItem } from './stacks-api';
+import type { ActivityItem } from './market-types';
+import { TOKEN_CONFIG } from './config';
 
 export type ExportFormat = 'csv' | 'json';
 
@@ -14,9 +15,11 @@ export type ExportFormat = 'csv' | 'json';
 export const EXPORT_MAX_WINDOW_DAYS = 90;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const MICRO_STX_PER_STX = 1_000_000;
+// #1539 — amounts on this chain are stroops (1 token = 10^7), but this
+// divisor was 10^6, inflating every exported amount by 10x.
+const STROOPS_PER_TOKEN = TOKEN_CONFIG.STROOPS_PER_UNIT;
 
-/** One exported activity row. `amount` is denominated in STX. */
+/** One exported activity row. `amount` is denominated in token units. */
 export interface ActivityExportRecord {
   poolId: number | null;
   type: ActivityItem['type'];
@@ -94,7 +97,7 @@ export function toExportRecords(activities: ActivityItem[]): ActivityExportRecor
   return activities.map((item) => ({
     poolId: item.poolId ?? null,
     type: item.type,
-    amount: item.amount === undefined ? null : item.amount / MICRO_STX_PER_STX,
+    amount: item.amount === undefined ? null : item.amount / STROOPS_PER_TOKEN,
     timestamp: new Date(item.timestamp * 1000).toISOString(),
     txHash: item.txId,
     poolTitle: item.poolTitle ?? '',
@@ -138,4 +141,90 @@ export function activitiesToJSON(activities: ActivityItem[]): string {
 /** Builds a download filename, e.g. `predinex-activity_2026-03-01_2026-05-30.csv`. */
 export function buildExportFilename(format: ExportFormat, window: ExportWindow): string {
   return `predinex-activity_${window.from}_${window.to}.${format}`;
+}
+
+// ---------------------------------------------------------------------------
+// #722 — Pool data export helpers
+// ---------------------------------------------------------------------------
+
+export interface PoolExportRecord {
+  pool_id: number;
+  title: string;
+  description: string;
+  outcome_a: string;
+  outcome_b: string;
+  total_a_stx: number;
+  total_b_stx: number;
+  total_volume_stx: number;
+  odds_a_pct: string;
+  odds_b_pct: string;
+  participants: number;
+  status: string;
+  creator: string;
+  expiry_block: number;
+  export_date: string;
+}
+
+type PoolLike = {
+  id?: number;
+  title?: string;
+  description?: string;
+  outcomeA?: string;
+  outcomeB?: string;
+  totalA?: number;
+  totalB?: number;
+  settled?: boolean;
+  status?: string;
+  creator?: string;
+  expiry?: number;
+  participant_count?: number;
+};
+
+export function poolToExportRecord(pool: PoolLike, poolId?: number): PoolExportRecord {
+  const totalA = (pool.totalA ?? 0) / STROOPS_PER_TOKEN;
+  const totalB = (pool.totalB ?? 0) / STROOPS_PER_TOKEN;
+  const volume = totalA + totalB;
+  const oddsA = volume > 0 ? ((totalA / volume) * 100).toFixed(1) : '50.0';
+  const oddsB = volume > 0 ? ((totalB / volume) * 100).toFixed(1) : '50.0';
+  return {
+    pool_id: poolId ?? pool.id ?? 0,
+    title: pool.title ?? '',
+    description: pool.description ?? '',
+    outcome_a: pool.outcomeA ?? '',
+    outcome_b: pool.outcomeB ?? '',
+    total_a_stx: totalA,
+    total_b_stx: totalB,
+    total_volume_stx: volume,
+    odds_a_pct: oddsA,
+    odds_b_pct: oddsB,
+    participants: pool.participant_count ?? 0,
+    status: pool.settled ? 'settled' : (pool.status ?? 'active'),
+    creator: pool.creator ?? '',
+    expiry_block: pool.expiry ?? 0,
+    export_date: new Date().toISOString().slice(0, 10),
+  };
+}
+
+const POOL_CSV_COLUMNS: (keyof PoolExportRecord)[] = [
+  'pool_id', 'title', 'description', 'outcome_a', 'outcome_b',
+  'total_a_stx', 'total_b_stx', 'total_volume_stx',
+  'odds_a_pct', 'odds_b_pct', 'participants', 'status',
+  'creator', 'expiry_block', 'export_date',
+];
+
+export function poolToCSV(pool: PoolLike, poolId?: number): string {
+  const record = poolToExportRecord(pool, poolId);
+  const header = POOL_CSV_COLUMNS.join(',');
+  const row = POOL_CSV_COLUMNS.map((k) => escapeCsvField(record[k] as string | number)).join(',');
+  return [header, row].join('\n');
+}
+
+export function poolToJSON(pool: PoolLike, poolId?: number): string {
+  return JSON.stringify(poolToExportRecord(pool, poolId), null, 2);
+}
+
+/** Descriptive pool export filename: `predinex-pool-{id}-{date}.{ext}`. */
+export function buildPoolExportFilename(poolId: number, format: ExportFormat): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return `predinex-pool-${poolId}-${date}.${format}`;
 }

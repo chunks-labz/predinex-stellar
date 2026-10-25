@@ -1,4 +1,4 @@
-import { TOKEN_SYMBOL, unitsToStroops } from './formatting';
+import { TOKEN_SYMBOL, unitsToStroops } from '@/app/lib/formatting';
 import type {
   MarketFilters,
   MarketStatusFilter,
@@ -17,7 +17,14 @@ export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   sortBy: 'newest',
 };
 
-const STATUS_VALUES = new Set<MarketStatusFilter>(['all', 'open', 'settled', 'disputed']);
+const STATUS_VALUES = new Set<MarketStatusFilter>([
+  'all',
+  'open',
+  'settled',
+  'disputed',
+  'frozen',
+  'expired',
+]);
 const SORT_VALUES = new Set<SortOption>(['newest', 'ending-soon', 'volume', 'participants']);
 const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'all',
@@ -27,7 +34,6 @@ const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'created-30d',
 ]);
 
-const BLOCKS_PER_DAY = 144;
 const SECONDS_PER_DAY = 86_400;
 
 export function normalizeAssetType(asset?: string): string {
@@ -108,18 +114,23 @@ function matchesStatus(market: ProcessedMarket, status: MarketStatusFilter): boo
   if (status === 'all') return true;
   if (status === 'open') return market.status === 'active';
   if (status === 'settled') return market.status === 'settled';
-  return market.disputed === true;
+  if (status === 'frozen') return market.status === 'frozen';
+  if (status === 'disputed') return market.status === 'disputed';
+  // #1537 — expired markets are produced by processMarketData but were
+  // unreachable through the status filter, so they only ever surfaced under "all".
+  if (status === 'expired') return market.status === 'expired';
+  return false;
 }
 
 function matchesTimeRange(market: ProcessedMarket, timeRange: TimeRangeFilter, nowSeconds: number): boolean {
   if (timeRange === 'all') return true;
 
   if (timeRange === 'ending-24h') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY;
   }
 
   if (timeRange === 'ending-7d') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY * 7;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY * 7;
   }
 
   if (market.createdAt < 1_000_000_000) return true;
@@ -137,8 +148,8 @@ export function filterAndSortMarkets(
   const query = normalized.search.toLowerCase();
   const minVolume = normalizeNumberInput(normalized.minVolume);
   const maxVolume = normalizeNumberInput(normalized.maxVolume);
-  const minVolumeStroops = minVolume === null ? null : unitsToStroops(minVolume);
-  const maxVolumeStroops = maxVolume === null ? null : unitsToStroops(maxVolume);
+  const minVolumeStroops = minVolume === null ? null : unitsToStroops(BigInt(Math.round(minVolume)));
+  const maxVolumeStroops = maxVolume === null ? null : unitsToStroops(BigInt(Math.round(maxVolume)));
   const selectedAsset = normalized.asset.toLowerCase();
 
   const filtered = markets.filter((market) => {

@@ -1,48 +1,72 @@
 'use client';
 
-import { useAppKitNetwork } from '@reown/appkit/react';
+import { useEffect, useState, useCallback } from 'react';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { getRuntimeConfig } from '@/app/lib/runtime-config';
-import { stellarNetworks } from '@/lib/appkit-config';
-import { useCallback, useMemo } from 'react';
+
+const EXPECTED_NETWORK_LABELS: Record<string, string> = {
+  mainnet: 'Stellar Mainnet',
+  testnet: 'Stellar Testnet',
+};
+
+const FREIGHTER_TO_APP_NETWORK: Record<string, string> = {
+  MAINNET: 'mainnet',
+  PUBNET: 'mainnet',
+  TESTNET: 'testnet',
+  FUTURENET: 'futurenet',
+};
 
 /**
- * Hook to detect if the connected wallet is on a different network than what the app expects.
- * Returns mismatch status, expected network details, and a function to switch to the correct network.
+ * Detects a network mismatch between the connected Freighter wallet and the
+ * expected app network (NEXT_PUBLIC_NETWORK). Uses Freighter's getNetwork()
+ * directly instead of AppKit so no AppKit provider is required.
  */
 export function useNetworkMismatch() {
-  const { caipNetwork, switchNetwork } = useAppKitNetwork();
+  const { isConnected } = useWallet();
+  const [currentNetworkName, setCurrentNetworkName] = useState<string>('');
+  const [isMismatch, setIsMismatch] = useState(false);
+
   const config = getRuntimeConfig();
+  const expectedNetworkType = config.network as string; // 'mainnet' | 'testnet'
+  const expectedNetworkName = EXPECTED_NETWORK_LABELS[expectedNetworkType] ?? expectedNetworkType;
 
-  // expectedNetwork is 'mainnet' or 'testnet' from NEXT_PUBLIC_NETWORK
-  const expectedNetworkType = config.network;
-
-  // caipNetwork?.id is a CAIP-2 chain id, e.g. 'stellar:pubnet' or 'stellar:testnet'
-  const currentNetworkId = caipNetwork?.id;
-  const expectedNetworkId =
-    expectedNetworkType === 'mainnet' ? stellarNetworks.mainnet.id : stellarNetworks.testnet.id;
-
-  const isMismatch = useMemo(() => {
-    if (!currentNetworkId) return false;
-    return currentNetworkId !== expectedNetworkId;
-  }, [currentNetworkId, expectedNetworkId]);
-
-  const handleSwitchNetwork = useCallback(async () => {
-    const targetNetwork =
-      expectedNetworkType === 'mainnet' ? stellarNetworks.mainnet : stellarNetworks.testnet;
-    try {
-      await (switchNetwork as unknown as (n: typeof targetNetwork) => Promise<void>)(targetNetwork);
-    } catch (error) {
-      console.error('Failed to switch network:', error);
-      throw error;
+  const checkNetwork = useCallback(async () => {
+    if (!isConnected || typeof window === 'undefined') {
+      setIsMismatch(false);
+      setCurrentNetworkName('');
+      return;
     }
-  }, [expectedNetworkType, switchNetwork]);
+
+    const freighter = (window as unknown as { freighter?: { getNetwork: () => Promise<{ network: string }> } }).freighter;
+    if (!freighter) return;
+
+    try {
+      const { network } = await freighter.getNetwork();
+      const normalised = FREIGHTER_TO_APP_NETWORK[network.toUpperCase()] ?? network.toLowerCase();
+      setCurrentNetworkName(EXPECTED_NETWORK_LABELS[normalised] ?? network);
+      setIsMismatch(normalised !== expectedNetworkType);
+    } catch {
+      // If getNetwork fails, don't block the UI
+    }
+  }, [isConnected, expectedNetworkType]);
+
+  useEffect(() => {
+    checkNetwork();
+  }, [checkNetwork]);
+
+  /**
+   * Freighter doesn't expose a programmatic network-switch API.
+   * Open the extension popup so the user can switch manually.
+   */
+  const switchNetwork = useCallback(async () => {
+    window.open('https://www.freighter.app/', '_blank', 'noopener');
+  }, []);
 
   return {
     isMismatch,
     expectedNetworkType,
-    expectedNetworkName:
-      expectedNetworkType === 'mainnet' ? stellarNetworks.mainnet.name : stellarNetworks.testnet.name,
-    currentNetworkName: caipNetwork?.name || 'Unknown',
-    switchNetwork: handleSwitchNetwork,
+    expectedNetworkName,
+    currentNetworkName,
+    switchNetwork,
   };
 }

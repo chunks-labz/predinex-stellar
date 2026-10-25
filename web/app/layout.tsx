@@ -1,15 +1,15 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { WalletAdapterProvider } from "./components/WalletAdapterProvider";
+import { WalletAdapterProvider } from '@/components/WalletAdapterProvider';
 import { ToastProvider } from "../providers/ToastProvider";
 import { ThemeProvider, ThemeInitScript } from "../lib/theme";
 import { I18nProvider } from "./providers/I18nProvider";
-import Footer from "./components/Footer";
+import Footer from '@/components/Footer';
 import MarketListPreloader from "./components/MarketListPreloader";
-import ServiceWorkerRegistration from "./components/ServiceWorkerRegistration";
-import PWAInstallPrompt from "./components/PWAInstallPrompt";
-import PushNotificationPrompt from "./components/PushNotificationPrompt";
+import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration';
+import PWAInstallPrompt from '@/components/PWAInstallPrompt';
+import PushNotificationPrompt from '@/components/PushNotificationPrompt';
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

@@ -34,7 +34,7 @@ const AccordionTrigger = React.forwardRef<
       "flex flex-1 items-center justify-between py-4 font-medium transition-all hover:underline",
       className
     )}
-    {...(props as any)}
+    {...props}
   >
     {children}
     <ChevronDown className="h-4 w-4 shrink-0 transition-transform duration-200" />

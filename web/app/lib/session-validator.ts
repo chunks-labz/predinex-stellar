@@ -5,6 +5,9 @@
 
 import { WalletSession } from './wallet-service';
 import { SessionStorageService } from './session-storage';
+import { createScopedLogger } from './logger';
+
+const log = createScopedLogger('session-validator');
 
 export interface SessionValidationResult {
   isValid: boolean;
@@ -92,14 +95,14 @@ export class SessionValidator {
       const validation = this.validateSession(storedSession);
       
       if (!validation.isValid) {
-        console.log(`Session invalid: ${validation.reason}`);
+        log.debug(`Session invalid: ${validation.reason}`);
         SessionStorageService.clearSession();
         return null;
       }
 
       return storedSession;
     } catch (error) {
-      console.error('Session validation failed:', error);
+      log.error('Session validation failed', error);
       SessionStorageService.clearSession();
       return null;
     }

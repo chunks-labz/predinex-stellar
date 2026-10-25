@@ -8,6 +8,9 @@
  */
 
 import { redactSensitiveData } from '../error-reporter';
+import { createScopedLogger } from '@/app/lib/logger';
+import { getRuntimeConfig, type SupportedNetwork } from '../runtime-config';
+const log = createScopedLogger('AnalyticsService');
 import type {
   AnalyticsEvent,
   EventName,
@@ -30,9 +33,9 @@ interface AnalyticsConfig {
  * (e.g., Segment, PostHog, Mixpanel, Google Analytics)
  */
 export interface AnalyticsProvider {
-  track(event: string, properties: Record<string, any>): void;
-  identify?(userId: string, traits?: Record<string, any>): void;
-  page?(name?: string, properties?: Record<string, any>): void;
+  track(event: string, properties: Record<string, unknown>): void;
+  identify?(userId: string, traits?: Record<string, unknown>): void;
+  page?(name?: string, properties?: Record<string, unknown>): void;
 }
 
 /**
@@ -53,6 +56,7 @@ class AnalyticsService {
   private sessionId: string;
   private sessionStartTime: number;
   private interactionCount: number = 0;
+  private runtimeNetworkOverride: SupportedNetwork | null = null;
 
   constructor() {
     this.config = {
@@ -78,6 +82,15 @@ class AnalyticsService {
    */
   setProvider(provider: AnalyticsProvider): void {
     this.config.provider = provider;
+  }
+
+  /**
+   * Override the network type at runtime (e.g. based on the currently
+   * connected wallet/network). Pass `null` to revert to the build-time
+   * runtime-config value.
+   */
+  setNetworkTypeOverride(network: SupportedNetwork | null): void {
+    this.runtimeNetworkOverride = network;
   }
 
   /**
@@ -111,7 +124,7 @@ class AnalyticsService {
 
     // Debug logging in development
     if (this.config.debug) {
-      console.info('[analytics]', event, payload.properties);
+      log.info(`[analytics] ${event}`, payload.properties);
     }
 
     // Skip emission if disabled
@@ -129,7 +142,7 @@ class AnalyticsService {
         });
       } catch (error) {
         // Never let analytics errors crash the app
-        console.error('[analytics] Failed to emit event:', error);
+        log.error('[analytics] Failed to emit event:', error);
       }
     }
   }
@@ -164,29 +177,23 @@ class AnalyticsService {
   /**
    * Sanitize event properties to remove sensitive data
    */
-  private sanitize(properties: any): any {
+  private sanitize(properties: unknown): unknown {
     if (properties === null || properties === undefined) {
       return properties;
     }
-
-    // Redact strings
     if (typeof properties === 'string') {
       return redactSensitiveData(properties);
     }
-
-    // Recursively sanitize objects
     if (typeof properties === 'object') {
       if (Array.isArray(properties)) {
         return properties.map((item) => this.sanitize(item));
       }
-
-      const sanitized: any = {};
-      for (const [key, value] of Object.entries(properties)) {
+      const sanitized: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(properties as Record<string, unknown>)) {
         sanitized[key] = this.sanitize(value);
       }
       return sanitized;
     }
-
     return properties;
   }
 
@@ -198,19 +205,30 @@ class AnalyticsService {
   }
 
   /**
-   * Get current network type from environment
+   * Get current network type from runtime config, or wallet override if set.
    */
   private getNetworkType(): 'mainnet' | 'testnet' {
-    // TODO: Read from runtime config
-    return process.env.NEXT_PUBLIC_NETWORK_TYPE === 'mainnet' ? 'mainnet' : 'testnet';
+    if (this.runtimeNetworkOverride) {
+      return this.runtimeNetworkOverride;
+    }
+    try {
+      const cfg = getRuntimeConfig();
+      return cfg.network;
+    } catch {
+      return 'testnet';
+    }
   }
 
   /**
-   * Get app version from package.json
+   * Get app version from build-time runtime-config constant.
    */
   private getAppVersion(): string {
-    // TODO: Read from build-time constant
-    return process.env.NEXT_PUBLIC_APP_VERSION || 'unknown';
+    try {
+      const cfg = getRuntimeConfig();
+      return cfg.appVersion || 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   /**

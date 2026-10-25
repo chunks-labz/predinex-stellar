@@ -15,7 +15,7 @@ import React from 'react';
 import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderWithProviders } from '../../helpers/renderWithProviders';
+import { renderWithProviders } from '../helpers/renderWithProviders';
 
 import {
   ACTIVE_POOL,
@@ -101,14 +101,12 @@ vi.mock('../../app/lib/adapters/predinex-contract', () => ({
 }));
 
 vi.mock('../../app/lib/soroban-read-api', () => ({
-  getUserBet: mockGetUserBet,
+  getPoolFromSoroban: mockGetPool,
+  getPoolsBatchFromSoroban: mockGetPools,
+  getUserBetFromSoroban: mockGetUserBet,
   getUserBets: mockGetUserBets,
   getUserActivityFromSoroban: vi.fn().mockResolvedValue([]),
-}));
-
-vi.mock('../../app/lib/stacks-api', () => ({
-  getPools: mockGetPools,
-  getPool: mockGetPool,
+  getPoolCountFromSoroban: vi.fn().mockResolvedValue(0),
 }));
 
 vi.mock('../../hooks/useWallet', () => ({ useWallet: mockUseWallet }));

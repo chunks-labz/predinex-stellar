@@ -7,6 +7,9 @@ import {
     ExternalLink, RefreshCw, TrendingUp, Clock
 } from 'lucide-react';
 import type { ActivityItem } from '../lib/adapters/types';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { areActivityFixturesEnabled } from '../lib/feature-flags';
+import { DemoDataBanner } from './DemoDataBanner';
 
 // --- Helpers ---
 
@@ -23,7 +26,7 @@ function timeAgo(timestamp: number, nowSeconds: number): string {
 }
 
 function formatMicroSTX(micro: number): string {
-    return (micro / 1_000_000).toLocaleString(undefined, {
+    return stroopsToUnits(micro).toLocaleString(undefined, {
         minimumFractionDigits: 2,
         maximumFractionDigits: 6,
     });
@@ -90,6 +93,26 @@ function ActivitySkeleton() {
 
 // --- Empty State ---
 
+function FilteredEmptyState({ onClearFilters }: { onClearFilters?: () => void }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+            <h3 className="text-xl font-bold mb-2">No matching activity</h3>
+            <p className="text-muted-foreground max-w-sm mb-6">
+                None of your transactions match the current filters.
+            </p>
+            {onClearFilters && (
+                <button
+                    type="button"
+                    onClick={onClearFilters}
+                    className="px-6 py-3 border border-border font-bold rounded-xl hover:bg-muted/50 transition-colors"
+                >
+                    Clear filters
+                </button>
+            )}
+        </div>
+    );
+}
+
 function EmptyState() {
     return (
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -127,7 +150,7 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
             case 'settlement':
                 return `Settled: ${item.event.outcome === 0 ? 'Outcome A' : 'Outcome B'} won`;
             case 'claim':
-                return `Claimed ${formatMicroSTX(item.event.winnerAmount || 0)} STX`;
+                return `Claimed ${formatMicroSTX(item.event.winnerAmount || 0)} ${TOKEN_SYMBOL}`;
             default:
                 return null;
         }
@@ -159,7 +182,7 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
                         <span className="font-medium">Pool #{item.poolId}</span>
                     )}
                     {item.amount !== undefined && !item.event?.winnerAmount && (
-                        <span className="font-mono font-medium text-foreground/80">{formatMicroSTX(item.amount)} STX</span>
+                        <span className="font-mono font-medium text-foreground/80">{formatMicroSTX(item.amount)} {TOKEN_SYMBOL}</span>
                     )}
                     <span className="font-mono text-xs">{item.txId.slice(0, 10)}…</span>
                 </div>
@@ -175,8 +198,10 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
                     href={item.explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-lg bg-muted/40 hover:bg-primary hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                    aria-label="View on Stellar Explorer"
+                    // Always visible on touch screens; on larger screens it reveals on
+                    // hover and, for keyboard users, on focus.
+                    className="p-2 rounded-lg bg-muted/40 hover:bg-primary hover:text-white transition-all sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100"
+                    aria-label="View on Stellar Explorer (opens in a new tab)"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -198,6 +223,9 @@ interface ActivityFeedProps {
     onRefresh?: () => void;
     limit?: number;
     showHeader?: boolean;
+    /** True when `activities` is a filtered subset, so an empty list means "no match", not "no history". */
+    isFiltered?: boolean;
+    onClearFilters?: () => void;
 }
 
 const ActivityFeed = memo(function ActivityFeed({
@@ -207,6 +235,8 @@ const ActivityFeed = memo(function ActivityFeed({
     onRefresh,
     limit,
     showHeader = true,
+    isFiltered = false,
+    onClearFilters,
 }: ActivityFeedProps) {
     const displayItems = limit ? activities.slice(0, limit) : activities;
 
@@ -219,6 +249,14 @@ const ActivityFeed = memo(function ActivityFeed({
 
     return (
         <div className="w-full">
+            {/* #1306 — a seeded row is shaped exactly like a real on-chain event,
+                so declare the source whenever the fixture adapter is in use. */}
+            {areActivityFixturesEnabled() && (
+                <div className="mb-4">
+                    <DemoDataBanner source="wallet activity" />
+                </div>
+            )}
+
             {showHeader && (
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center gap-3">
@@ -239,7 +277,7 @@ const ActivityFeed = memo(function ActivityFeed({
             )}
 
             {error && (
-                <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/10 text-red-400 text-sm mb-4">
+                <div role="alert" className="p-4 rounded-xl border border-red-500/20 bg-red-500/10 text-red-400 text-sm mb-4">
                     {error}
                 </div>
             )}
@@ -247,7 +285,13 @@ const ActivityFeed = memo(function ActivityFeed({
             {isLoading ? (
                 <ActivitySkeleton />
             ) : displayItems.length === 0 ? (
-                <EmptyState />
+                // With a load error the alert above already explains the empty
+                // list; "No Activity Yet" would contradict it.
+                error ? null : isFiltered ? (
+                    <FilteredEmptyState onClearFilters={onClearFilters} />
+                ) : (
+                    <EmptyState />
+                )
             ) : (
                 <div className="space-y-3" role="list" aria-label="Activity feed">
                     {displayItems.map((item) => (

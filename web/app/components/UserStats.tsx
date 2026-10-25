@@ -1,6 +1,7 @@
 'use client';
 
 import { TrendingUp, Trophy, Clock, DollarSign, Target } from 'lucide-react';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface UserStatsProps {
   totalBet: number;
@@ -22,13 +23,13 @@ export default function UserStats({
   const stats = [
     {
       label: 'Total Bet',
-      value: `${(totalBet / 1_000_000).toFixed(2)} STX`,
+      value: `${stroopsToUnits(totalBet).toFixed(2)} {TOKEN_SYMBOL}`,
       icon: DollarSign,
       color: 'text-blue-400',
     },
     {
       label: 'Total Winnings',
-      value: `${(totalWinnings / 1_000_000).toFixed(2)} STX`,
+      value: `${stroopsToUnits(totalWinnings).toFixed(2)} {TOKEN_SYMBOL}`,
       icon: Trophy,
       color: 'text-green-400',
     },

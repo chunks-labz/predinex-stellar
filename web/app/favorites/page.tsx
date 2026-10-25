@@ -2,17 +2,19 @@
 
 import { useMemo, useEffect, useState } from 'react';
 import Link from 'next/link';
-import Navbar from "../components/Navbar";
+import Navbar from '@/components/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
-import MarketGrid from "../components/MarketGrid";
-import { usePoolFavorites } from "../lib/hooks/usePoolFavorites";
+import MarketGrid from '@/components/MarketGrid';
+import { usePoolFavorites, POOL_FAVORITES_MAX } from "../lib/hooks/usePoolFavorites";
 import { useMarketDiscovery } from "../lib/hooks/useMarketDiscovery";
 import RouteErrorBoundary from "../../components/RouteErrorBoundary";
-import { Star, ChevronRight } from 'lucide-react';
+import { EmptyState } from '@/components/EmptyState';
+import { Star, ChevronRight, SearchX } from 'lucide-react';
 
 function FavoritesContent() {
-  const { favoritePoolIds } = usePoolFavorites();
-  const { filteredMarkets, isLoading, error, retry } = useMarketDiscovery();
+  const { favoritePoolIds, clearFavorites } = usePoolFavorites();
+  // Bookmarks are matched against every market, not the /markets filter state.
+  const { allMarkets, isLoading, error, retry } = useMarketDiscovery();
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
@@ -21,10 +23,10 @@ function FavoritesContent() {
 
   const favoriteMarkets = useMemo(() => {
     if (!isMounted) return [];
-    return filteredMarkets.filter((market) => favoritePoolIds.includes(market.poolId));
-  }, [filteredMarkets, favoritePoolIds, isMounted]);
+    return allMarkets.filter((market) => favoritePoolIds.includes(market.poolId));
+  }, [allMarkets, favoritePoolIds, isMounted]);
 
-  const maxFavorites = 50;
+  const maxFavorites = POOL_FAVORITES_MAX;
   const canAddMore = favoritePoolIds.length < maxFavorites;
   const isFull = favoritePoolIds.length >= maxFavorites;
 
@@ -85,20 +87,46 @@ function FavoritesContent() {
         )}
 
         {/* Markets Grid */}
-        {!isLoading && favoritePoolIds.length > 0 && (
+        {!isLoading && isMounted && favoritePoolIds.length > 0 && (
           <>
-            <MarketGrid markets={displayMarkets} isLoading={isLoading} error={null} onRetry={() => {}} />
+            {/*
+              With bookmarks but nothing to show, MarketGrid's generic empty
+              state ("no markets yet — create one") is wrong: either the load
+              failed, or the bookmarked pools are no longer in the market list.
+            */}
+            {displayMarkets.length === 0 ? (
+              error ? (
+                <MarketGrid markets={[]} isLoading={false} error={error} onRetry={retry} />
+              ) : (
+                <EmptyState
+                  title="Bookmarked markets unavailable"
+                  description="None of your bookmarked pools are in the current market list. They may have been removed, or the list hasn't refreshed yet."
+                  icon={SearchX}
+                  actionLabel="Browse Markets"
+                  actionHref="/markets"
+                  secondaryActionLabel="Clear bookmarks"
+                  onSecondaryAction={clearFavorites}
+                />
+              )
+            ) : (
+              <>
+                <MarketGrid markets={displayMarkets} isLoading={false} error={null} onRetry={retry} />
 
-            {error && (
-              <div className="mt-6 p-4 rounded-xl border border-red-500/20 bg-red-500/5">
-                <p className="text-sm text-red-600 mb-3">Failed to load market data</p>
-                <button
-                  onClick={retry}
-                  className="text-sm font-semibold text-red-600 hover:text-red-500"
-                >
-                  Retry
-                </button>
-              </div>
+                {error && (
+                  <div role="alert" className="mt-6 p-4 rounded-xl border border-red-500/20 bg-red-500/5">
+                    <p className="text-sm text-red-600 mb-3">
+                      Couldn&apos;t refresh market data — showing the last loaded values.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={retry}
+                      className="text-sm font-semibold text-red-600 hover:text-red-500"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

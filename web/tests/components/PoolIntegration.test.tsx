@@ -3,19 +3,31 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PoolIntegration from '../../app/components/PoolIntegration';
-import * as WalletAdapterProvider from '../../app/components/WalletAdapterProvider';
-import * as StacksApi from '../../app/lib/stacks-api';
+import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
+import * as SorobanReadApi from '../../app/lib/soroban-read-api';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 
+const { mockPush } = vi.hoisted(() => ({
+  mockPush: vi.fn(),
+}));
+
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({
+    push: mockPush,
+    replace: vi.fn(),
+    prefetch: vi.fn(),
+  }),
+}));
+
 // Mock WalletAdapterProvider hook
-vi.mock('../../app/components/WalletAdapterProvider', () => ({
+vi.mock('@/components/WalletAdapterProvider', () => ({
   useWallet: vi.fn(),
   WalletAdapterProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 // Mock stacks-api
-vi.mock('../../app/lib/stacks-api', () => ({
+vi.mock('../../app/lib/soroban-read-api', () => ({
   getMarkets: vi.fn(),
   getPoolCount: vi.fn(),
 }));
@@ -25,7 +37,7 @@ vi.mock('../../lib/hooks/useNetworkMismatch', () => ({
   useNetworkMismatch: vi.fn(),
 }));
 
-const mockPool: StacksApi.Pool = {
+const mockPool: SorobanReadApi.Pool = {
   id: 0,
   title: 'Test Pool',
   description: 'Test Description',
@@ -40,7 +52,7 @@ const mockPool: StacksApi.Pool = {
   status: 'active',
 };
 
-const settledPool: StacksApi.Pool = {
+const settledPool: SorobanReadApi.Pool = {
   ...mockPool,
   id: 1,
   title: 'Settled Pool',
@@ -91,7 +103,7 @@ describe('PoolIntegration', () => {
   });
 
   it('renders loading state initially', () => {
-    vi.mocked(StacksApi.getMarkets).mockImplementation(() => new Promise(() => {})); // Never resolves
+    vi.mocked(SorobanReadApi.getMarkets).mockImplementation(() => new Promise(() => {})); // Never resolves
 
     renderWithProviders(<PoolIntegration />);
 
@@ -99,7 +111,7 @@ describe('PoolIntegration', () => {
   });
 
   it('renders empty state when no pools are available', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -109,7 +121,7 @@ describe('PoolIntegration', () => {
   });
 
   it('does not contain stale chain references (STX is no longer acceptable)', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -123,7 +135,7 @@ describe('PoolIntegration', () => {
   });
 
   it('renders pool cards when pools are available', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -139,7 +151,7 @@ describe('PoolIntegration', () => {
   });
 
   it('displays correct pool statistics', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool, settledPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool, settledPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -162,7 +174,7 @@ describe('PoolIntegration', () => {
   it('still renders the connected wallet action from the current component path', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
     vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue(mockNetworkMismatch);
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -177,11 +189,12 @@ describe('PoolIntegration', () => {
     expect(screen.getByText(/Please switch to Stellar Testnet to interact/i)).toBeInTheDocument();
   });
 
-  it('enables Place Bet button when wallet is connected and network matches', async () => {
+  it('enables Place Bet button and navigates to pool detail page when clicked while connected', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
     vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue(mockNetworkMatch);
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
+    const user = userEvent.setup();
     renderWithProviders(<PoolIntegration />);
 
     await waitFor(() => {
@@ -190,11 +203,36 @@ describe('PoolIntegration', () => {
 
     const placeBetButton = screen.getByRole('button', { name: /Place Bet/i });
     expect(placeBetButton).not.toBeDisabled();
+
+    await user.click(placeBetButton);
+    expect(mockPush).toHaveBeenCalledWith(`/markets/${mockPool.id}`);
+  });
+
+  it('calls connect when Connect Wallet button is clicked while disconnected', async () => {
+    const mockConnect = vi.fn();
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue({
+      ...disconnectedWallet,
+      connect: mockConnect,
+    });
+    vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue(mockNetworkMatch);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
+
+    const user = userEvent.setup();
+    renderWithProviders(<PoolIntegration />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Test Pool')).toBeInTheDocument();
+    });
+
+    const connectButton = screen.getByRole('button', { name: /Connect Wallet/i });
+    await user.click(connectButton);
+
+    expect(mockConnect).toHaveBeenCalledTimes(1);
   });
 
   it('shows View Pool Details button when wallet is not connected', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(disconnectedWallet);
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -206,7 +244,7 @@ describe('PoolIntegration', () => {
   });
 
   it('displays settled pool with winner indicator', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([settledPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([settledPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -220,7 +258,7 @@ describe('PoolIntegration', () => {
   });
 
   it('calculates and displays correct odds percentages', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -234,7 +272,7 @@ describe('PoolIntegration', () => {
   });
 
   it('handles API errors gracefully', async () => {
-    vi.mocked(StacksApi.getMarkets).mockRejectedValue(new Error('Network error'));
+    vi.mocked(SorobanReadApi.getMarkets).mockRejectedValue(new Error('Network error'));
 
     renderWithProviders(<PoolIntegration />);
 
@@ -246,7 +284,7 @@ describe('PoolIntegration', () => {
   });
 
   it('allows refreshing pools', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     const user = userEvent.setup();
     renderWithProviders(<PoolIntegration />);
@@ -258,11 +296,11 @@ describe('PoolIntegration', () => {
     const refreshButton = screen.getByRole('button', { name: /Refresh Pools/i });
     await user.click(refreshButton);
 
-    expect(vi.mocked(StacksApi.getMarkets)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(SorobanReadApi.getMarkets)).toHaveBeenCalledTimes(2);
   });
 
   it('displays creator address in shortened format', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
@@ -276,23 +314,23 @@ describe('PoolIntegration', () => {
   });
 
   it('fetches all pools on mount', async () => {
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([mockPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([mockPool]);
 
     renderWithProviders(<PoolIntegration />);
 
     await waitFor(() => {
-      expect(vi.mocked(StacksApi.getMarkets)).toHaveBeenCalledWith('all');
+      expect(vi.mocked(SorobanReadApi.getMarkets)).toHaveBeenCalledWith('all');
     });
   });
 
   it('handles pools with zero volume correctly', async () => {
-    const emptyPool: StacksApi.Pool = {
+    const emptyPool: SorobanReadApi.Pool = {
       ...mockPool,
       totalA: 0,
       totalB: 0,
     };
 
-    vi.mocked(StacksApi.getMarkets).mockResolvedValue([emptyPool]);
+    vi.mocked(SorobanReadApi.getMarkets).mockResolvedValue([emptyPool]);
 
     renderWithProviders(<PoolIntegration />);
 

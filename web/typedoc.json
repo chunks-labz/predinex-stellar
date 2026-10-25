@@ -1,0 +1,22 @@
+{
+  "entryPoints": [
+    "app/lib/soroban-read-api.ts",
+    "app/lib/stacks-api.ts",
+    "app/lib/enhanced-stacks-api.ts",
+    "app/lib/soroban-transaction-service.ts",
+    "app/lib/soroban-event-service.ts",
+    "app/lib/contract-utils.ts",
+    "app/lib/adapters/predinex-read-api.ts",
+    "app/lib/adapters/predinex-contract.ts",
+    "app/lib/market-types.ts",
+    "app/lib/freighter-adapter.ts",
+    "app/lib/wallet-adapter.ts"
+  ],
+  "out": "../docs/api",
+  "exclude": ["**/*.test.ts", "**/node_modules/**", "**/fixtures/**"],
+  "includeVersion": true,
+  "name": "Predinex Stellar SDK Client",
+  "readme": "none",
+  "skipErrorChecking": true,
+  "excludePrivate": true
+}

@@ -72,7 +72,11 @@ async function networkFirstNavigation(request) {
   const cache = await caches.open(STATIC_CACHE);
   try {
     const fresh = await fetch(request);
-    cache.put(request, fresh.clone());
+    // Only cache successful responses: a 500/502 error page must not overwrite
+    // the last good cached document, or offline navigation would serve the error.
+    if (fresh && fresh.status === 200) {
+      await cache.put(request, fresh.clone());
+    }
     return fresh;
   } catch {
     const cached = await cache.match(request);

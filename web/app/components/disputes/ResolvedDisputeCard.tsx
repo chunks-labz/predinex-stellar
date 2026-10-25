@@ -1,3 +1,4 @@
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import type { Dispute } from '@/app/lib/disputes/types';
 import { formatDisputeAddress, formatMicroStx } from '@/app/lib/disputes/formatting';
 
@@ -27,7 +28,7 @@ export function ResolvedDisputeCard({ dispute }: ResolvedDisputeCardProps) {
         </div>
 
         <div className="text-right">
-          <div className="text-sm font-semibold">{formatMicroStx(dispute.disputeBond)} STX bond</div>
+          <div className="text-sm font-semibold">{formatMicroStx(dispute.disputeBond)} {TOKEN_SYMBOL} bond</div>
           <div className="text-xs text-muted-foreground">
             {dispute.resolution ? 'Refunded' : 'Forfeited'}
           </div>
@@ -51,7 +52,11 @@ export function ResolvedDisputeCard({ dispute }: ResolvedDisputeCardProps) {
         </div>
 
         <div className="text-sm text-muted-foreground">
-          Resolved {new Date(dispute.createdAt).toLocaleDateString()}
+          Resolved {(() => {
+            let ts = dispute.createdAt;
+            if (ts > 0 && ts < 1_000_000_000_000) ts = ts * 1000;
+            return new Date(ts).toLocaleDateString();
+          })()}
         </div>
       </div>
     </div>

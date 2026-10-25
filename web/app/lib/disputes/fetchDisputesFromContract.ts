@@ -1,4 +1,6 @@
-import { getPool } from '../stacks-api';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('fetchDisputesFromContract');
+import { getPoolFromSoroban } from '../soroban-read-api';
 import type { Dispute } from './types';
 
 export async function fetchDisputesFromContract(): Promise<Dispute[]> {
@@ -15,7 +17,8 @@ export async function fetchDisputesFromContract(): Promise<Dispute[]> {
     for (const event of events) {
       if (event.event === 'smart_contract_event' && event.data.event_name === 'dispute-created') {
         const eventData = event.data.event_data;
-        const pool = await getPool(eventData.pool_id);
+        const poolResult = await getPoolFromSoroban(eventData.pool_id);
+        const pool = poolResult.pool;
 
         disputes.push({
           id: Number(eventData.dispute_id),
@@ -35,7 +38,7 @@ export async function fetchDisputesFromContract(): Promise<Dispute[]> {
 
     return disputes;
   } catch (error) {
-    console.error('Failed to fetch disputes from contract:', error);
+    log.error('Failed to fetch disputes from contract:', error);
     return [];
   }
 }

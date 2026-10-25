@@ -1,4 +1,6 @@
 'use client';
+import { createScopedLogger } from '@/app/lib/logger';
+const log = createScopedLogger('useUserActivity');
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { predinexReadApi } from '../lib/adapters/predinex-read-api';
@@ -76,7 +78,7 @@ export function useUserActivity(
                 return;
             }
             setError('Failed to load activity. Please try again.');
-            console.error('useUserActivity error:', e);
+            log.error('useUserActivity error:', e);
         } finally {
             if (mountedRef.current && requestIdRef.current === requestId) {
                 setIsLoading(false);
