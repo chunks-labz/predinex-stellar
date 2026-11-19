@@ -8,13 +8,14 @@ This document provides a comprehensive reference for the lifecycle state machine
 
 Every prediction pool in Predinex maintains an explicit status represented by the `PoolStatus` enum in `contracts/predinex/src/lib.rs`.
 
-There are **7 states** in the market lifecycle:
+There are **8 states** in the market lifecycle. For the difference between *resolved*, *finalized*, and *claimed*, see [`CLAIM_LIFECYCLE.md`](./CLAIM_LIFECYCLE.md).
 
 | Status | Type | Description | Allowed Operations |
 |---|---|---|---|
 | **`Scheduled(open_at)`** | Non-terminal | Market parameters are stored on-chain, but betting does not open until the `open_at` Unix timestamp is reached. | Pool cancellation by creator. No bets allowed. |
 | **`Open`** | Non-terminal | Market is actively accepting bets. Expiry has not yet passed. | `place_bet`, `cancel_bet`, `cancel_pool` (if 0 bets), `freeze_pool`, `void_pool`, `settle_pool` (after expiry). |
 | **`Frozen`** | Non-terminal | Market is temporarily halted (due to manual admin action or automatic circuit-breaker cooling). Betting and claim payouts are blocked. Read-only queries remain available. | `unfreeze_pool` (admin), `override_pool_cooling` (treasury admin), auto-thaw on bet after cooling window. |
+| **`ResolutionPending(winning_outcome)`** | Non-terminal | Winning outcome declared while a dispute window is configured (`get_dispute_window() > 0`). Not final: claims revert with `ResolutionNotFinal` until `get_resolution_deadline(pool_id)` passes. | `finalize_resolution` (anyone, after deadline), auto-finalize on claim, `dispute_pool` (within window). |
 | **`Settled(winning_outcome)`** | Terminal / Provisional | Betting is closed, market outcome is resolved, and winning outcome is declared. Winners can claim payouts unless disputed. | `claim_winnings`, `dispute_pool` (during dispute window). |
 | **`Disputed`** | Non-terminal | A settlement outcome is challenged during the dispute window. Payout claims are suspended pending review. | `unfreeze_pool` (restores pre-dispute status or re-settles). Claims are blocked. |
 | **`Voided`** | Terminal | Market was declared void (by creator or due to expiry without settlement). Full refunds are enabled for all participants. | `claim_refund`. No new bets or settlements. |
@@ -44,12 +45,15 @@ stateDiagram-v2
     Frozen --> Open: Cooling Period Elapsed + place_bet\n[Automatic: Auto-Thaw]
     Frozen --> Open: override_pool_cooling\n[Role: Treasury Admin]
 
-    Open --> Settled: settle_pool (now >= expiry)\n[Role: Creator / Assigned Settler / Admin]
+    Open --> Settled: settle_pool (now >= expiry, dispute window == 0)\n[Role: Creator / Assigned Settler / Admin]
+    Open --> ResolutionPending: settle_pool (now >= expiry, dispute window > 0)\n[Role: Creator / Assigned Settler / Admin]
+    ResolutionPending --> Settled: finalize_resolution / claim auto-finalize (now >= deadline)\n[Permissionless]
+    ResolutionPending --> Disputed: dispute_pool (within window)\n[Role: Freeze Admin]
+    Disputed --> ResolutionPending: unfreeze_pool (pre-dispute status was pending)\n[Role: Freeze Admin]
 
     Settled --> Disputed: dispute_pool (now <= settlement_time + window)\n[Role: Freeze Admin]
     Disputed --> Settled: unfreeze_pool (review confirmed outcome)\n[Role: Freeze Admin]
     Disputed --> Open: unfreeze_pool (pre-dispute status was Open)\n[Role: Freeze Admin]
-    Disputed --> Voided: void_pool (review invalidated market)\n[Role: Creator / Admin]
 
     Cancelled --> [*]
     Voided --> [*]
@@ -74,7 +78,10 @@ The table below details every valid state transition, what triggers it, whether 
 | `Frozen` | `Open` | `unfreeze_pool(pool_id)` or `unpause_market(pool_id)` | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
 | `Frozen` | `Open` | `place_bet` after `now >= cooling_until` | Automatic | Any Bettor (Auto-Thaw) | `pool_unfrozen` (AutoThaw) |
 | `Frozen` | `Open` | `override_pool_cooling(pool_id)` | Permissioned | Treasury Admin | `pool_cooling_overridden` |
-| `Open` | `Settled(outcome)` | `settle_pool(pool_id, winning_outcome)` when `now >= expiry` | Permissioned | Creator / Assigned Settler / Admin | `settle_pool` |
+| `Open` | `Settled(outcome)` | `settle_pool(pool_id, winning_outcome)` when `now >= expiry` and dispute window is `0` | Permissioned | Creator / Assigned Settler / Admin | `settle_pool` |
+| `Open` | `ResolutionPending(outcome)` | `settle_pool(pool_id, winning_outcome)` when `now >= expiry` and dispute window `> 0` | Permissioned | Creator / Assigned Settler / Admin | `settle_pool` |
+| `ResolutionPending(outcome)` | `Settled(outcome)` | `finalize_resolution(pool_id)` or first claim, once `now >= resolution deadline` | Permissionless | Any Caller | `resolution_finalized` |
+| `ResolutionPending(outcome)` | `Disputed` | `dispute_pool(pool_id)` within `dispute_window` | Permissioned | Freeze Admin | `resolution_challenged`, `pool_disputed` |
 | `Settled(outcome)` | `Disputed` | `dispute_pool(pool_id)` within `dispute_window` | Permissioned | Freeze Admin | `pool_disputed` |
 | `Disputed` | `Settled(outcome)` | `unfreeze_pool(pool_id)` resolving dispute in favor of settlement | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
 | `Disputed` | `Open` | `unfreeze_pool(pool_id)` restoring pre-dispute `Open` status | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
@@ -103,7 +110,8 @@ The table below details every valid state transition, what triggers it, whether 
    - A manual administrative freeze via `freeze_pool` writes no cooling deadline and **must** be lifted by the Freeze Admin via `unfreeze_pool`. Treasury overrides cannot bypass manual administrative freezes.
 3. **Dispute Window Protection**:
    - When a market is settled, `PoolSettlementTime` is recorded.
-   - A dispute can only be filed within `DisputeWindow` seconds (configurable, default 86,400s / 24 hours). Once this window elapses, the settlement outcome is final and disputes revert with `DisputeWindowExpired`.
+   - A dispute can only be filed within `DisputeWindow` seconds, configured by the freeze admin via `set_dispute_window`. It defaults to `0`, meaning settlement is immediately final. Once this window elapses, the settlement outcome is final and disputes revert with `DisputeWindowExpired`.
+   - With a positive window, settlement lands in `ResolutionPending` and claims are blocked until the window closes. See [`CLAIM_LIFECYCLE.md`](./CLAIM_LIFECYCLE.md).
 4. **Terminal States**:
    - `Cancelled` and `Voided` are strictly terminal. No subsequent transition can reactivate the market.
    - In a `Voided` market, winnings cannot be claimed; instead, all bettors can call `claim_refund` to receive 100% of their deposited principal.
@@ -136,6 +144,7 @@ The REST read model uses a smaller vocabulary than the contract (`MarketStatus` 
 | `Scheduled(open_at)` | `open` | Scheduled markets are listed as `open`; the contract rejects bets until `open_at`. |
 | `Open` | `open` | Accepting bets. |
 | `Frozen` | `open` | Frozen markets stay listed as `open`; the contract blocks bets/claims while frozen. |
+| `ResolutionPending(_)` | `settled` | Not yet claimable; check `get_resolution_deadline`. See [`CLAIM_LIFECYCLE.md`](./CLAIM_LIFECYCLE.md#5-which-view-reports-what). |
 | `Settled(_)` | `settled` | |
 | `Disputed` | `settled` | Projections are refreshed once the dispute resolves. |
 | `Voided` | `voided` | Refund-eligible. |
