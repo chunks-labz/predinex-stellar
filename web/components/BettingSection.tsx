@@ -294,20 +294,20 @@ export default function BettingSection({
         <div className="flex h-3 rounded-full overflow-hidden mb-2">
           <div
             className="bg-green-500 transition-all duration-500"
-            style={{ width: `${oddsAValue}%` }}
+            style={{ width: `${oddsA}%` }}
           />
           <div
             className="bg-red-500 transition-all duration-500"
-            style={{ width: `${oddsBValue}%` }}
+            style={{ width: `${oddsB}%` }}
           />
         </div>
         <div className="flex justify-between text-sm">
           <div className="text-green-400">
             <span className="font-medium">{pool.outcomeA}</span>
-            <span className="ml-1 text-muted-foreground">{oddsA}</span>
+            <span className="ml-1 text-muted-foreground">{oddsA}%</span>
           </div>
           <div className="text-red-400">
-            <span className="mr-1 text-muted-foreground">{oddsB}</span>
+            <span className="mr-1 text-muted-foreground">{oddsB}%</span>
             <span className="font-medium">{pool.outcomeB}</span>
           </div>
         </div>
@@ -386,6 +386,7 @@ export default function BettingSection({
         <label htmlFor="bet-amount" className="block text-sm font-medium mb-2">
           {t('betting.amountLabel')}
         </label>
+        <div className="relative">
         <input
           id="bet-amount"
           type="number"
@@ -407,8 +408,11 @@ export default function BettingSection({
           aria-label={t('betting.amountAriaLabel')}
           aria-describedby={describedBy}
           aria-invalid={showAmountError}
-          className="w-full px-4 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
+          className="w-full pl-4 pr-14 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
+          onWheel={(e) => e.currentTarget.blur()}
         />
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground">XLM</span>
+        </div>
         {/* #715 — Quick-select buttons for mobile */}
         {quickBetOptions.length > 0 && (
           <div
@@ -484,7 +488,8 @@ export default function BettingSection({
             isMismatch
           }
           aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeA)}
-          className="py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+          aria-pressed={pendingOutcome === 0}
+          className={`py-4 ${pendingOutcome === 0 ? "ring-4 ring-green-300 " : ""}bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
@@ -505,7 +510,8 @@ export default function BettingSection({
             isMismatch
           }
           aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeB)}
-          className="py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+          aria-pressed={pendingOutcome === 1}
+          className={`py-4 ${pendingOutcome === 1 ? "ring-4 ring-red-300 " : ""}bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />

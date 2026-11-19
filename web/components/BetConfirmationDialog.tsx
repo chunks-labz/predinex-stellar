@@ -33,11 +33,12 @@ export function BetConfirmationDialog({
 }: BetConfirmationDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (isOpen) {
       previouslyFocusedRef.current = document.activeElement as HTMLElement;
-      dialogRef.current?.focus();
+      (cancelRef.current ?? dialogRef.current)?.focus();
       // Prevent body scroll
       document.body.style.overflow = 'hidden';
     } else {
@@ -139,7 +140,7 @@ export function BetConfirmationDialog({
             </div>
             <div className="h-px bg-border/50" />
             <div className="flex justify-between items-center">
-              <span className="text-sm text-muted-foreground">Potential Win</span>
+              <span className="text-sm text-muted-foreground">Estimated payout if correct</span>
               <div className="flex items-center gap-1">
                 <TrendingUp className="w-4 h-4 text-green-400" aria-hidden="true" />
                 <span className="text-lg font-bold text-green-400">
@@ -153,7 +154,7 @@ export function BetConfirmationDialog({
           <div className="p-3 rounded-lg bg-yellow-400/10 border border-yellow-400/20">
             <p className="text-xs text-yellow-600 dark:text-yellow-400">
               <strong>Important:</strong> Once confirmed, this bet cannot be canceled. 
-              Make sure you're comfortable with the amount and your prediction.
+              Make sure you're comfortable with the amount and your prediction. The payout is an estimate and changes as other bets come in.
             </p>
           </div>
         </div>
@@ -161,6 +162,7 @@ export function BetConfirmationDialog({
         {/* Action Buttons */}
         <div className="flex gap-3">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onClose}
             disabled={isProcessing}
