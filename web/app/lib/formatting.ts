@@ -33,7 +33,7 @@ export const stxToMicroStx = unitsToStroops;
 /**
  * Convert stroops to token units (divide by STROOPS_PER_UNIT).
  */
-export function stroopsToUnits(stroops: bigint): number {
+export function stroopsToUnits(stroops: bigint | number): number {
   return Number(stroops) / STROOPS_PER_UNIT;
 }
 
@@ -49,11 +49,7 @@ export const microStxToStx = stroopsToUnits;
  * Uses configurable TOKEN_SYMBOL.
  */
 export function formatTokenAmount(stroops: bigint): string {
-  const units = stroopsToUnits(stroops);
-  return units.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 7,
-  }) + ' ' + TOKEN_SYMBOL;
+  return formatTokenUnits(stroopsToUnits(stroops));
 }
 
 /**
@@ -358,4 +354,67 @@ export function formatNumberCompact(value: number, decimals = 1): string {
   }
   
   return value.toFixed(decimals);
+}
+
+// =============================================================================
+// Market number formatting — odds, prices, and payouts
+// =============================================================================
+//
+// The market surfaces used to mix `toFixed`, bare `toLocaleString`, and raw
+// numbers ("50" vs "50.0" vs "50%", "8 XLM" vs "8.00 XLM"). These helpers are
+// the single source of truth so a value always carries its unit and the same
+// number of decimals wherever it appears.
+
+const TOKEN_DISPLAY_OPTIONS: Intl.NumberFormatOptions = {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 7,
+};
+
+/**
+ * Format an amount already expressed in token units (not stroops).
+ * Always includes grouping separators, at least 2 decimals, and the token symbol.
+ */
+export function formatTokenUnits(units: number): string {
+  const safe = Number.isFinite(units) ? units : 0;
+  return safe.toLocaleString('en-US', TOKEN_DISPLAY_OPTIONS) + ' ' + TOKEN_SYMBOL;
+}
+
+/** Format a share/entry price expressed in token units. */
+export function formatPrice(units: number): string {
+  return formatTokenUnits(units);
+}
+
+/** Format a payout expressed in token units. */
+export function formatPayout(units: number): string {
+  return formatTokenUnits(units);
+}
+
+/**
+ * Format an odds percentage. Always shows one decimal and a `%` sign so a
+ * value is never mistaken for a multiplier or a raw probability.
+ */
+export function formatOdds(percentage: number, decimals = 1): string {
+  const safe = Number.isFinite(percentage) ? percentage : 0;
+  return `${safe.toFixed(decimals)}%`;
+}
+
+/**
+ * Derive and format a pair of odds from the two sides of a pool.
+ * Empty pools render as an explicit 50/50 split.
+ */
+export function formatOddsPair(sideA: number, sideB: number): { oddsA: string; oddsB: string } {
+  const total = sideA + sideB;
+  if (total <= 0) {
+    return { oddsA: formatOdds(50), oddsB: formatOdds(50) };
+  }
+  return {
+    oddsA: formatOdds((sideA / total) * 100),
+    oddsB: formatOdds((sideB / total) * 100),
+  };
+}
+
+/** Format a payout multiplier such as `1.96x`. */
+export function formatPayoutMultiplier(multiplier: number, decimals = 2): string {
+  const safe = Number.isFinite(multiplier) ? Math.max(0, multiplier) : 0;
+  return `${safe.toFixed(decimals)}x`;
 }

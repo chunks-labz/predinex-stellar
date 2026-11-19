@@ -2,6 +2,7 @@
 
 import { notFound } from 'next/navigation';
 import MarketCard from '@/components/MarketCard';
+import MarketGrid from '@/components/MarketGrid';
 import ActivityFeed from '@/app/components/ActivityFeed';
 import PoolIntegration from '@/app/components/PoolIntegration';
 import ActiveBetsCard from '@/app/components/dashboard/ActiveBetsCard';
@@ -95,6 +96,22 @@ export default function VisualRegressionPage() {
             />
           </div>
         </div>
+      </section>
+
+      {/* Market Grid — static surface for tablet overflow checks */}
+      <section id="market-grid-tablet" className="space-y-6">
+        <h2 className="text-xl font-semibold opacity-70 uppercase tracking-wider">Market Grid (tablet layout)</h2>
+        <MarketGrid
+          markets={[
+            MOCK_MARKET,
+            { ...MOCK_MARKET, poolId: 2, title: 'Will Bitcoin close above $100,000 this year?' },
+            { ...MOCK_MARKET, poolId: 3, title: 'Will the next Fed meeting cut rates?' },
+            { ...MOCK_MARKET, poolId: 4, title: 'Will XLM flip DOT in market cap by 2026?' },
+          ]}
+          isLoading={false}
+          error={null}
+          onRetry={() => {}}
+        />
       </section>
 
       {/* Activity Feed */}

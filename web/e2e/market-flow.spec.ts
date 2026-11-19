@@ -18,7 +18,7 @@ test.describe('Market Flow', () => {
     await page.click('li:first-child a');
 
     // Should navigate to pool detail page
-    await expect(page).toHaveURL(/\\/pools\\//);
+    await expect(page).toHaveURL(/\/pools\//);
 
     // Verify pool title is visible
     await expect(page.locator('h1')).toBeVisible();
@@ -32,7 +32,7 @@ test.describe('Market Flow', () => {
 
     // Open first pool
     await page.click('li:first-child a');
-    await expect(page).toHaveURL(/\\/pools\\//);
+    await expect(page).toHaveURL(/\/pools\//);
 
     // Look for place bet button/option
     await expect(page.locator('text=Place Bet, button:has-text("Place Bet")')).toBeVisible();

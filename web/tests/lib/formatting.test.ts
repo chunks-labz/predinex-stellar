@@ -21,6 +21,11 @@ import {
   formatNumberCompact,
   formatTokenAmount,
   formatTokenAmountCompact,
+  formatOdds,
+  formatOddsPair,
+  formatPrice,
+  formatPayout,
+  formatPayoutMultiplier,
   TOKEN_SYMBOL,
   TOKEN_CONFIG,
 } from '../../app/lib/formatting';
@@ -336,6 +341,52 @@ describe('Number Formatting', () => {
 
     it('uses custom decimals', () => {
       expect(formatNumberCompact(1_500_000, 2)).toBe('1.50M');
+    });
+  });
+});
+
+describe('Market number formatting', () => {
+  describe('formatOdds', () => {
+    it('always includes one decimal and a percent sign', () => {
+      expect(formatOdds(50)).toBe('50.0%');
+      expect(formatOdds(66.66)).toBe('66.7%');
+      expect(formatOdds(0)).toBe('0.0%');
+    });
+
+    it('supports a custom precision and guards non-finite input', () => {
+      expect(formatOdds(33.333, 2)).toBe('33.33%');
+      expect(formatOdds(Number.NaN)).toBe('0.0%');
+    });
+  });
+
+  describe('formatOddsPair', () => {
+    it('derives a stable pair from pool totals', () => {
+      expect(formatOddsPair(75, 25)).toEqual({ oddsA: '75.0%', oddsB: '25.0%' });
+    });
+
+    it('falls back to an explicit 50/50 split for empty pools', () => {
+      expect(formatOddsPair(0, 0)).toEqual({ oddsA: '50.0%', oddsB: '50.0%' });
+    });
+  });
+
+  describe('formatPrice / formatPayout', () => {
+    it('share one normalized unit format with grouping and a token symbol', () => {
+      expect(formatPrice(8)).toBe(`8.00 ${TOKEN_SYMBOL}`);
+      expect(formatPayout(1234.5)).toBe(`1,234.50 ${TOKEN_SYMBOL}`);
+      expect(formatPayout(0.0000001)).toBe(`0.0000001 ${TOKEN_SYMBOL}`);
+    });
+
+    it('agrees with formatTokenAmount for the same value', () => {
+      expect(formatTokenAmount(10_000_000n)).toBe(formatPayout(1));
+      expect(formatTokenAmount(80_000_000n)).toBe(formatPrice(8));
+    });
+  });
+
+  describe('formatPayoutMultiplier', () => {
+    it('formats with an x suffix and clamps invalid values', () => {
+      expect(formatPayoutMultiplier(1.567)).toBe('1.57x');
+      expect(formatPayoutMultiplier(0)).toBe('0.00x');
+      expect(formatPayoutMultiplier(Number.NaN)).toBe('0.00x');
     });
   });
 });

@@ -6,6 +6,14 @@ import MarketCardSkeleton from '@/components/MarketCardSkeleton';
 import EmptyState from '@/components/EmptyState';
 import { ProcessedMarket } from '@/app/lib/market-types';
 
+/**
+ * Shared grid classes for every market-grid surface (results, skeleton and
+ * page-level fallback). Tablet widths (sm/md) stay at two columns and items
+ * get `min-w-0` so long titles/odds cannot force a card wider than its track.
+ */
+export const MARKET_GRID_CLASSES =
+  'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 list-none p-0 m-0 min-w-0';
+
 interface MarketGridProps {
   markets: ProcessedMarket[];
   isLoading: boolean;
@@ -32,11 +40,11 @@ export default function MarketGrid({
         <span className="sr-only">Loading markets…</span>
         <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" aria-hidden="true" />
         <ul
-          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 list-none p-0 m-0"
+          className={MARKET_GRID_CLASSES}
           aria-hidden="true"
         >
           {Array.from({ length: 8 }).map((_, i) => (
-            <li key={i}>
+            <li key={i} className="min-w-0">
               <MarketCardSkeleton />
             </li>
           ))}
@@ -120,13 +128,13 @@ export default function MarketGrid({
         </p>
       </div>
 
-      {/* #455 mobile: single column on mobile, 2 on md, 3 on lg, 4 on xl */}
+      {/* Mobile: 1 column. Tablet (sm/md): 2 columns. lg: 3, xl: 4. */}
       <ul
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 list-none p-0 m-0"
+        className={MARKET_GRID_CLASSES}
         aria-label="Prediction markets"
       >
         {markets.map((market) => (
-          <li key={market.poolId}>
+          <li key={market.poolId} className="min-w-0">
             <MarketCard market={market} />
           </li>
         ))}

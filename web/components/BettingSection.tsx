@@ -3,7 +3,7 @@ import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
 import { useMemo, useState } from 'react';
-import { Loader2, Wallet, AlertCircle } from 'lucide-react';
+import { Loader2, Wallet, AlertCircle, Info } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '@/providers/ToastProvider';
@@ -20,6 +20,8 @@ import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
 import { useI18n } from '@/app/lib/i18n';
 import { BetConfirmationDialog } from '@/components/BetConfirmationDialog';
+import { formatOdds, formatPrice } from '@/app/lib/formatting';
+import Tooltip from '@/components/ui/Tooltip';
 
 interface BettingSectionProps {
   pool: Pool;
@@ -292,25 +294,28 @@ export default function BettingSection({
         <div className="flex h-3 rounded-full overflow-hidden mb-2">
           <div
             className="bg-green-500 transition-all duration-500"
-            style={{ width: `${oddsA}%` }}
+            style={{ width: `${oddsAValue}%` }}
           />
           <div
             className="bg-red-500 transition-all duration-500"
-            style={{ width: `${oddsB}%` }}
+            style={{ width: `${oddsBValue}%` }}
           />
         </div>
         <div className="flex justify-between text-sm">
           <div className="text-green-400">
             <span className="font-medium">{pool.outcomeA}</span>
-            <span className="ml-1 text-muted-foreground">{oddsA}%</span>
+            <span className="ml-1 text-muted-foreground">{oddsA}</span>
           </div>
           <div className="text-red-400">
-            <span className="mr-1 text-muted-foreground">{oddsB}%</span>
+            <span className="mr-1 text-muted-foreground">{oddsB}</span>
             <span className="font-medium">{pool.outcomeB}</span>
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1 text-center">
-          {t('betting.totalPool')} {(totalPool / STROOPS_PER_XLM).toLocaleString()} XLM
+          {t('betting.totalPool')} {formatPrice(totalPool / STROOPS_PER_XLM)}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1 text-center">
+          {t('betting.sharesPayoutHint')}
         </p>
       </div>
 
@@ -348,7 +353,7 @@ export default function BettingSection({
             <div className="text-right">
               <p className="text-sm text-muted-foreground">{t('betting.balance')}</p>
               <p className="font-bold">
-                {walletBalance?.toFixed(2) ?? "0"} XLM
+                {formatPrice(walletBalance ?? 0)}
               </p>
             </div>
           </div>
@@ -510,6 +515,21 @@ export default function BettingSection({
             t('betting.betOnButton').replace('{outcome}', pool.outcomeB)
           )}
         </button>
+      </div>
+
+      {/* First-time-user explainer. Kept after the bet controls in the DOM so
+          it does not change the primary keyboard flow, but it is focusable. */}
+      <div className="flex items-center justify-center pt-1">
+        <Tooltip content={t('betting.sharesPayoutInfo')}>
+          <button
+            type="button"
+            aria-label={t('betting.sharesPayoutInfoLabel')}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded px-1 py-1 transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" aria-hidden="true" />
+            {t('betting.sharesPayoutInfoLabel')}
+          </button>
+        </Tooltip>
       </div>
     </div>
   );
