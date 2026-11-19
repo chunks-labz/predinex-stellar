@@ -231,10 +231,10 @@ soroban-rpc-client health-check
 
 **For financial threats:**
 ```bash
-# Freeze entire contract
+# Pause entire contract (admin or treasury recipient only; see PAUSED_CONTRACT_RUNBOOK.md)
 stellar contract invoke --id $CONTRACT_ID \
-  --source freeze_admin --network mainnet \
-  -- set_paused --paused true
+  --source admin --network mainnet \
+  -- set_paused --caller $ADMIN --paused true
 
 # Freeze specific pool
 stellar contract invoke --id $CONTRACT_ID \
@@ -620,23 +620,25 @@ If mainnet admin key is lost/compromised:
 **When to use:** Any critical issue requiring immediate user action halt
 
 ```bash
-# Pause contract (no bets, no claims, no new pools)
+# Pause contract (no bets, claims, refunds or settlements)
+# Caller must be the admin or treasury recipient — the freeze admin is rejected.
 stellar contract invoke --id $CONTRACT_ID \
-  --source freeze_admin --network mainnet \
-  -- set_paused --paused true
+  --source admin --network mainnet \
+  -- set_paused --caller $ADMIN --paused true
 
 # Resume contract
 stellar contract invoke --id $CONTRACT_ID \
-  --source freeze_admin --network mainnet \
-  -- set_paused --paused false
+  --source admin --network mainnet \
+  -- set_paused --caller $ADMIN --paused false
 ```
 
 **Effects:**
-- ✅ No new pools can be created
 - ✅ No new bets can be placed
-- ✅ No claims processed
-- ❌ Existing pools cannot be modified
-- ❌ Settled pools cannot be claimed
+- ✅ No claims, refunds or settlements processed
+- ⚠️ Pool creation is **not** blocked
+- ⚠️ Treasury withdrawals, admin/fee setters, disputes and `finalize_resolution` still work
+
+See [`PAUSED_CONTRACT_RUNBOOK.md`](./PAUSED_CONTRACT_RUNBOOK.md) for the full caller-impact table, unpause checklist and post-incident checks.
 
 **Recovery:** Deploy fixed contract or `set_paused(false)`
 
