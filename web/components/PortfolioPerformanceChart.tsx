@@ -145,6 +145,9 @@ export function PortfolioPerformanceChart({
             className="bg-green-400 transition-all duration-300"
             style={{ width: `${(data.wonBets / data.totalBets) * 100}%` }}
             role="progressbar"
+            aria-label={`Pending bets: ${data.pendingBets} of ${data.totalBets}`}
+            aria-label={`Lost bets: ${data.lostBets} of ${data.totalBets}`}
+            aria-label={`Won bets: ${data.wonBets} of ${data.totalBets}`}
             aria-valuenow={(data.wonBets / data.totalBets) * 100}
             aria-valuemin={0}
             aria-valuemax={100}

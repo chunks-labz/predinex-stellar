@@ -13,6 +13,7 @@ interface ProgressBarProps {
   color?: string;
   size?: 'sm' | 'md' | 'lg';
   animated?: boolean;
+  ariaLabel?: string;
 }
 
 export const ProgressBar: React.FC<ProgressBarProps> = ({
@@ -23,6 +24,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
   color = 'bg-blue-500',
   size = 'md',
   animated = true,
+  ariaLabel,
 }) => {
   const percentage = Math.min(Math.max((value / max) * 100, 0), 100);
 
@@ -49,6 +51,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({
           className={`${color} ${sizeClasses[size]} ${animated ? 'transition-all duration-500 ease-out' : ''} rounded-full`}
           style={{ width: `${percentage}%` }}
           role="progressbar"
+          aria-label={ariaLabel || label || 'Progress'}
           aria-valuenow={value}
           aria-valuemin={0}
           aria-valuemax={max}

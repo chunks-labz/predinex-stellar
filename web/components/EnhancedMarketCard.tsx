@@ -20,6 +20,7 @@ export const EnhancedMarketCard: React.FC<any> = ({ pool }) => {
           value={pool.total_a}
           max={totalVolume}
           label={pool.outcome_a_name}
+          ariaLabel={`${pool.outcome_a_name} outcome volume`}
           showPercentage
           color="bg-green-500"
         />
@@ -27,6 +28,7 @@ export const EnhancedMarketCard: React.FC<any> = ({ pool }) => {
           value={pool.total_b}
           max={totalVolume}
           label={pool.outcome_b_name}
+          ariaLabel={`${pool.outcome_b_name} outcome volume`}
           showPercentage
           color="bg-red-500"
         />

@@ -70,20 +70,13 @@ function FavoritesContent() {
 
         {/* Empty State */}
         {!isLoading && favoritePoolIds.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-border p-12 text-center">
-            <Star className="h-12 w-12 text-muted-foreground/50 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold mb-2">No bookmarked markets yet</h2>
-            <p className="text-muted-foreground mb-6">
-              Bookmark markets to quickly access them later. Use the star icon on any market card.
-            </p>
-            <Link
-              href="/markets"
-              className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-            >
-              Browse Markets
-              <ChevronRight className="h-4 w-4" />
-            </Link>
-          </div>
+          <EmptyState
+            title="No bookmarked markets yet"
+            description="Bookmark markets to quickly access them later. Use the star icon on any market card."
+            icon={Star}
+            actionLabel="Browse Markets"
+            actionHref="/markets"
+          />
         )}
 
         {/* Markets Grid */}

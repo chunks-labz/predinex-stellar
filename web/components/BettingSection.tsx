@@ -214,7 +214,7 @@ export default function BettingSection({
       onBetSuccess?.(outcome, amountStroops);
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
-      showError(error instanceof Error ? error.message : "Unknown error");
+      showError(error);
       setStage("idle");
       setFeePrompt(null);
     } finally {

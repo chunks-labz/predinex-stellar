@@ -9,6 +9,7 @@
 import { Search, TrendingUp, Clock, X } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
+import EmptyState from '@/components/EmptyState';
 
 interface SearchResult {
   id: number;
@@ -203,14 +204,14 @@ export function MarketSearchAutocomplete({
       )}
 
       {isOpen && results.length === 0 && query.length >= 2 && (
-        <div
-          className="absolute top-full mt-2 w-full glass p-6 rounded-xl border text-center"
-          role="status"
-        >
-          <p className="text-muted-foreground">No markets found for "{query}"</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Try different keywords or browse all markets
-          </p>
+        <div className="absolute top-full mt-2 w-full">
+          <EmptyState
+            title={`No markets match "${query}"`}
+            description="Try different keywords or clear filters, or browse all markets."
+            actionLabel="Browse all markets"
+            actionHref="/markets"
+            className="p-6"
+          />
         </div>
       )}
     </div>

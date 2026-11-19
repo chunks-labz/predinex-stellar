@@ -131,6 +131,7 @@ export function MarketInsights({
             className="h-full bg-primary transition-all duration-300"
             style={{ width: `${popularOutcomePercentage}%` }}
             role="progressbar"
+            aria-label={`${popularOutcome} share of bets`}
             aria-valuenow={popularOutcomePercentage}
             aria-valuemin={0}
             aria-valuemax={100}

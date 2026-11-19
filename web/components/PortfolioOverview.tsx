@@ -17,7 +17,8 @@ export default function PortfolioOverview({ portfolio, isLoading = false }: Port
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading portfolio">
+        <span className="sr-only">Loading portfolio…</span>
         <div className="flex items-center justify-between">
           <div className="h-8 bg-muted/50 rounded w-48 animate-pulse"></div>
           <div className="h-4 bg-muted/50 rounded w-32 animate-pulse"></div>

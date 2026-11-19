@@ -203,8 +203,12 @@ export default function MarketCard({ market }: MarketCardProps) {
             {/* Odds visualization bar */}
             <div
               className="w-full h-2 bg-muted/30 rounded-full overflow-hidden"
-              role="img"
-              aria-label={`Odds: ${market.outcomeA} ${formatOdds(market.oddsA)}, ${market.outcomeB} ${formatOdds(market.oddsB)}`}
+              role="progressbar"
+              aria-label={`Market odds: ${market.outcomeA} ${formatOdds(market.oddsA)}, ${market.outcomeB} ${formatOdds(market.oddsB)}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={market.oddsA}
+              aria-valuetext={`${market.outcomeA}: ${formatOdds(market.oddsA)}; ${market.outcomeB}: ${formatOdds(market.oddsB)}`}
             >
               <div className="h-full flex">
                 <div
