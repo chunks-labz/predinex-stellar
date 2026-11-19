@@ -25,7 +25,7 @@ describe('Accessibility (WCAG 2.1 AA) axe-core tests', () => {
       <div>
         <h1>Prediction Markets</h1>
         <MarketGrid
-          markets: [
+          markets={[
             {
               poolId: 1,
               title: 'Test Market',
@@ -39,21 +39,21 @@ describe('Accessibility (WCAG 2.1 AA) axe-core tests', () => {
               oddsA: '50.0',
               oddsB: '50.0',
             } as any,
-          ] as any[],
-          isLoading: false,
-          error: null,
-          onRetry: () => {},
-          searchQuery: '',
-          hasFilters: false,
+          ] as any[]}
+          isLoading={false}
+          error={null}
+          onRetry={() => {}}
+          searchQuery=""
+          hasFilters={false}
         />
       </div>
     );
 
     const violations = await axe(container).run();
-    const critical = violations violations.filter(
+    const critical = violations.filter(
       (v: any) => v.description?.includes('critical') || v.id === 'region'
     );
-    const serious = violations violations.filter(
+    const serious = violations.filter(
       (v: any) => v.description?.includes('serious') || v.tags?.includes('critical') || v.tags?.includes('serious')
     );
 

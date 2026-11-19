@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
 import MarketFilterBar from "../components/MarketFilterBar";
-import MarketGrid from '@/components/MarketGrid';
+import MarketGrid, { MARKET_GRID_CLASSES } from '@/components/MarketGrid';
 import Pagination from '@/components/Pagination';
 import { marketFiltersToParams, parseMarketFiltersFromParams } from "../lib/market-filtering";
 import type { MarketFilters } from "../lib/market-types";
@@ -196,11 +196,11 @@ function MarketsPageSkeleton() {
         <div className="space-y-6">
           <div className="h-5 w-32 bg-muted/40 rounded animate-pulse" />
           <ul
-            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6 list-none p-0 m-0"
+            className={MARKET_GRID_CLASSES}
             aria-hidden="true"
           >
             {Array.from({ length: 8 }).map((_, i) => (
-              <li key={i}>
+              <li key={i} className="min-w-0">
                 <div className="p-8 rounded-3xl border border-border bg-card/40 h-full flex flex-col glass animate-pulse">
                   <div className="flex justify-between items-center mb-6">
                     <div className="h-6 w-16 bg-muted rounded-full" />

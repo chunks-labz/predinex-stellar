@@ -5,10 +5,10 @@
  *
  * | Mutation          | Caches invalidated                                      |
  * |-------------------|---------------------------------------------------------|
- * | place-bet         | market list, pool(poolId), user activity, user bets     |
- * | claim-winnings    | market list, pool(poolId), user activity, dashboard     |
+ * | place-bet         | market list, pool(poolId), detail(poolId), user activity, user bets |
+ * | claim-winnings    | market list, pool(poolId), detail(poolId), user activity, dashboard |
  * | create-pool       | market list                                             |
- * | resolve-pool      | market list, pool(poolId)                               |
+ * | resolve-pool      | market list, pool(poolId), detail(poolId)               |
  *
  * All invalidation helpers are synchronous and safe to call from any context
  * (they guard against SSR via `typeof window` checks inside the cache modules).
@@ -31,6 +31,7 @@ import {
   invalidatePoolCache,
 } from './market-list-cache';
 import { createScopedCache } from './cache';
+import { invalidateMarketDetail } from './market-detail-cache';
 import { clearPoolActivityCache } from '../hooks/usePoolActivity';
 
 // ---------------------------------------------------------------------------
@@ -84,6 +85,7 @@ export interface PlaceBetInvalidationParams {
 export function invalidateOnPlaceBet({ poolId, userAddress }: PlaceBetInvalidationParams): void {
   invalidateMarketList();
   invalidatePool(poolId);
+  invalidateMarketDetail(poolId);
   invalidateUserCaches(userAddress);
   // usePoolActivity.ts keeps its own 30s-TTL cache (issue #990) separate from
   // the caches above; a fresh bet won't show up in the activity timeline
@@ -108,6 +110,7 @@ export interface ClaimWinningsInvalidationParams {
 export function invalidateOnClaimWinnings({ poolId, userAddress }: ClaimWinningsInvalidationParams): void {
   invalidateMarketList();
   invalidatePool(poolId);
+  invalidateMarketDetail(poolId);
   invalidateUserCaches(userAddress);
   clearPoolActivityCache();
 }
@@ -132,4 +135,5 @@ export function invalidateOnCreatePool(): void {
 export function invalidateOnResolvePool(poolId: number): void {
   invalidateMarketList();
   invalidatePool(poolId);
+  invalidateMarketDetail(poolId);
 }

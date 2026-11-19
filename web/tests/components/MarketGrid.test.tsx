@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
-import MarketGrid from '@/components/MarketGrid';
+import { screen, fireEvent, cleanup } from '@testing-library/react';
+import { renderWithProviders } from '../helpers/renderWithProviders';
+import MarketGrid, { MARKET_GRID_CLASSES } from '@/components/MarketGrid';
 import { ProcessedMarket } from '@/app/lib/market-types';
 
 describe('MarketGrid Component (#1446)', () => {
@@ -14,7 +15,7 @@ describe('MarketGrid Component (#1446)', () => {
   const mockMarket: ProcessedMarket = {
     poolId: 1,
     creator: 'GCREATOR123',
-    question: 'Will XLM exceed $1 in 2026?',
+    title: 'Will XLM exceed $1 in 2026?',
     description: 'Resolves to Yes if XLM touches $1.00 or higher.',
     options: ['Yes', 'No'],
     expiry: Date.now() + 86400000,
@@ -30,7 +31,7 @@ describe('MarketGrid Component (#1446)', () => {
   };
 
   it('renders loading skeleton cards when isLoading is true', () => {
-    render(
+    renderWithProviders(
       <MarketGrid
         markets={[]}
         isLoading={true}
@@ -46,7 +47,7 @@ describe('MarketGrid Component (#1446)', () => {
   });
 
   it('renders error state distinctly when error is provided and allows retry', () => {
-    render(
+    renderWithProviders(
       <MarketGrid
         markets={[]}
         isLoading={false}
@@ -67,7 +68,7 @@ describe('MarketGrid Component (#1446)', () => {
   });
 
   it('renders friendly empty state when there are zero markets in the protocol', () => {
-    render(
+    renderWithProviders(
       <MarketGrid
         markets={[]}
         isLoading={false}
@@ -89,7 +90,7 @@ describe('MarketGrid Component (#1446)', () => {
   });
 
   it('renders friendly filter empty state when search/filters return 0 results and allows clearing filters', () => {
-    render(
+    renderWithProviders(
       <MarketGrid
         markets={[]}
         isLoading={false}
@@ -113,8 +114,51 @@ describe('MarketGrid Component (#1446)', () => {
     expect(createLink).toBeInTheDocument();
   });
 
+  it('uses responsive grid classes that keep tablet cards from overflowing', () => {
+    // Tablet widths (640–1024px) must resolve to two columns, and each item
+    // needs min-w-0 so long titles cannot stretch its grid track.
+    expect(MARKET_GRID_CLASSES).toContain('grid-cols-1');
+    expect(MARKET_GRID_CLASSES).toContain('sm:grid-cols-2');
+    expect(MARKET_GRID_CLASSES).toContain('md:grid-cols-2');
+    expect(MARKET_GRID_CLASSES).toContain('lg:grid-cols-3');
+    expect(MARKET_GRID_CLASSES).toContain('min-w-0');
+
+    renderWithProviders(
+      <MarketGrid
+        markets={[mockMarket]}
+        isLoading={false}
+        error={null}
+        onRetry={mockRetry}
+      />
+    );
+
+    const grid = screen.getByRole('list', { name: 'Prediction markets' });
+    expect(grid.className).toBe(MARKET_GRID_CLASSES);
+    expect(grid.querySelector('li')?.className).toContain('min-w-0');
+  });
+
+  it('uses the same responsive grid for the loading skeleton', () => {
+    renderWithProviders(
+      <MarketGrid
+        markets={[]}
+        isLoading={true}
+        error={null}
+        onRetry={mockRetry}
+      />
+    );
+
+    const skeletons = document.querySelectorAll('ul[aria-hidden="true"]');
+    expect(skeletons.length).toBeGreaterThan(0);
+    skeletons.forEach((ul) => {
+      expect(ul.className).toBe(MARKET_GRID_CLASSES);
+      ul.querySelectorAll('li').forEach((li) => {
+        expect(li.className).toContain('min-w-0');
+      });
+    });
+  });
+
   it('renders market cards when data is loaded successfully', () => {
-    render(
+    renderWithProviders(
       <MarketGrid
         markets={[mockMarket]}
         isLoading={false}

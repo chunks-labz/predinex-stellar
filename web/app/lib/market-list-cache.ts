@@ -21,7 +21,12 @@ import { processMarketData } from './market-utils';
  */
 export const MARKET_LIST_CACHE_KEY = 'predinex_market_list_v2';
 export const MARKET_LIST_CACHE_VERSION = 2;
-export const MARKET_LIST_CACHE_TTL_MS = 30_000;
+/**
+ * List snapshots stay fresh for one full polling cycle (60s in
+ * `useMarketDiscovery`). Returning from a market detail page within that
+ * window reuses the snapshot instead of refetching every pool from the chain.
+ */
+export const MARKET_LIST_CACHE_TTL_MS = 60_000;
 
 export const POOL_CACHE_KEY_PREFIX = 'predinex_pool_';
 export const POOL_CACHE_VERSION = 1;

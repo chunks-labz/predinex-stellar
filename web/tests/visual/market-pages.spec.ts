@@ -9,6 +9,33 @@ test.describe('Visual Regression - Market Pages & Components', () => {
     await page.waitForSelector('h1:has-text("Visual Regression Test Surface")');
   });
 
+  test('Market grid does not overflow at tablet width', async ({ page }) => {
+    // 768px sits in the sm/md range where the grid must stay at two columns.
+    await page.setViewportSize({ width: 768, height: 1024 });
+
+    const grid = page.locator('#market-grid-tablet ul[aria-label="Prediction markets"]');
+    await expect(grid).toBeVisible();
+
+    const layout = await grid.evaluate((element) => {
+      const styles = window.getComputedStyle(element);
+      const gridRect = element.getBoundingClientRect();
+      const cards = Array.from(element.querySelectorAll('li'));
+      return {
+        columns: styles.gridTemplateColumns.split(' ').filter(Boolean).length,
+        overflowingCards: cards.filter((card) => {
+          const rect = card.getBoundingClientRect();
+          return rect.left < gridRect.left - 1 || rect.right > gridRect.right + 1;
+        }).length,
+        documentOverflow:
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+
+    expect(layout.columns).toBe(2);
+    expect(layout.overflowingCards).toBe(0);
+    expect(layout.documentOverflow).toBeLessThanOrEqual(1);
+  });
+
   test('Market Card Visuals', async ({ page }) => {
     const section = page.locator('#market-cards');
     await expect(section).toHaveScreenshot('market-cards.png');

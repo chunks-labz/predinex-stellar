@@ -8,6 +8,7 @@ import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { useMarketDiscovery } from '../lib/hooks/useMarketDiscovery';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '../lib/hooks/usePoolComparison';
 import { formatSTXAmount } from '../lib/market-utils';
+import { formatOdds } from '../lib/formatting';
 import { formatDisplayAddress } from '../lib/address-display';
 import CountdownTimer from '@/components/CountdownTimer';
 import type { ProcessedMarket } from '../lib/market-types';
@@ -45,11 +46,11 @@ const COMPARISON_ROWS: Array<{
       <div className="space-y-1">
         <div className="flex justify-between text-sm">
           <span className="text-green-400">{m.outcomeA}</span>
-          <span className="font-mono">{m.oddsA}%</span>
+          <span className="font-mono">{formatOdds(m.oddsA)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-red-400">{m.outcomeB}</span>
-          <span className="font-mono">{m.oddsB}%</span>
+          <span className="font-mono">{formatOdds(m.oddsB)}</span>
         </div>
       </div>
     ),

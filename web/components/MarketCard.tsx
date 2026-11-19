@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
-import { formatTokenAmount } from '@/app/lib/formatting';
+import { formatOdds, formatTokenAmount } from '@/app/lib/formatting';
 import { formatDisplayAddress } from '@/app/lib/address-display';
 import { usePoolFavorites } from '@/app/lib/hooks/usePoolFavorites';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '@/app/lib/hooks/usePoolComparison';
@@ -170,11 +170,11 @@ export default function MarketCard({ market }: MarketCardProps) {
             <div className="flex justify-between items-center text-sm p-3 bg-muted/30 rounded-lg min-w-0">
               <div className="flex items-center gap-2 truncate min-w-0">
                 <span className="font-medium text-green-400 truncate">{market.outcomeA}</span>
-                <span className="text-xs text-muted-foreground shrink-0">({market.oddsA}%)</span>
+                <span className="text-xs text-muted-foreground shrink-0">({formatOdds(market.oddsA)})</span>
               </div>
               <span className="text-muted-foreground text-xs shrink-0 px-2" aria-hidden="true">vs</span>
               <div className="flex items-center gap-2 truncate min-w-0 justify-end">
-                <span className="text-xs text-muted-foreground shrink-0">({market.oddsB}%)</span>
+                <span className="text-xs text-muted-foreground shrink-0">({formatOdds(market.oddsB)})</span>
                 <span className="font-medium text-red-400 truncate">{market.outcomeB}</span>
               </div>
             </div>
@@ -183,7 +183,7 @@ export default function MarketCard({ market }: MarketCardProps) {
             <div
               className="w-full h-2 bg-muted/30 rounded-full overflow-hidden"
               role="img"
-              aria-label={`Odds: ${market.outcomeA} ${market.oddsA}%, ${market.outcomeB} ${market.oddsB}%`}
+              aria-label={`Odds: ${market.outcomeA} ${formatOdds(market.oddsA)}, ${market.outcomeB} ${formatOdds(market.oddsB)}`}
             >
               <div className="h-full flex">
                 <div

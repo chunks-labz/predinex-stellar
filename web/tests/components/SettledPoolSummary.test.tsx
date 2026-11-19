@@ -66,7 +66,7 @@ describe('SettledPoolSummary', () => {
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('Total Pool')).toBeInTheDocument();
-    expect(screen.getByText('8 XLM')).toBeInTheDocument();
+    expect(screen.getByText('8.00 XLM')).toBeInTheDocument();
   });
 
   it('shows winning and losing side totals', () => {
@@ -74,10 +74,10 @@ describe('SettledPoolSummary', () => {
     renderWithProviders(<SettledPoolSummary pool={pool} />);
 
     expect(screen.getByText('Winning Side')).toBeInTheDocument();
-    expect(screen.getByText('5 XLM')).toBeInTheDocument();
+    expect(screen.getByText('5.00 XLM')).toBeInTheDocument();
 
     expect(screen.getByText('Losing Side')).toBeInTheDocument();
-    expect(screen.getByText('3 XLM')).toBeInTheDocument();
+    expect(screen.getByText('3.00 XLM')).toBeInTheDocument();
   });
 
   it('shows protocol fee and net payout', () => {

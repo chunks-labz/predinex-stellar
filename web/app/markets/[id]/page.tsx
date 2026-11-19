@@ -8,7 +8,7 @@ import BettingSection from '@/components/BettingSection';
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import SettledPoolSummary from "../../components/SettledPoolSummary";
 import { useWallet } from '@/components/WalletAdapterProvider';
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useUserActivity } from "../../hooks/useUserActivity";
 import { predinexReadApi } from "../../lib/adapters/predinex-read-api";
 import type { Pool } from "../../lib/adapters/types";
@@ -17,16 +17,26 @@ import CountdownTimer from '@/components/CountdownTimer';
 import DisputeHistoryTimeline from "../../components/DisputeHistoryTimeline";
 import { useDisputeHistory } from "../../lib/hooks/useDisputeHistory";
 import PoolActivityTimeline from "../../components/PoolActivityTimeline";
-import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff } from "lucide-react";
+import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff, Info } from "lucide-react";
 import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
 import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
+import {
+  formatOdds,
+  formatPayout,
+  formatTokenUnits,
+  stroopsToUnits,
+} from "../../lib/formatting";
+import { useI18n } from "../../lib/i18n";
+import Tooltip from "../../../components/ui/Tooltip";
+import { readMarketDetail, writeMarketDetail } from "../../lib/market-detail-cache";
 
 export default function PoolDetails({ params }: { params: Promise<{ id: string }> }) {
     const { id } = use(params);
     const poolId = parseInt(id);
+    const { t } = useI18n();
 
     const { address: stxAddress } = useWallet();
     const { activities, refresh: refreshActivity } = useUserActivity(stxAddress ?? undefined, 50);
@@ -50,40 +60,47 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const isRefreshingRef = useRef(false);
     const rerunPendingRef = useRef(false);
-    
-    const snapshotRef = useRef<{ pool: Pool; userBet: { amountA: number; amountB: number } } | null>(null);
-    const pendingBetsRef = useRef(0);
-    const reconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isRefreshingRef = useRef(false);
-    const rerunPendingRef = useRef(false);
 
     useEffect(() => {
+        let cancelled = false;
+        const cacheAddress = stxAddress ?? undefined;
+        const cached = readMarketDetail(poolId, cacheAddress);
+
+        if (cached) {
+            // Navigation cache hit: render the pool and position immediately
+            // instead of repeating the RPC round-trip on every detail visit.
+            setPool(cached.pool);
+            setUserBet(cached.userBet);
+            setIsLoading(false);
+            setError(null);
+            return () => { cancelled = true; };
+        }
+
         const loadPool = async () => {
             setIsLoading(true);
             setError(null);
             try {
-                const data = await predinexReadApi.getPool(poolId);
+                const [data, bet] = await Promise.all([
+                    predinexReadApi.getPool(poolId),
+                    stxAddress ? predinexReadApi.getUserBet(poolId, stxAddress) : Promise.resolve(null),
+                ]);
+                if (cancelled) return;
                 setPool(data);
+                setUserBet(bet);
+                if (data) {
+                    writeMarketDetail(poolId, cacheAddress, data, bet);
+                }
             } catch (e) {
+                if (cancelled) return;
                 setError(e instanceof Error ? e.message : 'Failed to load pool');
                 log.error(`Failed to load pool ${poolId}:`, e);
             } finally {
-                setIsLoading(false);
+                if (!cancelled) setIsLoading(false);
             }
         };
         loadPool();
-    }, [poolId]);
-
-    useEffect(() => {
-        if (!stxAddress || !poolId) {
-            setUserBet(null);
-            return;
-        }
-
-        predinexReadApi.getUserBet(poolId, stxAddress).then(bet => {
-            setUserBet(bet);
-        }).catch(() => setUserBet(null));
-    }, [stxAddress, poolId]);
+        return () => { cancelled = true; };
+    }, [poolId, stxAddress]);
 
     const refreshPoolData = useCallback(async () => {
         if (isRefreshingRef.current) {
@@ -107,6 +124,9 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
             if (newPool) setPool(newPool);
             setUserBet(newBet);
+            if (newPool) {
+                writeMarketDetail(poolId, stxAddress ?? undefined, newPool, newBet);
+            }
             if (stxAddress) {
                 await refreshActivity();
             }
@@ -264,8 +284,10 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     }
 
     const totalVolume = pool.totalA + pool.totalB;
-    const oddsA = totalVolume > 0 ? ((pool.totalA / totalVolume) * 100).toFixed(1) : 50;
-    const oddsB = totalVolume > 0 ? ((pool.totalB / totalVolume) * 100).toFixed(1) : 50;
+    const oddsAValue = totalVolume > 0 ? (pool.totalA / totalVolume) * 100 : 50;
+    const oddsBValue = totalVolume > 0 ? (pool.totalB / totalVolume) * 100 : 50;
+    const oddsA = formatOdds(oddsAValue);
+    const oddsB = formatOdds(oddsBValue);
 
     return (
         <main className="min-h-screen bg-background text-foreground">
@@ -323,7 +345,7 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <TrendingUp className="w-5 h-5 mx-auto mb-2 text-primary" />
                             <p className="text-sm text-muted-foreground">Total Volume</p>
-                            <p className="font-bold">{stroopsToUnits(totalVolume).toLocaleString()} {TOKEN_SYMBOL}</p>
+                            <p className="font-bold">{formatTokenUnits(stroopsToUnits(totalVolume))}</p>
                         </div>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Users className="w-5 h-5 mx-auto mb-2 text-accent" />
@@ -345,31 +367,43 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
                     {/* Odds Display */}
                     <div className="mb-8">
-                        <p className="text-sm text-muted-foreground mb-2" id="odds-bar-label">Current Odds</p>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                            <p className="text-sm text-muted-foreground" id="odds-bar-label">{t('betting.currentOdds')}</p>
+                            <Tooltip content={t('betting.sharesPayoutInfo')}>
+                                <button
+                                    type="button"
+                                    aria-label={t('betting.sharesPayoutInfoLabel')}
+                                    className="inline-flex items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
+                                >
+                                    <Info className="w-4 h-4" aria-hidden="true" />
+                                </button>
+                            </Tooltip>
+                        </div>
                         <div
                             className="flex h-4 rounded-full overflow-hidden"
                             role="progressbar"
                             aria-labelledby="odds-bar-label"
                             aria-valuemin={0}
                             aria-valuemax={100}
-                            aria-valuenow={Number(oddsA)}
-                            aria-valuetext={`${pool.outcomeA}: ${oddsA}%, ${pool.outcomeB}: ${oddsB}%`}
+                            aria-valuenow={oddsAValue}
+                            aria-valuetext={`${pool.outcomeA}: ${oddsA}, ${pool.outcomeB}: ${oddsB}`}
                         >
                             <div
                                 className="bg-green-500 transition-all"
-                                style={{ width: `${oddsA}%` }}
+                                style={{ width: `${oddsAValue}%` }}
                                 aria-hidden="true"
                             />
                             <div
                                 className="bg-red-500 transition-all"
-                                style={{ width: `${oddsB}%` }}
+                                style={{ width: `${oddsBValue}%` }}
                                 aria-hidden="true"
                             />
                         </div>
                         <div className="flex justify-between mt-2 text-sm">
-                            <span className="text-green-400">{pool.outcomeA}: {oddsA}%</span>
-                            <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
+                            <span className="text-green-400">{pool.outcomeA}: {oddsA}</span>
+                            <span className="text-red-400">{pool.outcomeB}: {oddsB}</span>
                         </div>
+                        <p className="text-xs text-muted-foreground mt-2">{t('betting.sharesPayoutHint')}</p>
                     </div>
 
                     {/* User Bet Summary Card */}
@@ -379,16 +413,16 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>
-                                    <p className="text-xl font-bold">{stroopsToUnits(userBet.amountA).toFixed(2)} {TOKEN_SYMBOL}</p>
+                                    <p className="text-xl font-bold">{formatPayout(stroopsToUnits(userBet.amountA))}</p>
                                 </div>
                                 <div className={`p-3 rounded-lg ${userBet.amountB > 0 ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeB}</p>
-                                    <p className="text-xl font-bold">{stroopsToUnits(userBet.amountB).toFixed(2)} {TOKEN_SYMBOL}</p>
+                                    <p className="text-xl font-bold">{formatPayout(stroopsToUnits(userBet.amountB))}</p>
                                 </div>
                             </div>
                             <div className="mt-3 pt-3 border-t border-primary/20 flex justify-between items-center">
                                 <span className="text-sm text-muted-foreground">Total Staked</span>
-                                <span className="font-bold">{stroopsToUnits(userBet.amountA + userBet.amountB).toFixed(2)} {TOKEN_SYMBOL}</span>
+                                <span className="font-bold">{formatPayout(stroopsToUnits(userBet.amountA + userBet.amountB))}</span>
                             </div>
                             {pool.settled && userHasWinnings && (
                                 <div className="mt-2 text-sm text-green-400">
