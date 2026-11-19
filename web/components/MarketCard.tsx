@@ -8,6 +8,8 @@ import { formatDisplayAddress } from '@/app/lib/address-display';
 import { usePoolFavorites, POOL_FAVORITES_MAX } from '@/app/lib/hooks/usePoolFavorites';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '@/app/lib/hooks/usePoolComparison';
 import CountdownTimer from '@/components/CountdownTimer';
+import SettlementStatusBadge from '@/components/SettlementStatusBadge';
+import { formatMarketDeadline } from '@/app/lib/formatting';
 
 interface MarketCardProps {
   market: ProcessedMarket;
@@ -89,6 +91,12 @@ export default function MarketCard({ market }: MarketCardProps) {
                 {getStatusIcon(market.status)}
                 {getStatusText(market.status)}
               </span>
+              {(market.status === 'settled' || market.status === 'disputed') && (
+                <SettlementStatusBadge
+                  status={market.status}
+                  payoutStatus={market.settlementStatus}
+                />
+              )}
 
               <button
                 type="button"
@@ -226,6 +234,17 @@ export default function MarketCard({ market }: MarketCardProps) {
                 showIcon
               />
             </div>
+          </div>
+
+          <div className="text-xs text-muted-foreground border-t border-muted/20 pt-2">
+            <span className="font-medium">Deadline:</span>{' '}
+            <time dateTime={
+              Number.isFinite(market.expiry) && market.expiry > 0
+                ? new Date(market.expiry * 1000).toISOString()
+                : undefined
+            }>
+              {formatMarketDeadline(market.expiry)}
+            </time>
           </div>
 
           {/* Creator info */}

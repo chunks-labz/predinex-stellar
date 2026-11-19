@@ -39,6 +39,20 @@
   transition-duration: 150ms;
 }
 
+/* Consistent keyboard focus across native and custom controls. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role="button"]:focus-visible,
+[role="checkbox"]:focus-visible,
+[role="tab"]:focus-visible,
+[role="dialog"]:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+}
+
 /* Enhanced hover effects */
 .hover-lift:hover {
   transform: translateY(-2px);

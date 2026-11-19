@@ -90,12 +90,14 @@ export function processMarketData(pool: PoolData, nowSeconds?: number): Processe
     oddsB: odds.oddsB,
     status,
     timeRemaining,
+    expiry: pool.expiry,
     createdAt: pool.createdAt,
     settledAt: pool.settledAt,
     creator: pool.creator,
     participantCount: pool.participantCount,
     assetType: pool.assetType,
     disputed: pool.disputed,
+    settlementStatus: pool.settlementStatus,
   };
 }
 

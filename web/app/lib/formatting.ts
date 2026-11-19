@@ -302,6 +302,25 @@ export function formatTimestamp(
   }
 }
 
+/**
+ * Formats a market deadline with an explicit timezone so deadline text is
+ * consistent and cannot be mistaken for the viewer's local time.
+ */
+export function formatMarketDeadline(expirySeconds: number | undefined): string {
+  if (!Number.isFinite(expirySeconds) || expirySeconds <= 0) return 'Deadline unavailable';
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZoneName: 'short',
+  }).format(new Date(expirySeconds * 1000));
+}
+
 // =============================================================================
 // Number Formatting
 // =============================================================================

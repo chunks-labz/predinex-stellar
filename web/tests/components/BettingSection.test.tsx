@@ -188,6 +188,25 @@ describe('BettingSection', () => {
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
+  it('requires confirmation and shows amount and odds before placing a bet', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    await user.type(screen.getByLabelText(/Enter bet amount/i), '1.5');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+
+    const dialog = screen.getByRole('dialog', { name: /Confirm Your Bet/i });
+    expect(within(dialog).getByText('1.50 XLM')).toBeInTheDocument();
+    expect(within(dialog).getByText('Outcome A')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Current Odds/i)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole('button', { name: /Cancel/i }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(predinexContract.placeBetSoroban).not.toHaveBeenCalled();
+  });
+
   it('calls predinexContract.placeBet with correct parameters when placing bet', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
     vi.mocked(predinexContract.placeBetSoroban).mockResolvedValue({ txHash: '0xbet-1' });
@@ -200,6 +219,7 @@ describe('BettingSection', () => {
 
     const betButton = screen.getByText(/Bet on Outcome A/i);
     await user.click(betButton);
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
 
     await waitFor(() => {
       expect(predinexContract.placeBetSoroban).toHaveBeenCalledWith(
@@ -239,6 +259,11 @@ describe('BettingSection', () => {
     await user.tab();
     expect(document.activeElement).toBe(outcomeA);
     await user.keyboard('{Enter}');
+    expect(screen.getByRole('dialog', { name: /Confirm Your Bet/i })).toBeInTheDocument();
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    await user.keyboard('{Enter}');
     await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
 
     vi.mocked(predinexContract.placeBetSoroban).mockClear();
@@ -249,6 +274,11 @@ describe('BettingSection', () => {
     const outcomeB = screen.getByRole('button', { name: /Bet on Outcome B/i });
     expect(document.activeElement).toBe(outcomeB);
     await user.keyboard('{Space}');
+    expect(screen.getByRole('dialog', { name: /Confirm Your Bet/i })).toBeInTheDocument();
+    await user.tab();
+    await user.tab();
+    await user.tab();
+    await user.keyboard('{Enter}');
     await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
   });
 
@@ -359,6 +389,7 @@ describe('BettingSection', () => {
 
     const betButton = screen.getByText(/Bet on Outcome A/i);
     await user.click(betButton);
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
 
     // Check if loading state is shown (button should be disabled)
     await waitFor(() => {

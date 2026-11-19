@@ -32,14 +32,17 @@ export function BetConfirmationDialog({
   isProcessing = false,
 }: BetConfirmationDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      previouslyFocusedRef.current = document.activeElement as HTMLElement;
       dialogRef.current?.focus();
       // Prevent body scroll
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
+      previouslyFocusedRef.current?.focus();
     }
 
     return () => {
@@ -51,6 +54,21 @@ export function BetConfirmationDialog({
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen && !isProcessing) {
         onClose();
+      }
+      if (e.key === 'Tab' && isOpen) {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        );
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     };
 

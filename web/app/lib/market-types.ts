@@ -18,6 +18,7 @@ export interface PoolData {
   assetType?: string;
   disputed?: boolean;
   frozen?: boolean;
+  settlementStatus?: 'paid' | 'pending';
 }
 
 export interface ProcessedMarket {
@@ -37,6 +38,8 @@ export interface ProcessedMarket {
   participantCount?: number;
   assetType?: string;
   disputed?: boolean;
+  expiry?: number;
+  settlementStatus?: 'paid' | 'pending';
   /** #721 — Optional cover image URL stored in extended pool metadata. */
   coverImage?: string;
   /** #745 — Pool category (crypto, sports, weather, etc). */
@@ -205,6 +208,7 @@ export interface Pool {
   expiry: number;
   status: 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
   participant_count?: number;
+  settlementStatus?: 'paid' | 'pending';
 }
 
 /**
