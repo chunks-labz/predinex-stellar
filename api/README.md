@@ -113,6 +113,25 @@ reflect the filtered set.
 }
 ```
 
+### GET /api/events
+List indexed `place_bet` contract events in ascending ledger order. Use the
+opaque `nextCursor` value to continue from the last event returned; events
+added after the first page will be picked up on a subsequent cursor page when
+their ledger position follows that cursor.
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `cursor` | *(first page)* | Opaque cursor returned as `pagination.nextCursor`; an empty value starts at the beginning |
+| `limit` | `20` | Page size, 1-100; larger values are capped at 100 |
+| `offset` | `0` | Deprecated zero-based offset retained for compatibility; cannot be combined with `cursor` |
+
+The response includes `pagination.nextCursor` when another page is available.
+`offset` and `nextOffset` remain populated for legacy offset requests.
+
+### GET /api/positions
+List current indexed positions. This endpoint keeps its existing `limit` and
+`offset` pagination and optional `market`, `account` and `outcome` filters.
+
 ### POST /api/markets
 Validate a market creation request. Body: `title` (non-empty, at most 100
 bytes), `outcomes` (2-20 unique non-empty strings, each at most 50 bytes) and

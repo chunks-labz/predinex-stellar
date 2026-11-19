@@ -1,13 +1,14 @@
 /**
  * Predinex API — Express application factory.
  *
- * Builds the HTTP server that mounts all eight route modules under `/api/*`
+ * Builds the HTTP server that mounts all route modules under `/api/*`
  * (see #1194, #1197) with authentication and rate limiting applied to every
  * route (see #1196):
  *
  *   /api/budget       budget planner (plan, portfolio, liquidity, fees, risk)
  *   /api/compliance   compliance checks + officer-gated registration
  *   /api/emergency    emergency controls (admin-gated mutations, real txs)
+ *   /api/events       chronologically indexed contract events
  *   /api/gas-estimate gas estimation + optimization suggestions
  *   /api/insurance    insurance pools, quotes, purchases, claims
  *   /api/markets      paginated market list (limit/offset, see #1420)
@@ -31,6 +32,7 @@ import { corsMiddleware } from './config/cors.js';
 import { createBudgetRouter, contractService } from './routes/budget.js';
 import { complianceRouter } from './routes/compliance.js';
 import { emergencyRouter } from './routes/emergency.js';
+import { eventsRouter } from './routes/events.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
 import { createMarketsRouter, type TradeHistorySource } from './routes/markets.js';
@@ -176,11 +178,12 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
     res.json(openApiDoc);
   });
 
-  // 4. Mount routes (all eight modules).
+  // 4. Mount routes.
   // Issue #1295: Balance provider wired above before mounting budget router
   app.use('/api/budget', createBudgetRouter(contractService));
   app.use('/api/compliance', complianceRouter);
   app.use('/api/emergency', emergencyRouter);
+  app.use('/api/events', eventsRouter);
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
   app.use('/api/markets', createMarketsRouter(undefined, undefined, tradeHistorySource));

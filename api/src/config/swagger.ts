@@ -536,6 +536,41 @@ export const openApiDoc = {
         responses: { '200': { description: 'OpenAPI 3.1 JSON' } },
       },
     },
+    '/api/events': {
+      get: {
+        summary: 'List indexed contract events in ledger order',
+        description:
+          'Use the opaque `nextCursor` value to continue chronologically. ' +
+          'Offset pagination remains available for existing clients; cursor and offset cannot be combined.',
+        parameters: [
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'Opaque cursor from the previous response; omit or pass an empty value for the first page',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Page size, 1-100 (default 20)',
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            description: 'Deprecated zero-based offset for legacy clients',
+            schema: { type: 'integer', minimum: 0 },
+          },
+        ],
+        responses: {
+          '200': { description: 'Chronological page of indexed events with a next cursor' },
+          '400': { description: 'Invalid pagination parameters' },
+        },
+      },
+    },
     '/api/budget/plan': {
       post: { summary: 'Create a budget plan', responses: { '200': { description: 'Budget plan' } } },
     },

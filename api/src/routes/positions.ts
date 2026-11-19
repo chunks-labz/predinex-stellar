@@ -31,14 +31,22 @@ import { Router, Request, Response } from 'express';
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
 import { logger, serializeError } from '../lib/logger.js';
 import { withSpan } from '../middleware/tracing.js';
+import { getPositionEventId } from '../types/positions.js';
 import type {
   IndexedPosition,
   PlaceBetEvent,
+  PositionEventCursor,
   PositionFilter,
   PositionSource,
 } from '../types/positions.js';
 
-export type { IndexedPosition, PlaceBetEvent, PositionFilter, PositionSource };
+export type {
+  IndexedPosition,
+  PlaceBetEvent,
+  PositionEventCursor,
+  PositionFilter,
+  PositionSource,
+};
 
 // ---------------------------------------------------------------------------
 // InMemoryPositionSource
@@ -47,15 +55,16 @@ export type { IndexedPosition, PlaceBetEvent, PositionFilter, PositionSource };
 /**
  * In-memory implementation of {@link PositionSource}.
  *
- * Upserts are keyed on `(market, account, outcome)`.  The primary idempotency
- * key is `txHash`; if a position row already carries the same `lastTxHash` as
- * an incoming event the row is returned unchanged.
+ * Upserts are keyed on `(market, account, outcome)`. Event ids are tracked
+ * globally so duplicate deliveries cannot apply a transition twice.
  *
  * Thread-safety: JavaScript is single-threaded; no locking is needed.
  */
 export class InMemoryPositionSource implements PositionSource {
   /** Primary store: `${market}:${account}:${outcome}` → position. */
   private positions: Map<string, IndexedPosition> = new Map();
+  private processedEvents: Map<string, string> = new Map();
+  private events: Map<string, PlaceBetEvent> = new Map();
 
   // -------------------------------------------------------------------------
   // Internal helpers
@@ -78,6 +87,13 @@ export class InMemoryPositionSource implements PositionSource {
     const acc = a.account.localeCompare(b.account);
     if (acc !== 0) return acc;
     return a.outcome - b.outcome;
+  }
+
+  private static compareEvents(a: PlaceBetEvent, b: PlaceBetEvent): number {
+    if (a.ledgerSeq !== b.ledgerSeq) return a.ledgerSeq - b.ledgerSeq;
+    const eventIndex = (a.eventIndex ?? 0) - (b.eventIndex ?? 0);
+    if (eventIndex !== 0) return eventIndex;
+    return getPositionEventId(a).localeCompare(getPositionEventId(b));
   }
 
   private filtered(filter?: PositionFilter): IndexedPosition[] {
@@ -106,51 +122,86 @@ export class InMemoryPositionSource implements PositionSource {
     });
   }
 
+  async listEvents(
+    offset: number,
+    limit: number,
+    cursor?: PositionEventCursor
+  ): Promise<PlaceBetEvent[]> {
+    return withSpan('db.positions.list_events', async () => {
+      const sorted = [...this.events.values()].sort(InMemoryPositionSource.compareEvents);
+      const start = cursor
+        ? sorted.findIndex((event) => InMemoryPositionSource.compareEvents(event, {
+          ...event,
+          ledgerSeq: cursor.ledgerSeq,
+          eventIndex: cursor.eventIndex,
+          eventId: cursor.eventId,
+        }) > 0)
+        : offset;
+      const index = start < 0 ? sorted.length : start;
+      return sorted.slice(index, index + limit).map((event) => ({ ...event }));
+    });
+  }
+
+  async countEvents(): Promise<number> {
+    return withSpan('db.positions.count_events', async () => this.events.size);
+  }
+
+  private applyEvent(event: PlaceBetEvent): IndexedPosition {
+    const eventId = getPositionEventId(event);
+    const processedPositionKey = this.processedEvents.get(eventId);
+    if (processedPositionKey) {
+      const processedPosition = this.positions.get(processedPositionKey);
+      if (!processedPosition) {
+        throw new Error(`Processed event ${eventId} has no indexed position`);
+      }
+      return { ...processedPosition };
+    }
+
+    const key = InMemoryPositionSource.positionKey(event.market, event.account, event.outcome);
+    const existing = this.positions.get(key);
+
+    // Reorg safety: do not let an older ledger replace newer canonical state.
+    if (existing && event.ledgerSeq < existing.lastLedgerSeq) {
+      return { ...existing };
+    }
+
+    const now = new Date().toISOString();
+    const position: IndexedPosition = {
+      market: event.market,
+      account: event.account,
+      outcome: event.outcome,
+      amount: event.amount,
+      totalYes: event.totalYes,
+      totalNo: event.totalNo,
+      lastTxHash: event.txHash,
+      lastLedgerSeq: event.ledgerSeq,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+
+    this.positions.set(key, position);
+    this.processedEvents.set(eventId, key);
+    this.events.set(eventId, { ...event, eventId });
+    return { ...position };
+  }
+
   async upsert(event: PlaceBetEvent): Promise<IndexedPosition> {
     return withSpan('db.positions.upsert', async () => {
-      const key = InMemoryPositionSource.positionKey(event.market, event.account, event.outcome);
-      const existing = this.positions.get(key);
-      const now = new Date().toISOString();
-
-      // Idempotency: same tx already processed, return stored row unchanged.
-      if (existing && existing.lastTxHash === event.txHash) {
-        return { ...existing };
-      }
-
-      // Reorg safety: only update if the incoming ledger is >= the stored one.
-      // (Earlier ledgers from a replay that re-deliver already-superseded
-      // events are ignored to keep the row at the latest canonical state.)
-      if (existing && event.ledgerSeq < existing.lastLedgerSeq) {
-        return { ...existing };
-      }
-
-      const position: IndexedPosition = {
-        market: event.market,
-        account: event.account,
-        outcome: event.outcome,
-        amount: event.amount,
-        totalYes: event.totalYes,
-        totalNo: event.totalNo,
-        lastTxHash: event.txHash,
-        lastLedgerSeq: event.ledgerSeq,
-        createdAt: existing?.createdAt ?? now,
-        updatedAt: now,
-      };
-
-      this.positions.set(key, position);
-      return { ...position };
+      return this.applyEvent(event);
     });
   }
 
   async rollback(latestSafeSeq: number): Promise<number> {
     return withSpan('db.positions.rollback', async () => {
-      let removed = 0;
-      for (const [key, pos] of this.positions.entries()) {
-        if (pos.lastLedgerSeq > latestSafeSeq) {
-          this.positions.delete(key);
-          removed++;
-        }
+      const removed = [...this.positions.values()]
+        .filter((position) => position.lastLedgerSeq > latestSafeSeq).length;
+      for (const [eventId, event] of this.events.entries()) {
+        if (event.ledgerSeq > latestSafeSeq) this.events.delete(eventId);
       }
+      this.positions.clear();
+      this.processedEvents.clear();
+      const canonicalEvents = [...this.events.values()].sort(InMemoryPositionSource.compareEvents);
+      for (const event of canonicalEvents) this.applyEvent(event);
       return removed;
     });
   }
@@ -158,6 +209,8 @@ export class InMemoryPositionSource implements PositionSource {
   /** Test helper: remove all stored positions. */
   clear(): void {
     this.positions.clear();
+    this.processedEvents.clear();
+    this.events.clear();
   }
 
   /** Test helper: return a snapshot of all stored positions in stable order. */

@@ -29,4 +29,5 @@ export * from './routes/emergency.js';
 export * from './routes/gasEstimate.js';
 export * from './routes/referral.js';
 export * from './routes/markets.js';
+export * from './routes/events.js';
 export * from './config/swagger.js';
