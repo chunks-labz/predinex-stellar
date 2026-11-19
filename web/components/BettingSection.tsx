@@ -22,6 +22,7 @@ import { useI18n } from '@/app/lib/i18n';
 import { BetConfirmationDialog } from '@/components/BetConfirmationDialog';
 import { formatOdds, formatPrice } from '@/app/lib/formatting';
 import Tooltip from '@/components/ui/Tooltip';
+import { parseContractError } from '@/app/lib/error-handler';
 
 interface BettingSectionProps {
   pool: Pool;
@@ -48,6 +49,9 @@ export default function BettingSection({
   } | null>(null);
   const [stage, setStage] = useState<TxStage>("idle");
   const [pendingOutcome, setPendingOutcome] = useState<number | null>(null);
+  // #1589 — the failure toast disappears on its own; keep the last failure next
+  // to the bet buttons so the user can read it and retry the same outcome.
+  const [betError, setBetError] = useState<{ outcome: number; message: string } | null>(null);
 
   const STROOPS_PER_XLM = 10_000_000;
 
@@ -185,6 +189,7 @@ export default function BettingSection({
     }
 
     setIsBetting(true);
+    setBetError(null);
 
     try {
       await predinexContract.placeBetSoroban({
@@ -215,6 +220,8 @@ export default function BettingSection({
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
       showError(error);
+      setBetError({ outcome, message: parseContractError(error) });
+      setPendingOutcome(null);
       setStage("idle");
       setFeePrompt(null);
     } finally {
@@ -273,7 +280,7 @@ export default function BettingSection({
         : 0;
 
   return (
-    <div className="bg-muted/30 p-6 rounded-xl border border-border space-y-4">
+    <div className="bg-muted/30 p-4 sm:p-6 rounded-xl border border-border space-y-4">
       {pendingOutcome !== null && (
         <BetConfirmationDialog
           isOpen
@@ -291,7 +298,7 @@ export default function BettingSection({
       {/* Current odds */}
       <div className="p-4 bg-muted/30 rounded-lg border border-border/50">
         <p className="text-sm text-muted-foreground mb-2">{t('betting.currentOdds')}</p>
-        <div className="flex h-3 rounded-full overflow-hidden mb-2">
+        <div className="flex h-3 rounded-full overflow-hidden mb-2" aria-hidden="true">
           <div
             className="bg-green-500 transition-all duration-500"
             style={{ width: `${oddsA}%` }}
@@ -301,12 +308,12 @@ export default function BettingSection({
             style={{ width: `${oddsB}%` }}
           />
         </div>
-        <div className="flex justify-between text-sm">
-          <div className="text-green-400">
+        <div className="flex justify-between gap-3 text-sm">
+          <div className="text-green-400 min-w-0 break-words">
             <span className="font-medium">{pool.outcomeA}</span>
             <span className="ml-1 text-muted-foreground">{oddsA}%</span>
           </div>
-          <div className="text-red-400">
+          <div className="text-red-400 min-w-0 break-words text-right">
             <span className="mr-1 text-muted-foreground">{oddsB}%</span>
             <span className="font-medium">{pool.outcomeB}</span>
           </div>
@@ -342,8 +349,8 @@ export default function BettingSection({
       {/* Wallet info */}
       {address && (
         <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
-          <div className="flex justify-between items-center">
-            <div>
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div className="min-w-0">
               <p className="text-sm text-muted-foreground">{t('betting.connectedWallet')}</p>
               <TruncatedAddress
                 address={address}
@@ -416,7 +423,7 @@ export default function BettingSection({
         {/* #715 — Quick-select buttons for mobile */}
         {quickBetOptions.length > 0 && (
           <div
-            className="flex gap-2 mt-2"
+            className="flex flex-wrap gap-2 mt-2"
             role="group"
             aria-label={t('betting.quickBetAriaLabel')}
           >
@@ -441,7 +448,7 @@ export default function BettingSection({
                   }}
                   disabled={isBetting || isMismatch || unavailable}
                   title={ariaLabel}
-                  className="flex-1 py-2 text-xs font-semibold rounded-lg border border-border bg-muted/50 hover:bg-primary/10 hover:border-primary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
+                  className="flex-1 min-w-[3.5rem] min-h-[44px] py-2 text-xs font-semibold rounded-lg border border-border bg-muted/50 hover:bg-primary/10 hover:border-primary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                   aria-label={ariaLabel}
                 >
                   {option.label}
@@ -473,12 +480,14 @@ export default function BettingSection({
 
       {/* Bet buttons */}
       <div
-        className="grid grid-cols-2 gap-4"
+        className="grid grid-cols-2 gap-3 sm:gap-4"
         role="group"
         aria-label={t('betting.sectionTitle')}
       >
         <button
+          type="button"
           onClick={() => requestBet(0)}
+          aria-busy={isBetting}
           disabled={
             isBetting ||
             isAmountInvalid ||
@@ -489,7 +498,7 @@ export default function BettingSection({
           }
           aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeA)}
           aria-pressed={pendingOutcome === 0}
-          className={`py-4 ${pendingOutcome === 0 ? "ring-4 ring-green-300 " : ""}bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2`}
+          className={`min-h-[44px] py-4 px-3 ${pendingOutcome === 0 ? "ring-4 ring-green-300 " : ""}bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-center break-words focus:outline-none focus-visible:ring-4 focus-visible:ring-green-300`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
@@ -500,7 +509,9 @@ export default function BettingSection({
           )}
         </button>
         <button
+          type="button"
           onClick={() => requestBet(1)}
+          aria-busy={isBetting}
           disabled={
             isBetting ||
             isAmountInvalid ||
@@ -511,7 +522,7 @@ export default function BettingSection({
           }
           aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeB)}
           aria-pressed={pendingOutcome === 1}
-          className={`py-4 ${pendingOutcome === 1 ? "ring-4 ring-red-300 " : ""}bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2`}
+          className={`min-h-[44px] py-4 px-3 ${pendingOutcome === 1 ? "ring-4 ring-red-300 " : ""}bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-center break-words focus:outline-none focus-visible:ring-4 focus-visible:ring-red-300`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
@@ -522,6 +533,37 @@ export default function BettingSection({
           )}
         </button>
       </div>
+
+      {betError && !isBetting && (
+        <div
+          role="alert"
+          className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex flex-col gap-2"
+        >
+          <div className="flex gap-2">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
+            <p className="text-sm text-red-400">
+              Your bet on {betError.outcome === 0 ? pool.outcomeA : pool.outcomeB} did not go through: {betError.message}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-7">
+            <button
+              type="button"
+              onClick={() => requestBet(betError.outcome)}
+              disabled={isAmountInvalid || isMismatch}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => setBetError(null)}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* First-time-user explainer. Kept after the bet controls in the DOM so
           it does not change the primary keyboard flow, but it is focusable. */}

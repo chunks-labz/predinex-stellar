@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useMemo } from 'react';
+import { Suspense, useCallback, useEffect, useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
@@ -13,6 +13,7 @@ import { useMarketDiscovery } from "../lib/hooks/useMarketDiscovery";
 import { useFilterPresets } from "../lib/hooks/useFilterPresets";
 import RouteErrorBoundary from "../../components/RouteErrorBoundary";
 import CompareBadge from '@/components/CompareBadge';
+import { rememberMarketsHref } from "../lib/market-nav";
 
 function MarketsContent() {
   const router = useRouter();
@@ -31,6 +32,12 @@ function MarketsContent() {
     },
     [pathname, queryKey, router],
   );
+
+  // #1590 — remember the filtered list so "Back to markets" on a detail page
+  // returns to the same search, filters and sort.
+  useEffect(() => {
+    rememberMarketsHref(queryKey ? `${pathname}?${queryKey}` : pathname);
+  }, [pathname, queryKey]);
 
   const {
     paginatedMarkets,
@@ -92,7 +99,7 @@ function MarketsContent() {
       <div className="pt-32 pb-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Prediction Markets</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold mb-2">Prediction Markets</h1>
           <p className="text-muted-foreground">
             Discover and participate in decentralized prediction markets on Stellar
           </p>

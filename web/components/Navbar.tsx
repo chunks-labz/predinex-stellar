@@ -25,7 +25,14 @@ export default function Navbar() {
         setIsMounted(true);
     }, []);
 
-    const isActive = (href: string) => pathname === href;
+    // #1590 — nested routes keep their section highlighted (e.g. /markets/12
+    // marks "Markets" as current) so users can tell where they are.
+    const isActive = (href: string) =>
+        href === '/' ? pathname === '/' : pathname === href || !!pathname?.startsWith(`${href}/`);
+    const desktopLinkClass = (href: string) =>
+        `text-sm font-medium transition-colors rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+            isActive(href) ? 'text-primary' : 'text-muted-foreground hover:text-primary'
+        }`;
 
     const closeMenu = () => setIsMenuOpen(false);
 
@@ -45,39 +52,39 @@ export default function Navbar() {
 
                         {/* Navigation Links - Desktop */}
                         <div className="hidden md:flex items-center gap-6" role="navigation">
-                            <Link href="/markets" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="View all markets">
+                            <Link href="/markets" className={desktopLinkClass('/markets')} aria-current={isActive('/markets') ? 'page' : undefined}>
                                 {t('nav.markets')}
                             </Link>
-                            <Link href="/create" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="Create a new prediction market">
+                            <Link href="/create" className={desktopLinkClass('/create')} aria-current={isActive('/create') ? 'page' : undefined}>
                                 {t('nav.create')}
                             </Link>
-                            <Link href="/pools/new" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="Create a new pool">
+                            <Link href="/pools/new" className={desktopLinkClass('/pools/new')} aria-current={isActive('/pools/new') ? 'page' : undefined}>
                                 Create pool
                             </Link>
                             {isConnected && (
-                                <Link href="/transactions" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="View transaction history">
+                                <Link href="/transactions" className={desktopLinkClass('/transactions')} aria-current={isActive('/transactions') ? 'page' : undefined}>
                                     {t('nav.transactions')}
                                 </Link>
                             )}
                             {isConnected && (
-                                <Link href="/activity" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="View activity feed">
+                                <Link href="/activity" className={desktopLinkClass('/activity')} aria-current={isActive('/activity') ? 'page' : undefined}>
                                     {t('nav.activity')}
                                 </Link>
                             )}
                             {isConnected && (
-                                <Link href="/dashboard" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="User dashboard">
+                                <Link href="/dashboard" className={desktopLinkClass('/dashboard')} aria-current={isActive('/dashboard') ? 'page' : undefined}>
                                     {t('nav.dashboard')}
                                 </Link>
                             )}
                             {isConnected && (
-                                <Link href="/favorites" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="View favorite markets">
+                                <Link href="/favorites" className={desktopLinkClass('/favorites')} aria-current={isActive('/favorites') ? 'page' : undefined}>
                                     Favorites
                                 </Link>
                             )}
-                            <Link href="/analytics" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="Platform analytics">
+                            <Link href="/analytics" className={desktopLinkClass('/analytics')} aria-current={isActive('/analytics') ? 'page' : undefined}>
                                 {t('nav.analytics')}
                             </Link>
-                            <Link href="/settings" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors" aria-label="Open settings">
+                            <Link href="/settings" className={desktopLinkClass('/settings')} aria-current={isActive('/settings') ? 'page' : undefined}>
                                 {t('nav.settings')}
                             </Link>
                         </div>
@@ -192,6 +199,7 @@ export default function Navbar() {
                             )}
                             <Link
                                 href="/markets"
+                                aria-current={isActive('/markets') ? 'page' : undefined}
                                 className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                     isActive('/markets')
                                         ? 'bg-primary/10 text-primary'
@@ -203,6 +211,7 @@ export default function Navbar() {
                             </Link>
                             <Link
                                 href="/create"
+                                aria-current={isActive('/create') ? 'page' : undefined}
                                 className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                     isActive('/create')
                                         ? 'bg-primary/10 text-primary'
@@ -214,6 +223,7 @@ export default function Navbar() {
                             </Link>
                             <Link
                                 href="/pools/new"
+                                aria-current={isActive('/pools/new') ? 'page' : undefined}
                                 className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                     isActive('/pools/new')
                                         ? 'bg-primary/10 text-primary'
@@ -226,6 +236,7 @@ export default function Navbar() {
                             {isConnected && (
                                 <Link
                                     href="/transactions"
+                                    aria-current={isActive('/transactions') ? 'page' : undefined}
                                     className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                         isActive('/transactions')
                                             ? 'bg-primary/10 text-primary'
@@ -239,6 +250,7 @@ export default function Navbar() {
                             {isConnected && (
                                 <Link
                                     href="/activity"
+                                    aria-current={isActive('/activity') ? 'page' : undefined}
                                     className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                         isActive('/activity')
                                             ? 'bg-primary/10 text-primary'
@@ -253,6 +265,7 @@ export default function Navbar() {
                                 <>
                                     <Link
                                         href="/dashboard"
+                                        aria-current={isActive('/dashboard') ? 'page' : undefined}
                                         className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                             isActive('/dashboard')
                                                 ? 'bg-primary/10 text-primary'
@@ -264,6 +277,7 @@ export default function Navbar() {
                                     </Link>
                                     <Link
                                         href="/favorites"
+                                        aria-current={isActive('/favorites') ? 'page' : undefined}
                                         className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                             isActive('/favorites')
                                                 ? 'bg-primary/10 text-primary'
@@ -275,6 +289,7 @@ export default function Navbar() {
                                     </Link>
                                     <Link
                                         href="/settings"
+                                        aria-current={isActive('/settings') ? 'page' : undefined}
                                         className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                             isActive('/settings')
                                                 ? 'bg-primary/10 text-primary'
@@ -307,6 +322,7 @@ export default function Navbar() {
                             )}
                             <Link
                                 href="/analytics"
+                                aria-current={isActive('/analytics') ? 'page' : undefined}
                                 className={`block px-3 py-2 text-base font-medium rounded-lg transition-colors ${
                                     isActive('/analytics')
                                         ? 'bg-primary/10 text-primary'
@@ -327,6 +343,7 @@ export default function Navbar() {
                     <div className="flex items-center justify-around h-16 max-w-7xl mx-auto w-full px-2">
                         <Link
                             href="/"
+                            aria-current={isActive('/') ? 'page' : undefined}
                             className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
                                 isActive('/')
                                     ? 'text-primary bg-primary/10'
@@ -339,8 +356,9 @@ export default function Navbar() {
                         </Link>
                         <Link
                             href="/markets"
+                            aria-current={isActive('/markets') ? 'page' : undefined}
                             className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
-                                isActive('/markets') || pathname?.startsWith('/markets/')
+                                isActive('/markets')
                                     ? 'text-primary bg-primary/10'
                                     : 'text-muted-foreground hover:text-primary'
                             }`}
@@ -352,6 +370,7 @@ export default function Navbar() {
                         {isConnected ? (
                             <Link
                                 href="/dashboard"
+                                aria-current={isActive('/dashboard') ? 'page' : undefined}
                                 className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
                                     isActive('/dashboard')
                                         ? 'text-primary bg-primary/10'
@@ -375,6 +394,7 @@ export default function Navbar() {
                         {isConnected ? (
                             <Link
                                 href="/activity"
+                                aria-current={isActive('/activity') ? 'page' : undefined}
                                 className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
                                     isActive('/activity')
                                         ? 'text-primary bg-primary/10'
@@ -388,6 +408,7 @@ export default function Navbar() {
                         ) : (
                             <Link
                                 href="/analytics"
+                                aria-current={isActive('/analytics') ? 'page' : undefined}
                                 className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
                                     isActive('/analytics')
                                         ? 'text-primary bg-primary/10'
@@ -401,6 +422,7 @@ export default function Navbar() {
                         )}
                         <Link
                             href="/settings"
+                            aria-current={isActive('/settings') ? 'page' : undefined}
                             className={`flex flex-col items-center justify-center gap-0.5 min-w-[3.5rem] p-1.5 rounded-lg transition-colors ${
                                 isActive('/settings')
                                     ? 'text-primary bg-primary/10'
