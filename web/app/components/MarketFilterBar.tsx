@@ -97,6 +97,11 @@ export default function MarketFilterBar({
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <SlidersHorizontal className="h-4 w-4 text-primary" />
           Filters
+          {hasActiveFilters && (
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+              Active
+            </span>
+          )}
         </div>
         <button
           type="button"

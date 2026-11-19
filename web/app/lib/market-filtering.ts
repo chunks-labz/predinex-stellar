@@ -183,14 +183,15 @@ export function filterAndSortMarkets(
   const sorted = [...filtered];
   switch (normalized.sortBy) {
     case 'volume':
-      sorted.sort((a, b) => b.totalVolume - a.totalVolume || b.createdAt - a.createdAt);
+      sorted.sort((a, b) => b.totalVolume - a.totalVolume || b.createdAt - a.createdAt || b.poolId - a.poolId);
       break;
     case 'participants':
       sorted.sort(
         (a, b) =>
           (b.participantCount ?? 0) - (a.participantCount ?? 0) ||
           b.totalVolume - a.totalVolume ||
-          b.createdAt - a.createdAt,
+          b.createdAt - a.createdAt ||
+          b.poolId - a.poolId,
       );
       break;
     case 'ending-soon':
@@ -199,8 +200,14 @@ export function filterAndSortMarkets(
         const bActive = b.status === 'active' && b.timeRemaining !== null;
         if (aActive && !bActive) return -1;
         if (bActive && !aActive) return 1;
-        if (aActive && bActive) return (a.timeRemaining ?? Infinity) - (b.timeRemaining ?? Infinity);
-        return b.createdAt - a.createdAt;
+        if (aActive && bActive) {
+          return (
+            (a.timeRemaining ?? Infinity) - (b.timeRemaining ?? Infinity) ||
+            b.totalVolume - a.totalVolume ||
+            b.poolId - a.poolId
+          );
+        }
+        return b.createdAt - a.createdAt || b.poolId - a.poolId;
       });
       break;
     case 'newest':

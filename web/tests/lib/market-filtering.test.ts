@@ -114,4 +114,16 @@ describe('market filtering', () => {
     expect(hasActiveMarketFilters(DEFAULT_MARKET_FILTERS)).toBe(false);
     expect(marketFiltersToParams(DEFAULT_MARKET_FILTERS).toString()).toBe('');
   });
+
+  it('uses volume as deterministic tiebreaker when ending-soon timeRemaining matches', () => {
+    const markets = [
+      market({ poolId: 10, status: 'active', timeRemaining: 1000, totalVolume: 10_000_000 }),
+      market({ poolId: 11, status: 'active', timeRemaining: 1000, totalVolume: 50_000_000 }),
+      market({ poolId: 12, status: 'settled', timeRemaining: 500, totalVolume: 90_000_000 }),
+    ];
+
+    expect(
+      filterAndSortMarkets(markets, { ...baseFilters, sortBy: 'ending-soon' }).map((m) => m.poolId),
+    ).toEqual([11, 10, 12]);
+  });
 });

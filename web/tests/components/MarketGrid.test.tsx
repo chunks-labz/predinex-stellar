@@ -114,6 +114,33 @@ describe('MarketGrid Component (#1446)', () => {
     expect(createLink).toBeInTheDocument();
   });
 
+  it('renders filter-only empty state and clears loading skeleton once markets load', () => {
+    const { rerender } = renderWithProviders(
+      <MarketGrid
+        markets={[]}
+        isLoading={true}
+        error={null}
+        onRetry={mockRetry}
+      />
+    );
+    expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
+
+    rerender(
+      <MarketGrid
+        markets={[]}
+        isLoading={false}
+        error={null}
+        onRetry={mockRetry}
+        onResetFilters={mockResetFilters}
+        searchQuery=""
+        hasFilters={true}
+      />
+    );
+    expect(screen.queryByText('Loading markets…')).not.toBeInTheDocument();
+    expect(screen.getByText('No Matching Markets')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument();
+  });
+
   it('uses responsive grid classes that keep tablet cards from overflowing', () => {
     // Tablet widths (640–1024px) must resolve to two columns, and each item
     // needs min-w-0 so long titles cannot stretch its grid track.
