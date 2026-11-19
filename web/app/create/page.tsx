@@ -37,6 +37,7 @@ export default function CreateMarket() {
     onStageChange: onTransactionStageChange,
     showError,
     showSuccess,
+    dismiss,
   } = useTransactionToast();
   const searchParams = useSearchParams();
   const wizard = useCreateWizard();
@@ -48,6 +49,14 @@ export default function CreateMarket() {
     feeStroops: string;
     resolve: (v: boolean) => void;
   } | null>(null);
+  // Only offer "continue where you left off" for a draft restored on arrival,
+  // not for the draft being edited right now.
+  const [showRestoredDraft, setShowRestoredDraft] = useState(false);
+
+  useEffect(() => {
+    if (wizard.hasSavedDraft && wizard.step > 1) setShowRestoredDraft(true);
+    // Mount-only: later edits must not re-open the banner.
+  }, []);
 
   useEffect(() => {
     if (deepLinkHandled) return;
@@ -59,7 +68,13 @@ export default function CreateMarket() {
 
     let cancelled = false;
     (async () => {
-      const publicTemplates = await predinexReadApi.getPublicTemplates();
+      let publicTemplates: Awaited<ReturnType<typeof predinexReadApi.getPublicTemplates>> = [];
+      try {
+        publicTemplates = await predinexReadApi.getPublicTemplates();
+      } catch (error) {
+        // Saved (local) templates can still resolve without the network.
+        log.warn("Failed to load public templates for deep link:", error);
+      }
       if (cancelled) return;
       const savedTemplates = loadSavedTemplates();
       const applied = wizard.applyDeepLinkTemplate(
@@ -111,12 +126,14 @@ export default function CreateMarket() {
       return;
     }
 
-    const { valid } = wizard.validateAll();
+    // Branch on the fresh result: `wizard.errors` still holds the previous
+    // render's state here, which sent users to the wrong step.
+    const { valid, errors } = wizard.validateAll();
     if (!valid) {
-      if (wizard.errors.title || wizard.errors.description) {
+      if (errors.title || errors.description) {
         wizard.goTo(2);
       } else if (
-        Object.keys(wizard.errors).some((key) => key.startsWith("outcome"))
+        Object.keys(errors).some((key) => key.startsWith("outcome"))
       ) {
         wizard.goTo(3);
       } else {
@@ -160,7 +177,8 @@ export default function CreateMarket() {
       // #721 — If any extended metadata fields are filled and we decoded the pool ID,
       // submit them as a second transaction (best-effort, non-blocking on error).
       const { resolutionCriteria, externalLinks, coverImage } = wizard.draft;
-      if (poolId && (resolutionCriteria || externalLinks || coverImage)) {
+      // Pool IDs start at 0, so test for presence rather than truthiness.
+      if (poolId != null && (resolutionCriteria || externalLinks || coverImage)) {
         try {
           await predinexContract.setPoolExtMetadataSoroban({
             wallet,
@@ -178,13 +196,29 @@ export default function CreateMarket() {
         }
       }
 
+      if (wizard.draft.saveAsTemplate) {
+        try {
+          saveTemplateToLocalStorage(wizard.draft.title, wizard.draft);
+        } catch (templateError) {
+          log.warn("Saving the pool as a template failed:", templateError);
+        }
+      }
+
       setTxId(txHash);
+      setShowRestoredDraft(false);
       wizard.resetDraft();
       invalidateOnCreatePool();
       showSuccess("Pool created successfully!");
     } catch (error) {
-      log.error("Failed to create pool:", error);
-      showError(error instanceof Error ? error.message : "Unknown error");
+      const message = error instanceof Error ? error.message : "Unknown error";
+      if (message === "Transaction cancelled by user") {
+        // Declining the fee prompt is a choice, not a failure.
+        dismiss();
+        showToast("Pool creation cancelled", "info");
+      } else {
+        log.error("Failed to create pool:", error);
+        showError(message);
+      }
     } finally {
       setIsSubmitting(false);
       setStage("idle");
@@ -237,7 +271,7 @@ export default function CreateMarket() {
               </div>
             )}
 
-            {wizard.hasSavedDraft && wizard.step > 1 && (
+            {showRestoredDraft && wizard.hasSavedDraft && wizard.step > 1 && (
               <div
                 role="status"
                 className="mb-6 p-4 rounded-xl border border-primary/30 bg-primary/5 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
@@ -248,7 +282,7 @@ export default function CreateMarket() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => wizard.goTo(wizard.step)}
+                  onClick={() => setShowRestoredDraft(false)}
                   className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 shrink-0"
                 >
                   Continue editing

@@ -146,7 +146,7 @@ describe('CSV export of real-row-shaped ActivityItems', () => {
       functionName: 'place_bet',
       timestamp: Math.floor(Date.parse('2026-05-31T12:00:00Z') / 1000),
       status: 'success',
-      amount: 2_500_000,
+      amount: 25_000_000, // stroops: 25_000_000 / 10^7 = 2.5 tokens
       poolId: 7,
       poolTitle: 'Will BTC exceed 100k by 2027?',
       explorerUrl: 'https://explorer.example/tx/0xabcdef',
@@ -154,7 +154,7 @@ describe('CSV export of real-row-shaped ActivityItems', () => {
     };
   }
 
-  it('toExportRecords converts microSTX → STX and ISO timestamps', () => {
+  it('toExportRecords converts stroops → token units and ISO timestamps', () => {
     const rows = [row()];
     const [record] = toExportRecords(rows);
     expect(record.poolId).toBe(7);
@@ -167,7 +167,7 @@ describe('CSV export of real-row-shaped ActivityItems', () => {
 
   it('activitiesToCSV emits a header row and escapes commas/quotes in pool titles', () => {
     const rows = [
-      row({ poolTitle: 'Will it rain, "maybe"?', amount: 10_000_000 }),
+      row({ poolTitle: 'Will it rain, "maybe"?', amount: 100_000_000 }),
       row({ type: 'winnings-claimed', amount: undefined }),
     ];
     const csv = activitiesToCSV(rows);

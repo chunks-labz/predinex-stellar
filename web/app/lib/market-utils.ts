@@ -42,10 +42,10 @@ export function calculateOdds(totalA: bigint, totalB: bigint): { oddsA: number; 
   const total = totalA + totalB;
   if (total === BigInt(0)) return { oddsA: 50, oddsB: 50 };
 
-  return {
-    oddsA: Math.round((Number(totalA) / Number(total)) * 100),
-    oddsB: Math.round((Number(totalB) / Number(total)) * 100)
-  };
+  // Derive B from A so the pair always sums to 100. Rounding each side on its
+  // own turns a 12.5 / 87.5 split into 13 / 88, overflowing the odds bar.
+  const oddsA = Math.round((Number(totalA) / Number(total)) * 100);
+  return { oddsA, oddsB: 100 - oddsA };
 }
 
 /**

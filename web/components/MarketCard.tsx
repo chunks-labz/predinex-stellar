@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
+import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
 import { formatOdds, formatTokenAmount } from '@/app/lib/formatting';
 import { formatDisplayAddress } from '@/app/lib/address-display';
-import { usePoolFavorites } from '@/app/lib/hooks/usePoolFavorites';
+import { usePoolFavorites, POOL_FAVORITES_MAX } from '@/app/lib/hooks/usePoolFavorites';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '@/app/lib/hooks/usePoolComparison';
 import CountdownTimer from '@/components/CountdownTimer';
 
@@ -14,8 +14,9 @@ interface MarketCardProps {
 }
 
 export default function MarketCard({ market }: MarketCardProps) {
-  const { isFavorite, toggleFavorite } = usePoolFavorites();
-  const favorite = isFavorite(market.poolId);
+  const favorites = usePoolFavorites();
+  const favorite = favorites.isFavorite(market.poolId);
+  const favoriteDisabled = !favorite && favorites.atCapacity;
   const compare = usePoolComparison();
   const isCompared = compare.isSelected(market.poolId);
   const compareDisabled = !isCompared && compare.atCapacity;
@@ -93,23 +94,35 @@ export default function MarketCard({ market }: MarketCardProps) {
                 type="button"
                 aria-label={favorite ? `Unfavorite pool #${market.poolId}` : `Favorite pool #${market.poolId}`}
                 aria-pressed={favorite}
-                title={favorite ? 'Remove bookmark' : 'Bookmark pool'}
+                aria-disabled={favoriteDisabled || undefined}
+                title={
+                  favorite
+                    ? 'Remove bookmark'
+                    : favoriteDisabled
+                      ? `You can bookmark at most ${POOL_FAVORITES_MAX} pools`
+                      : 'Bookmark pool'
+                }
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  toggleFavorite(market.poolId);
+                  if (favoriteDisabled) return;
+                  favorites.toggleFavorite(market.poolId);
                 }}
                 className={`h-11 w-11 flex items-center justify-center rounded-lg border transition-colors shrink-0 ${
                   favorite
                     ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400 hover:bg-yellow-400/15'
-                    : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    : favoriteDisabled
+                      ? 'bg-muted/20 border-border/40 text-muted-foreground/50 cursor-not-allowed'
+                      : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
               >
-                {favorite ? (
-                  <Star className="w-5 h-5" fill="currentColor" strokeWidth={2} aria-hidden="true" />
-                ) : (
-                  <StarOff className="w-5 h-5" aria-hidden="true" />
-                )}
+                {/* Outline star = not bookmarked; a crossed-out star read as "can't bookmark". */}
+                <Star
+                  className="w-5 h-5"
+                  fill={favorite ? 'currentColor' : 'none'}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </button>
             </div>
           </div>
@@ -206,7 +219,9 @@ export default function MarketCard({ market }: MarketCardProps) {
             </div>
             <div className="flex items-center gap-1 text-muted-foreground shrink-0">
               <CountdownTimer
-                secondsRemaining={market.status === 'expired' ? 0 : market.timeRemaining}
+                secondsRemaining={
+                  market.timeRemaining ?? (market.status === 'active' ? null : 0)
+                }
                 settled={market.status === 'settled'}
                 showIcon
               />

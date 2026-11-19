@@ -490,7 +490,7 @@ export const openApiDoc = {
   info: {
     title: 'PrediNx Budget Planner API',
     version: '1.0.0',
-    description: 'RESTful API for PrediNx prediction market protocol - budget, compliance, emergency, gas estimation, insurance, referral, reputation, and simulation modules',
+    description: 'RESTful API for PrediNx prediction market protocol. Public routes are rate limited per IP or registered API key. Configure RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS, and RATE_LIMIT_STRICT_MAX_REQUESTS; throttled requests return 429 with Retry-After.',
     contact: {
       name: 'PrediNx Dev Team',
       email: 'predinex-dev@stellar.org',
@@ -514,20 +514,61 @@ export const openApiDoc = {
   paths: {
     '/health': {
       get: {
-        summary: 'Liveness probe',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/health': {
       get: {
-        summary: 'Liveness probe under the API prefix',
-        responses: { '200': { description: 'Process is up' } },
+        summary: 'Dependency health probe under the API prefix',
+        responses: {
+          '200': { description: 'Process and critical dependencies are healthy' },
+          '503': { description: 'One or more critical dependencies are degraded' },
+        },
       },
     },
     '/api/openapi.json': {
       get: {
         summary: 'OpenAPI document for this server',
         responses: { '200': { description: 'OpenAPI 3.1 JSON' } },
+      },
+    },
+    '/api/events': {
+      get: {
+        summary: 'List indexed contract events in ledger order',
+        description:
+          'Use the opaque `nextCursor` value to continue chronologically. ' +
+          'Offset pagination remains available for existing clients; cursor and offset cannot be combined.',
+        parameters: [
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'Opaque cursor from the previous response; omit or pass an empty value for the first page',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'limit',
+            in: 'query',
+            required: false,
+            description: 'Page size, 1-100 (default 20)',
+            schema: { type: 'integer', minimum: 1, default: 20 },
+          },
+          {
+            name: 'offset',
+            in: 'query',
+            required: false,
+            description: 'Deprecated zero-based offset for legacy clients',
+            schema: { type: 'integer', minimum: 0 },
+          },
+        ],
+        responses: {
+          '200': { description: 'Chronological page of indexed events with a next cursor' },
+          '400': { description: 'Invalid pagination parameters' },
+        },
       },
     },
     '/api/budget/plan': {
@@ -855,8 +896,8 @@ export const openApiDoc = {
       get: {
         summary: 'Cancellation/restoration audit history (admin only)',
         description:
-          'Newest-first audit entries for every market cancellation and restoration. Optionally filter to one ' +
-          'market with `marketId`.',
+          'Newest-first audit entries for every market cancellation and restoration. Supports cursor pagination + ' +
+          'filters for market, actor, action, and date range. Example: GET /api/markets/admin/audit?actor=admin&action=cancelled&from=2025-01-01T00:00:00.000Z&limit=50',
         security: [{ apiKey: [] }],
         parameters: [
           {
@@ -867,10 +908,46 @@ export const openApiDoc = {
             schema: { type: 'integer', minimum: 0 },
           },
           {
+            name: 'actor',
+            in: 'query',
+            required: false,
+            description: 'Case-insensitive substring filter on the actor address or admin name',
+            schema: { type: 'string', example: 'admin' },
+          },
+          {
+            name: 'action',
+            in: 'query',
+            required: false,
+            description: 'Filter by audit action type',
+            schema: { type: 'string', enum: ['cancelled', 'restored'], example: 'cancelled' },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            required: false,
+            description: 'Inclusive lower bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-01-01T00:00:00.000Z' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            required: false,
+            description: 'Inclusive upper bound for the event timestamp (ISO-8601)',
+            schema: { type: 'string', format: 'date-time', example: '2025-12-31T23:59:59.999Z' },
+          },
+          {
+            name: 'cursor',
+            in: 'query',
+            required: false,
+            description: 'Opaque cursor for the next page; use the previous response\'s nextCursor value',
+            schema: { type: 'string', example: '42' },
+          },
+          {
             name: 'limit',
             in: 'query',
             required: false,
-            schema: { type: 'integer', minimum: 1, default: 20 },
+            description: 'Maximum records to return; capped server-side at 100',
+            schema: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
           },
           {
             name: 'offset',
@@ -892,7 +969,23 @@ export const openApiDoc = {
                       type: 'array',
                       items: { $ref: '#/components/schemas/MarketAuditEntry' },
                     },
-                    pagination: { $ref: '#/components/schemas/MarketPagination' },
+                    pagination: {
+                      type: 'object',
+                      properties: {
+                        total: { type: 'integer', example: 42 },
+                        limit: { type: 'integer', example: 20 },
+                        offset: { type: 'integer', example: 0 },
+                        count: { type: 'integer', example: 20 },
+                        hasMore: { type: 'boolean', example: true },
+                        nextOffset: { type: 'integer', nullable: true, example: 20 },
+                        prevOffset: { type: 'integer', nullable: true, example: null },
+                        page: { type: 'integer', example: 1 },
+                        pageSize: { type: 'integer', example: 20 },
+                        nextCursor: { type: 'string', nullable: true, example: '42' },
+                        prevCursor: { type: 'string', nullable: true, example: null },
+                        cursor: { type: 'string', nullable: true, example: '12' },
+                      },
+                    },
                     timestamp: { $ref: '#/components/schemas/IsoTimestamp' },
                   },
                 },

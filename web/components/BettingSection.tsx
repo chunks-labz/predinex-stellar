@@ -10,7 +10,7 @@ import { useToast } from '@/providers/ToastProvider';
 import { predinexContract } from '@/app/lib/adapters/predinex-contract';
 import { invalidateOnPlaceBet } from '@/app/lib/cache-invalidation';
 import { toastMessages, showToastPayload } from '@/lib/toast-messages';
-import { validateBetAmount } from '@/lib/validators';
+import { validateBetAmount, clampBetAmount } from '@/lib/validators';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
 import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
@@ -64,6 +64,36 @@ export default function BettingSection({
 
   const { isMismatch, expectedNetworkName } = useNetworkMismatch();
 
+  // #1534 — the quick-select buttons used to fill in a raw percentage of the
+  // wallet balance, which could land below the pool minimum or above the pool
+  // maximum and leave the form permanently invalid (the buttons stayed
+  // disabled with no obvious reason). Every quick amount is clamped into the
+  // allowed range instead, and a "Max" option bets the largest amount the
+  // wallet and the pool allow.
+  const quickBetOptions = useMemo(() => {
+    if (walletBalance === null || walletBalance <= 0) return [];
+
+    const limits = {
+      minBet: hasMinBet ? minBetXlm : undefined,
+      maxBet: hasMaxBet ? maxBetXlm ?? undefined : undefined,
+      balance: walletBalance,
+    };
+
+    const options = [10, 25, 50, 100].map((pct) => ({
+      key: `pct-${pct}`,
+      label: `${pct}%`,
+      amount: clampBetAmount((walletBalance * pct) / 100, limits),
+    }));
+
+    options.push({
+      key: 'max',
+      label: t('betting.quickBetMaxLabel'),
+      amount: clampBetAmount(walletBalance, limits),
+    });
+
+    return options;
+  }, [walletBalance, hasMinBet, minBetXlm, hasMaxBet, maxBetXlm, t]);
+
   // Inline, client-side validation of the bet amount. Returns a human-readable
   // error string, or null when the amount is valid for this pool. Runs on every
   // change/blur so the form can show feedback and disable submission before the
@@ -93,6 +123,18 @@ export default function BettingSection({
 
   const isAmountInvalid = amountError !== null;
   const showAmountError = amountTouched && isAmountInvalid;
+  // #1538 — the bet buttons are disabled while the amount is empty, but the
+  // error message only appeared after blur, so an untouched field left the user
+  // staring at two permanently disabled buttons with no explanation. Show a
+  // quiet hint until they interact, then hand over to the error message.
+  const showAmountHint = !amountTouched && betAmount.trim() === '';
+  const describedBy = [
+    'bet-limits',
+    showAmountError ? 'bet-amount-error' : null,
+    showAmountHint ? 'bet-amount-hint' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const placeBet = async (outcome: number) => {
     if (!isConnected) {
@@ -323,28 +365,42 @@ export default function BettingSection({
             isMismatch
           }
           aria-label={t('betting.amountAriaLabel')}
-          aria-describedby="bet-limits"
+          aria-describedby={describedBy}
+          aria-invalid={showAmountError}
           className="w-full px-4 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
         />
-        {/* #715 — Quick-select percentage buttons for mobile */}
-        {walletBalance !== null && walletBalance > 0 && (
+        {/* #715 — Quick-select buttons for mobile */}
+        {quickBetOptions.length > 0 && (
           <div
             className="flex gap-2 mt-2"
             role="group"
             aria-label={t('betting.quickBetAriaLabel')}
           >
-            {[10, 25, 50, 100].map((pct) => {
-              const amt = Math.floor(((walletBalance * pct) / 100) * 10) / 10;
+            {quickBetOptions.map((option) => {
+              const unavailable = option.amount === null;
+              const ariaLabel = unavailable
+                ? t('betting.quickBetUnavailableAriaLabel').replace('{label}', option.label)
+                : t('betting.quickBetAmountAriaLabel')
+                    .replace('{amount}', String(option.amount))
+                    .replace('{label}', option.label);
               return (
                 <button
-                  key={pct}
+                  key={option.key}
                   type="button"
-                  onClick={() => setBetAmount(String(amt))}
-                  disabled={isBetting || isMismatch}
+                  onClick={() => {
+                    if (option.amount === null) return;
+                    setBetAmount(String(option.amount));
+                    // Show the validation feedback right away: a quick amount
+                    // that the pool rejects should not leave the user with a
+                    // silently disabled button.
+                    setAmountTouched(true);
+                  }}
+                  disabled={isBetting || isMismatch || unavailable}
+                  title={ariaLabel}
                   className="flex-1 py-2 text-xs font-semibold rounded-lg border border-border bg-muted/50 hover:bg-primary/10 hover:border-primary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                  aria-label={t('betting.quickBetButtonAriaLabel').replace('{pct}', String(pct))}
+                  aria-label={ariaLabel}
                 >
-                  {pct}%
+                  {option.label}
                 </button>
               );
             })}
@@ -359,8 +415,13 @@ export default function BettingSection({
             ? `, ${t('betting.maxLabel').replace('{max}', String(maxBetXlm))}`
             : `, ${t('betting.noMaximum')}`}
         </p>
+        {showAmountHint && (
+          <p id="bet-amount-hint" className="text-sm text-muted-foreground mt-1">
+            {t('betting.amountHint')}
+          </p>
+        )}
         {showAmountError && amountError && (
-          <p role="alert" className="text-sm text-red-500 mt-1">
+          <p id="bet-amount-error" role="alert" className="text-sm text-red-500 mt-1">
             {amountError}
           </p>
         )}

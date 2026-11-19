@@ -4,8 +4,8 @@
  * A position row is written every time a `place_bet` / PositionPlaced event is
  * indexed.  Rows are keyed by (market, account, outcome) and upserted, so the
  * stored amount always reflects the latest cumulative balance for that slot.
- * Duplicate events (same tx_hash) are ignored, making the indexer idempotent
- * over re-plays and reorgs.
+ * Duplicate ledger events are ignored by event id, making the indexer
+ * idempotent over replays and reorgs.
  *
  * Contract event reference (contracts/predinex/src/events.rs – BetEvent):
  *   Topics: (Symbol("place_bet"), version, user: Address, pool_id: u32)
@@ -40,8 +40,6 @@ export interface IndexedPosition {
   totalNo: string;
   /**
    * The transaction hash of the *latest* event that updated this row.
-   * Used for idempotency: an event whose tx_hash already appears in the store
-   * is silently skipped.
    */
   lastTxHash: string;
   /** Ledger sequence number of the last indexed event. Used for reorg detection. */
@@ -61,6 +59,10 @@ export interface IndexedPosition {
  * decoded by the off-chain indexer before being handed to {@link PositionIndexer}.
  */
 export interface PlaceBetEvent {
+  /** Stable ledger event id supplied by the event stream when available. */
+  eventId?: string;
+  /** Position within the ledger when the event source supplies it. */
+  eventIndex?: number;
   /** Pool / market id from the event topics. */
   market: number;
   /** Bettor address from the event topics. */
@@ -73,10 +75,26 @@ export interface PlaceBetEvent {
   totalYes: string;
   /** Cumulative pool total for outcome 1 after this bet. */
   totalNo: string;
-  /** Transaction hash; used as the idempotency key. */
+  /** Transaction hash containing this event. */
   txHash: string;
   /** Ledger sequence number when the event was emitted. */
   ledgerSeq: number;
+}
+
+/** Keyset cursor for chronological event traversal. */
+export interface PositionEventCursor {
+  ledgerSeq: number;
+  eventIndex: number;
+  eventId: string;
+}
+
+/**
+ * Use the stream's event id when present; the composite fallback keeps older
+ * producers idempotent while distinguishing events within one transaction.
+ */
+export function getPositionEventId(event: PlaceBetEvent): string {
+  return event.eventId?.trim()
+    || `${event.ledgerSeq}:${event.eventIndex ?? 0}:${event.txHash}:${event.market}:${event.account}:${event.outcome}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +122,7 @@ export interface PositionFilter {
  * Backing store for indexed positions.
  *
  * Implementations are expected to satisfy these invariants:
- *  - `upsert` is idempotent: re-processing an event with the same `txHash`
+ *  - `upsert` is idempotent: re-processing an event with the same event id
  *    must not change stored data.
  *  - The primary key is (market, account, outcome).  When the key already
  *    exists the stored `amount` is updated to `event.amount` and the
@@ -123,10 +141,20 @@ export interface PositionSource {
    */
   list(offset: number, limit: number, filter?: PositionFilter): Promise<IndexedPosition[]>;
 
+  /** Returns indexed events in ledger order, or strictly after the cursor. */
+  listEvents(
+    offset: number,
+    limit: number,
+    cursor?: PositionEventCursor
+  ): Promise<PlaceBetEvent[]>;
+
+  /** Returns the number of indexed events. */
+  countEvents(): Promise<number>;
+
   /**
    * Upsert a position from a decoded `place_bet` event.
    *
-   * Returns the upserted row. If the `txHash` was already processed the
+   * Returns the upserted row. If the event id was already processed the
    * existing row is returned unchanged (idempotency).
    */
   upsert(event: PlaceBetEvent): Promise<IndexedPosition>;

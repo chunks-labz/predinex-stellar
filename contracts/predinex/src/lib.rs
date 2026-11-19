@@ -33,11 +33,13 @@ mod integration_tests;
 mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
+mod multi_outcome_tests;
 mod multi_user_tests;
 mod pause_tests;
 mod pool_categories_tests;
 mod protocol_fee_tests;
 mod settlement_tests;
+mod stale_oracle_tests;
 mod test;
 mod validation_hardening_tests;
 mod validation_prop_tests;
@@ -230,6 +232,21 @@ fn emit_user_exposure_config_set(
             large_bet_cooldown_secs,
             large_bet_threshold,
         ),
+    );
+}
+
+/// #1444 — Emitted when the oracle staleness threshold is updated.
+fn emit_stale_oracle_threshold_set(
+    env: &Env,
+    old_threshold_secs: u64,
+    new_threshold_secs: u64,
+) {
+    env.events().publish(
+        (
+            Symbol::new(env, "stale_oracle_threshold_set"),
+            event_version(env),
+        ),
+        (old_threshold_secs, new_threshold_secs),
     );
 }
 
@@ -1435,6 +1452,10 @@ const DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS: u64 = 0;
 pub const DEFAULT_TWAP_PERIOD_SECS: u64 = 3_600;
 /// Minimum time between TWAP snapshots for a given pool/outcome.
 pub const MIN_UPDATE_INTERVAL: u64 = 60;
+
+/// #1444 — Default oracle staleness threshold: 0 (disabled). Set via
+/// `set_stale_oracle_threshold` by the treasury recipient.
+const DEFAULT_STALE_ORACLE_THRESHOLD_SECS: u64 = 0;
 
 pub const GRACE_PERIOD_SECS: u64 = 7 * 24 * 60 * 60; // 7 days grace period for refunds
 
@@ -2655,7 +2676,9 @@ impl PredinexContract {
             .set(&DataKey::FeeRecipient, &treasury_recipient);
         env.storage().persistent().set(&DataKey::FeeRate, &0u32);
         env.storage().persistent().set(&DataKey::Treasury, &0i128);
-        env.storage().persistent().set(&DataKey::TreasuryToken(token.clone()), &0i128);
+        env.storage()
+            .persistent()
+            .set(&DataKey::TreasuryToken(token.clone()), &0i128);
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage()
             .persistent()
@@ -3336,6 +3359,51 @@ impl PredinexContract {
                 .get::<_, u64>(&DataKey::LargePoolCoolingPeriodSecs)
                 .unwrap_or(DEFAULT_LARGE_POOL_COOLING_PERIOD_SECS),
         }
+    }
+
+    /// #1444 — Configure the oracle staleness threshold.
+    ///
+    /// Only treasury recipient may call this. When `threshold_secs > 0`,
+    /// `place_bet` and `settle_pool` reject operations on any pool whose last
+    /// oracle (`update_twap`) update is older than the threshold. A value of
+    /// `0` disables the check entirely (default).
+    pub fn set_stale_oracle_threshold(
+        env: Env,
+        caller: Address,
+        threshold_secs: u64,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+
+        let old_threshold: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS);
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::StaleOracleThresholdSecs, &threshold_secs);
+
+        emit_stale_oracle_threshold_set(&env, old_threshold, threshold_secs);
+        Ok(())
+    }
+
+    /// #1444 — Read the current oracle staleness threshold (seconds).
+    ///
+    /// Returns `0` when the check is disabled (default).
+    pub fn get_stale_oracle_threshold(env: Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS)
+    }
+
+    /// #1444 — Returns `true` when the pool's oracle feed is considered fresh
+    /// (staleness check is disabled or last update is within the threshold).
+    /// Returns `false` when the feed is stale.
+    pub fn is_oracle_fresh(env: Env, pool_id: u32) -> bool {
+        Self::check_oracle_freshness(&env, pool_id).is_ok()
     }
 
     /// Configure per-wallet rate limiting.
@@ -4082,7 +4150,12 @@ impl PredinexContract {
         totals
     }
 
-    pub(crate) fn read_user_outcome_bets(env: &Env, pool_id: u32, user: Address, bet: &UserBet) -> Vec<i128> {
+    pub(crate) fn read_user_outcome_bets(
+        env: &Env,
+        pool_id: u32,
+        user: Address,
+        bet: &UserBet,
+    ) -> Vec<i128> {
         if let Some(amounts) = env
             .storage()
             .persistent()
@@ -4234,7 +4307,11 @@ impl PredinexContract {
 
     /// Validate and collect the creator deposit. Called by every public
     /// pool-creation entrypoint so the anti-spam floor is enforced uniformly.
-    fn collect_creator_deposit(env: &Env, creator: &Address, amount: i128) -> Result<(), ContractError> {
+    fn collect_creator_deposit(
+        env: &Env,
+        creator: &Address,
+        amount: i128,
+    ) -> Result<(), ContractError> {
         if amount < MIN_CREATOR_DEPOSIT {
             return Err(ContractError::InsufficientCreatorDeposit);
         }
@@ -5076,6 +5153,9 @@ impl PredinexContract {
             return Err(ContractError::InvalidOutcome);
         }
 
+        // #1444 — Reject wagers against a stale oracle price feed.
+        Self::check_oracle_freshness(&env, pool_id)?;
+
         // Per-wallet rate limiting for abuse prevention.
         let max_bets_per_window: u32 = env
             .storage()
@@ -5410,9 +5490,11 @@ impl PredinexContract {
                         .checked_add(reward)
                         .ok_or(ContractError::TreasuryOverflow)?;
                     env.storage().persistent().set(&key, &next);
-                    env.storage()
-                        .persistent()
-                        .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+                    env.storage().persistent().extend_ttl(
+                        &key,
+                        POOL_BUMP_THRESHOLD,
+                        POOL_BUMP_TARGET,
+                    );
 
                     let pending_key = DataKey::TotalPendingReferralRewards;
                     let pending: i128 = env
@@ -5423,9 +5505,7 @@ impl PredinexContract {
                     let next_pending = pending
                         .checked_add(reward)
                         .ok_or(ContractError::TreasuryOverflow)?;
-                    env.storage()
-                        .persistent()
-                        .set(&pending_key, &next_pending);
+                    env.storage().persistent().set(&pending_key, &next_pending);
 
                     let total: i128 = env
                         .storage()
@@ -5558,6 +5638,13 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
+
+        // #1444 — Record the last oracle update timestamp for this pool so
+        // `check_oracle_freshness` can compare it against the staleness threshold.
+        env.storage()
+            .persistent()
+            .set(&DataKey::OracleLastUpdated(pool_id), &now);
+
         emit_twap_updated(
             &env,
             pool_id,
@@ -6001,9 +6088,11 @@ impl PredinexContract {
             // More bettors remain — persist cursor and keep pool in its current
             // status so the next call continues refunding.
             env.storage().persistent().set(&cursor_key, &end);
-            env.storage()
-                .persistent()
-                .extend_ttl(&cursor_key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+            env.storage().persistent().extend_ttl(
+                &cursor_key,
+                POOL_BUMP_THRESHOLD,
+                POOL_BUMP_TARGET,
+            );
             // Persist pool (status unchanged) so it stays alive.
             env.storage()
                 .persistent()
@@ -6285,6 +6374,9 @@ impl PredinexContract {
             return Err(ContractError::InsufficientParticipants);
         }
 
+        // #1444 — Reject resolution against a stale oracle price feed.
+        Self::check_oracle_freshness(env, pool_id)?;
+
         let outcomes = Self::read_outcomes(env, pool_id, &pool);
         // #1415 — Settlement validates `winning_outcome` against the label set
         // the UI renders, then pays it out of the per-outcome totals. If the
@@ -6515,10 +6607,7 @@ impl PredinexContract {
                 }),
             }
         }
-        SettleBatchResult {
-            results,
-            truncated,
-        }
+        SettleBatchResult { results, truncated }
     }
 
     /// #1416 — Finalize a pending resolution, transitioning the pool from
@@ -6886,7 +6975,9 @@ impl PredinexContract {
 
         // Persist the decremented pool and outcome totals so settlement and
         // subsequent refunds both read the post-refund figures.
-        env.storage().persistent().set(&DataKey::Pool(pool_id), &pool);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Pool(pool_id), &pool);
         env.storage().persistent().extend_ttl(
             &DataKey::Pool(pool_id),
             POOL_BUMP_THRESHOLD,
@@ -7351,7 +7442,11 @@ impl PredinexContract {
 
             let main_token_opt: Option<Address> = env.storage().persistent().get(&DataKey::Token);
             if let Some(mt) = main_token_opt {
-                let prev_tok: i128 = env.storage().persistent().get(&DataKey::TreasuryToken(mt.clone())).unwrap_or(0);
+                let prev_tok: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::TreasuryToken(mt.clone()))
+                    .unwrap_or(0);
                 let next_tok = prev_tok
                     .checked_add(treasury_delta)
                     .ok_or(ContractError::TreasuryOverflow)?;
@@ -7725,29 +7820,21 @@ impl PredinexContract {
     ///
     /// Delegates each pool to `claim_winnings_internal` so that all safety
     /// invariants, CEI ordering, analytics updates (UserTotalClaimed /
-    /// UserClaimHistory), multi-asset guards, and fee/dust accounting are
-    /// handled in one canonical place. Pools that are ineligible (not settled,
-    /// no winning bet, already claimed, multi-asset) are silently skipped so a
-    /// partial batch never reverts the whole transaction.
+    /// UserClaimHistory), fee/dust accounting, and single-/multi-asset payout
+    /// handling are kept in their canonical paths. Pools that are ineligible
+    /// (not settled, no winning bet, or already claimed) are recorded as
+    /// skipped errors so a partial batch never reverts the whole transaction.
     ///
     /// Returns a vec of `ClaimAllEntry` (pool_id + amount transferred) for every
     /// pool from which tokens were actually sent. An empty vec means nothing was
     /// claimable. The list is capped at 20 pool IDs per call to bound compute costs.
-    pub fn claim_all_winnings(
-        env: Env,
-        user: Address,
-        pool_ids: Vec<u32>,
-    ) -> ClaimBatchResult {
+    pub fn claim_all_winnings(env: Env, user: Address, pool_ids: Vec<u32>) -> ClaimBatchResult {
         user.require_auth();
 
         let mut results = Vec::new(&env);
         let total = pool_ids.len();
         let truncated = total > 20;
-        let cap = if total > 20 {
-            20
-        } else {
-            total
-        };
+        let cap = if total > 20 { 20 } else { total };
 
         for i in 0..cap {
             let pool_id = match pool_ids.get(i) {
@@ -7755,22 +7842,20 @@ impl PredinexContract {
                 None => continue,
             };
 
-            // Skip multi-asset pools — callers must use claim_multi_asset_winnings.
-            if env
+            let is_multi_asset = env
                 .storage()
                 .persistent()
                 .get::<_, bool>(&DataKey::PoolIsMultiAsset(pool_id))
-                .unwrap_or(false)
-            {
-                results.push_back(ClaimAllEntry {
-                    pool_id,
-                    amount: 0,
-                    error_code: ContractError::MultiAssetClaimRequired as u32,
-                });
-                continue;
-            }
+                .unwrap_or(false);
 
-            match Self::claim_winnings_internal(&env, user.clone(), pool_id) {
+            let result = if is_multi_asset {
+                Self::claim_multi_asset_winnings(env.clone(), user.clone(), pool_id)
+                    .map(|claim| claim.total_normalized)
+            } else {
+                Self::claim_winnings_internal(&env, user.clone(), pool_id)
+            };
+
+            match result {
                 Ok(amount) => {
                     results.push_back(ClaimAllEntry {
                         pool_id,
@@ -7788,10 +7873,7 @@ impl PredinexContract {
             }
         }
 
-        ClaimBatchResult {
-            results,
-            truncated,
-        }
+        ClaimBatchResult { results, truncated }
     }
 
     /// #158 — Return the per-pool payout-tracking state, or `None` if the
@@ -8243,8 +8325,7 @@ impl PredinexContract {
         // can verify the exact amount moved. SEP-41 `transfer` panics on
         // failure, but fee-on-transfer or no-op tokens can silently move less
         // than requested, causing the ledger to drift from the real balance.
-        let balance_before: i128 =
-            token_client.balance(&env.current_contract_address());
+        let balance_before: i128 = token_client.balance(&env.current_contract_address());
 
         token_client.transfer(
             &env.current_contract_address(),
@@ -8252,11 +8333,8 @@ impl PredinexContract {
             &amount,
         );
 
-        let balance_after: i128 =
-            token_client.balance(&env.current_contract_address());
-        let actually_moved = balance_before
-            .checked_sub(balance_after)
-            .unwrap_or(0);
+        let balance_after: i128 = token_client.balance(&env.current_contract_address());
+        let actually_moved = balance_before.checked_sub(balance_after).unwrap_or(0);
         if actually_moved != amount {
             return Err(ContractError::TransferBalanceMismatch);
         }
@@ -8264,9 +8342,10 @@ impl PredinexContract {
         env.storage()
             .persistent()
             .set(&DataKey::Treasury, &(current_treasury - amount));
-        env.storage()
-            .persistent()
-            .set(&DataKey::TreasuryToken(token_address), &(current_main_treasury - amount));
+        env.storage().persistent().set(
+            &DataKey::TreasuryToken(token_address),
+            &(current_main_treasury - amount),
+        );
 
         emit_treasury_withdrawn(&env, caller.clone(), treasury_recipient, amount);
         audit_log::append(
@@ -8687,6 +8766,15 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
+        // #1309 — tagged Admin so consumers can distinguish this from a bettor's
+        // bet auto-thawing a pool whose cooling period had elapsed.
+        emit_pool_unfrozen(
+            &env,
+            pool_id,
+            caller.clone(),
+            UnfreezeTrigger::Admin,
+            had_cooling_deadline,
+        );
         emit_pool_unfrozen(&env, pool_id, caller.clone(), UnfreezeTrigger::Admin, had_cooling_deadline);
         // #1449 — emit MarketUnpaused domain event for market resumption
         emit_market_unpaused(&env, pool_id, caller.clone(), env.ledger().timestamp());
@@ -10259,9 +10347,7 @@ impl PredinexContract {
                 let next_pending = pending
                     .checked_add(reward)
                     .ok_or(ContractError::TreasuryOverflow)?;
-                env.storage()
-                    .persistent()
-                    .set(&pending_key, &next_pending);
+                env.storage().persistent().set(&pending_key, &next_pending);
 
                 let total: i128 = env
                     .storage()
@@ -10785,13 +10871,9 @@ impl PredinexContract {
         // each individually within the per-call max, but exceeding it in
         // aggregate. Track the user's running normalised stake for this token
         // in this pool and reject if adding this bet would breach the limit.
-        let user_token_key =
-            DataKey::UserTokenExposure(pool_id, user.clone(), bet_token.clone());
-        let prev_token_exposure: i128 = env
-            .storage()
-            .persistent()
-            .get(&user_token_key)
-            .unwrap_or(0);
+        let user_token_key = DataKey::UserTokenExposure(pool_id, user.clone(), bet_token.clone());
+        let prev_token_exposure: i128 =
+            env.storage().persistent().get(&user_token_key).unwrap_or(0);
         let new_token_exposure = prev_token_exposure
             .checked_add(normalized)
             .ok_or(ContractError::PoolTotalOverflow)?;
@@ -10920,18 +11002,12 @@ impl PredinexContract {
         // deliver less than `amount`; recording `amount` would overstate the
         // pool's holdings and cause later claims to fail with a short balance.
         let token_client = token::Client::new(&env, &bet_token);
-        let balance_before: i128 =
-            token_client.balance(&env.current_contract_address());
+        let balance_before: i128 = token_client.balance(&env.current_contract_address());
 
         // Transfer bet_token from user to contract.
-        token_client.transfer(
-            &user,
-            env.current_contract_address(),
-            &amount,
-        );
+        token_client.transfer(&user, env.current_contract_address(), &amount);
 
-        let balance_after: i128 =
-            token_client.balance(&env.current_contract_address());
+        let balance_after: i128 = token_client.balance(&env.current_contract_address());
         let received = balance_after
             .checked_sub(balance_before)
             .ok_or(ContractError::PoolTotalOverflow)?;
@@ -11419,8 +11495,8 @@ impl PredinexContract {
                     _ => 0,
                 };
                 // Only sweep what this pool's token balance can cover.
-                let on_hand = token::Client::new(&env, &tok)
-                    .balance(&env.current_contract_address());
+                let on_hand =
+                    token::Client::new(&env, &tok).balance(&env.current_contract_address());
                 let sweepable = dust.min(on_hand);
                 if sweepable > 0 {
                     token::Client::new(&env, &tok).transfer(
@@ -11456,9 +11532,7 @@ impl PredinexContract {
                     let deposit_after = deposit
                         .checked_sub(sweepable)
                         .ok_or(ContractError::PoolTotalOverflow)?;
-                    env.storage()
-                        .persistent()
-                        .set(&deposit_key, &deposit_after);
+                    env.storage().persistent().set(&deposit_key, &deposit_after);
                     env.storage().persistent().extend_ttl(
                         &deposit_key,
                         POOL_BUMP_THRESHOLD,
@@ -11625,7 +11699,11 @@ impl PredinexContract {
                     .checked_add(pool_liability)
                     .ok_or(ContractError::PoolTotalOverflow)?;
             } else if is_main_token {
-                if let Some(pool) = env.storage().persistent().get::<_, Pool>(&DataKey::Pool(pid)) {
+                if let Some(pool) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Pool>(&DataKey::Pool(pid))
+                {
                     if pool.status != PoolStatus::Cancelled {
                         // #1272 — pool.total_a / pool.total_b only mirror
                         // outcomes 0 and 1; stakes on outcomes 2+ live solely
@@ -11646,7 +11724,8 @@ impl PredinexContract {
                         } else {
                             0
                         };
-                        let bettor_liability = remaining_escrow.saturating_sub(fee_already_in_treasury);
+                        let bettor_liability =
+                            remaining_escrow.saturating_sub(fee_already_in_treasury);
                         total_liabilities = total_liabilities
                             .checked_add(bettor_liability)
                             .ok_or(ContractError::PoolTotalOverflow)?;
@@ -11670,9 +11749,14 @@ impl PredinexContract {
                             .unwrap_or(0);
                         let mut pending_refunds: i128 = 0;
                         for idx in start..bettors.len() {
-                            if let Some(user_bet) = env.storage().persistent().get::<_, UserBet>(
-                                &DataKey::UserBet(pid, bettors.get(idx).unwrap()),
-                            ) {
+                            if let Some(user_bet) =
+                                env.storage()
+                                    .persistent()
+                                    .get::<_, UserBet>(&DataKey::UserBet(
+                                        pid,
+                                        bettors.get(idx).unwrap(),
+                                    ))
+                            {
                                 pending_refunds = pending_refunds
                                     .checked_add(user_bet.total_bet)
                                     .ok_or(ContractError::PoolTotalOverflow)?;
@@ -12000,7 +12084,8 @@ impl PredinexContract {
         // otherwise the index validated here and the one paid out could differ.
         let source_outcomes = Self::read_outcomes(&env, source_pool_id, &source_pool);
         let source_totals = Self::read_outcome_totals(&env, source_pool_id, &source_pool);
-        if source_outcomes.len() != source_totals.len() || winning_outcome >= source_outcomes.len() {
+        if source_outcomes.len() != source_totals.len() || winning_outcome >= source_outcomes.len()
+        {
             return Err(ContractError::InvalidOutcome);
         }
 
@@ -12175,8 +12260,7 @@ impl PredinexContract {
                     // #1245 — scale boost linearly by elapsed time over lock duration
                     // so stakers cannot immediately claim full boosted rewards.
                     let elapsed_bps = (elapsed * 10_000 / lock_duration).min(10_000);
-                    let effective_bps =
-                        (boost_bps as i128 * elapsed_bps as i128 / 10_000) as i128;
+                    let effective_bps = (boost_bps as i128 * elapsed_bps as i128 / 10_000) as i128;
                     let boosted = boost_portion
                         .checked_mul(effective_bps)
                         .ok_or(ContractError::PoolTotalOverflow)?
@@ -12622,7 +12706,10 @@ impl PredinexContract {
         let stake = LpStakeInfo {
             shares: new_staked,
             lock_until,
-            staked_at: existing_stake.as_ref().map(|s| s.staked_at).unwrap_or_else(|| env.ledger().timestamp()),
+            staked_at: existing_stake
+                .as_ref()
+                .map(|s| s.staked_at)
+                .unwrap_or_else(|| env.ledger().timestamp()),
         };
         env.storage()
             .persistent()
@@ -12812,6 +12899,34 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
         emit_lp_rewards_distributed(&env, pool_id, amount);
+        Ok(())
+    }
+
+    /// #1444 — Internal staleness check. Returns `Ok(())` when the staleness
+    /// check is disabled (threshold == 0). Returns `Err(StaleOraclePrice)`
+    /// when the last `update_twap` exceeds the configured threshold.
+    fn check_oracle_freshness(env: &Env, pool_id: u32) -> Result<(), ContractError> {
+        let threshold: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::StaleOracleThresholdSecs)
+            .unwrap_or(DEFAULT_STALE_ORACLE_THRESHOLD_SECS);
+
+        if threshold == 0 {
+            return Ok(());
+        }
+
+        let last_updated: u64 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::OracleLastUpdated(pool_id))
+            .unwrap_or(0);
+
+        let now = env.ledger().timestamp();
+        if last_updated == 0 || now.saturating_sub(last_updated) > threshold {
+            return Err(ContractError::StaleOraclePrice);
+        }
+
         Ok(())
     }
 }

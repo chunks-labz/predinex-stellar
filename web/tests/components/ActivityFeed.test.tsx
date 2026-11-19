@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import ActivityFeed from '../../app/components/ActivityFeed';
 import { ActivityItem } from '../../app/lib/market-types';
 import { TOKEN_SYMBOL } from '../../app/lib/formatting';
@@ -39,6 +39,26 @@ describe('ActivityFeed Component', () => {
 
     it('renders error message when error is provided', () => {
         render(<ActivityFeed activities={[]} isLoading={false} error="Failed to load" />);
-        expect(screen.getByText('Failed to load')).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent('Failed to load');
+        // The error explains the empty list; "No Activity Yet" would contradict it.
+        expect(screen.queryByText('No Activity Yet')).not.toBeInTheDocument();
+    });
+
+    it('tells filtered users that nothing matches instead of "no activity"', () => {
+        const onClearFilters = vi.fn();
+        render(
+            <ActivityFeed
+                activities={[]}
+                isLoading={false}
+                error={null}
+                isFiltered
+                onClearFilters={onClearFilters}
+            />
+        );
+        expect(screen.getByText('No matching activity')).toBeInTheDocument();
+        expect(screen.queryByText('No Activity Yet')).not.toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+        expect(onClearFilters).toHaveBeenCalledTimes(1);
     });
 });

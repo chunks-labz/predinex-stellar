@@ -121,6 +121,38 @@ describe('PositionIndexer (Issue #1425)', () => {
     expect(store.all()).toHaveLength(1);
   });
 
+  it('ignores a replayed event identifier after a later event updates the position', async () => {
+    const firstEvent = makeEvent({ eventId: 'ledger-event-1', amount: '1000', ledgerSeq: 10 });
+    await indexer.process(firstEvent);
+    const later = await indexer.process(makeEvent({
+      eventId: 'ledger-event-2',
+      amount: '2000',
+      ledgerSeq: 11,
+      txHash: 'tx-later',
+    }));
+
+    const replay = await indexer.process(firstEvent);
+
+    expect(replay).toEqual(later);
+    expect(store.all()).toHaveLength(1);
+    expect(store.all()[0].amount).toBe('2000');
+  });
+
+  it('deduplicates an event identifier across position keys', async () => {
+    const event = makeEvent({ eventId: 'ledger-event-global', ledgerSeq: 10 });
+    const first = await indexer.process(event);
+    const replayWithDifferentPayload = await indexer.process(makeEvent({
+      eventId: 'ledger-event-global',
+      market: 2,
+      account: ACCOUNT_B,
+      ledgerSeq: 11,
+      txHash: 'replayed-tx',
+    }));
+
+    expect(replayWithDifferentPayload).toEqual(first);
+    expect(store.all()).toHaveLength(1);
+  });
+
   it('ignores an event from an older ledger than the stored one (stale replay)', async () => {
     await indexer.process(makeEvent({ amount: '2000', ledgerSeq: 50, txHash: 'tx_new' }));
     const result = await indexer.process(makeEvent({ amount: '999', ledgerSeq: 10, txHash: 'tx_old' }));

@@ -50,6 +50,9 @@ export default function SearchBar({
           value={localValue}
           onChange={handleInputChange}
           placeholder={placeholder}
+          // #1537 — placeholder text is not a reliable accessible name; give the
+          // field an explicit label so screen readers announce its purpose.
+          aria-label={placeholder}
           className="w-full pl-10 pr-10 py-3 bg-muted/30 border border-muted/50 rounded-lg
                    focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary/50
                    transition-all duration-200 text-sm placeholder:text-muted-foreground"

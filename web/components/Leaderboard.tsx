@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useState } from 'react';
+import { memo, useState, useRef, type KeyboardEvent } from 'react';
 import { Trophy, RefreshCw, AlertCircle, Users, Layers } from 'lucide-react';
 import { useLeaderboard, type LeaderboardTab } from '../app/lib/hooks/useLeaderboard';
 import { formatDisplayAddress } from '../app/lib/address-display';
@@ -34,11 +34,13 @@ function SkeletonRows() {
 }
 
 function formatVolume(stroops: number): string {
-  // #1285 — 1 XLM = 10_000_000 stroops; the old 1e6 divisor showed 10x the
-  // real volume while still labelling the result in XLM.
+  // #1285 — 1 XLM = 10_000_000 stroops; use stroopsToUnits (divide by 1e7).
   const units = stroopsToUnits(stroops);
-  if (units >= 1) return `${units.toFixed(2)} ${TOKEN_SYMBOL}`;
-  return `${stroops.toLocaleString()} μ${TOKEN_SYMBOL}`;
+  if (units >= 1) return `${units.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${TOKEN_SYMBOL}`;
+  if (units >= 0.000001) {
+    return `${units.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${TOKEN_SYMBOL}`;
+  }
+  return `${(stroops / 10_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} micro${TOKEN_SYMBOL}`;
 }
 
 const Leaderboard = memo(function Leaderboard({ currentUserAddress }: LeaderboardProps) {
@@ -47,6 +49,27 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
     useLeaderboard(currentUserAddress);
 
   const userRank = activeTab === 'bettors' ? userBettorRank : userCreatorRank;
+
+  // #1540 — WAI-ARIA tabs: roving tabindex + arrow-key movement, so keyboard
+  // users switch panels without tabbing through every row of the active one.
+  const tabRefs = {
+    bettors: useRef<HTMLButtonElement>(null),
+    creators: useRef<HTMLButtonElement>(null),
+  };
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, current: LeaderboardTab) => {
+    const order: LeaderboardTab[] = ['bettors', 'creators'];
+    const index = order.indexOf(current);
+    let next: LeaderboardTab | null = null;
+    if (event.key === 'ArrowRight') next = order[(index + 1) % order.length];
+    else if (event.key === 'ArrowLeft') next = order[(index - 1 + order.length) % order.length];
+    else if (event.key === 'Home') next = order[0];
+    else if (event.key === 'End') next = order[order.length - 1];
+    if (next) {
+      event.preventDefault();
+      setActiveTab(next);
+      tabRefs[next].current?.focus();
+    }
+  };
 
   return (
     <div className="glass-panel rounded-xl p-6">
@@ -73,6 +96,9 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
           aria-selected={activeTab === 'bettors'}
           aria-controls="tab-panel-bettors"
           id="tab-bettors"
+          ref={tabRefs.bettors}
+          tabIndex={activeTab === 'bettors' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'bettors')}
           onClick={() => setActiveTab('bettors')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
             ${activeTab === 'bettors' ? 'bg-primary text-primary-foreground' : 'bg-muted/30 hover:bg-muted/50 text-muted-foreground'}`}
@@ -85,6 +111,9 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
           aria-selected={activeTab === 'creators'}
           aria-controls="tab-panel-creators"
           id="tab-creators"
+          ref={tabRefs.creators}
+          tabIndex={activeTab === 'creators' ? 0 : -1}
+          onKeyDown={(event) => handleTabKeyDown(event, 'creators')}
           onClick={() => setActiveTab('creators')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
             ${activeTab === 'creators' ? 'bg-primary text-primary-foreground' : 'bg-muted/30 hover:bg-muted/50 text-muted-foreground'}`}
@@ -102,7 +131,7 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
       )}
 
       {/* Error */}
-      {error && (
+      {error && bettors.length === 0 && creators.length === 0 && (
         <div className="flex items-center gap-2 p-3 mb-4 bg-red-500/10 border border-red-500/20 rounded-lg text-sm text-red-400" role="alert">
           <AlertCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
           {error}
@@ -121,16 +150,17 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
         ) : bettors.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Trophy className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
-            <p>No bettors yet. Be the first!</p>
+            <p>{error ? 'Unable to load leaderboard.' : 'No bettors yet. Be the first!'}</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" role="list" aria-label="Top bettors">
             {bettors.map((entry) => {
               const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
               const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
               return (
                 <div
                   key={entry.address}
+                  role="listitem"
                   className={`flex items-center justify-between p-4 rounded-lg transition-colors
                     ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
                   aria-current={isCurrentUser ? 'true' : undefined}
@@ -172,16 +202,17 @@ const Leaderboard = memo(function Leaderboard({ currentUserAddress }: Leaderboar
         ) : creators.length === 0 ? (
           <div className="text-center py-10 text-muted-foreground">
             <Layers className="h-10 w-10 mx-auto mb-3 opacity-30" aria-hidden="true" />
-            <p>No pool creators yet. Create the first market!</p>
+            <p>{error ? 'Unable to load leaderboard.' : 'No pool creators yet. Create the first market!'}</p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3" role="list" aria-label="Top creators">
             {creators.map((entry) => {
               const isCurrentUser = !!currentUserAddress && entry.address === currentUserAddress;
               const rankColor = RANK_COLORS[entry.rank] ?? 'text-muted-foreground';
               return (
                 <div
                   key={entry.address}
+                  role="listitem"
                   className={`flex items-center justify-between p-4 rounded-lg transition-colors
                     ${isCurrentUser ? 'bg-primary/10 border border-primary/30' : 'bg-muted/30 hover:bg-muted/50'}`}
                   aria-current={isCurrentUser ? 'true' : undefined}

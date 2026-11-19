@@ -2,6 +2,8 @@
  * Shared Type Definitions for Stellar-Lend API Services and Routes.
  */
 
+export * from './positions.js';
+
 export type RiskTier = 'Safe' | 'Caution' | 'AtRisk' | 'Liquidatable';
 export type ReputationTier = 'Bronze' | 'Silver' | 'Gold' | 'Platinum';
 export type ComplianceTier = 'Tier0_Unverified' | 'Tier1_Retail' | 'Tier2_Accredited' | 'Tier3_Institutional';

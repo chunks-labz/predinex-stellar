@@ -14,13 +14,16 @@ const FEATURED_MARKET_COUNT = 3;
 export default function FeaturedMarkets() {
   const { filteredMarkets, isLoading, error, retry } = useMarketDiscovery();
 
-  const featured = useMemo(
-    () =>
-      [...filteredMarkets]
-        .sort((a, b) => b.totalVolume - a.totalVolume)
-        .slice(0, FEATURED_MARKET_COUNT),
-    [filteredMarkets]
-  );
+  const featured = useMemo(() => {
+    // The section invites users to "place your bets", so prefer pools that
+    // still accept them. Settled or expired pools with large historical
+    // volume would otherwise crowd out every live market.
+    const open = filteredMarkets.filter((m) => m.status === 'active');
+    const pool = open.length > 0 ? open : filteredMarkets;
+    return [...pool]
+      .sort((a, b) => b.totalVolume - a.totalVolume)
+      .slice(0, FEATURED_MARKET_COUNT);
+  }, [filteredMarkets]);
 
   return (
     <MarketGrid

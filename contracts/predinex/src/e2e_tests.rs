@@ -49,6 +49,63 @@ fn mint_e2e(env: &Env, token: &Address, user: &Address, amount: i128) {
 
 // ── E2E Test Cases ───────────────────────────────────────────────────────────
 
+/// Smoke-test one complete settlement and ensure a payout is applied only once.
+#[test]
+fn test_e2e_settlement_smoke_pays_once() {
+    let t = setup_e2e();
+    let creator = Address::generate(&t.env);
+    let winner = Address::generate(&t.env);
+    let loser = Address::generate(&t.env);
+    let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
+
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
+    mint_e2e(&t.env, &t.token, &winner, 1000);
+    mint_e2e(&t.env, &t.token, &loser, 1000);
+
+    t.env.ledger().with_mut(|li| li.timestamp = 100);
+    let pool_id = t.client.create_pool(
+        &creator,
+        &String::from_str(&t.env, "Settlement smoke"),
+        &String::from_str(&t.env, "Complete pool settlement path"),
+        &String::from_str(&t.env, "Yes"),
+        &String::from_str(&t.env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+    t.client
+        .place_bet(&winner, &pool_id, &0u32, &500i128, &None::<Address>);
+    t.client
+        .place_bet(&loser, &pool_id, &1u32, &500i128, &None::<Address>);
+
+    assert_eq!(token_client.balance(&winner), 500);
+    assert_eq!(token_client.balance(&loser), 500);
+
+    t.env.ledger().with_mut(|li| li.timestamp = 3701);
+    t.client.settle_pool(&creator, &pool_id, &0u32);
+
+    let settlement = t.client.get_pool(&pool_id).expect("pool must exist");
+    assert_eq!(settlement.status, PoolStatus::Settled(0));
+    assert!(settlement.settled);
+    assert_eq!(settlement.winning_outcome, Some(0));
+
+    assert_eq!(t.client.claim_winnings(&winner, &pool_id), 980);
+    assert_eq!(token_client.balance(&winner), 1480);
+    assert_eq!(token_client.balance(&loser), 500);
+    assert_eq!(t.client.get_treasury_balance(), 20);
+
+    assert_eq!(
+        t.client.try_claim_winnings(&winner, &pool_id),
+        Err(Ok(ContractError::NoBetFound))
+    );
+    assert_eq!(token_client.balance(&winner), 1480);
+    assert_eq!(t.client.get_treasury_balance(), 20);
+
+    let payout = t.client.get_pool_payout_state(&pool_id).unwrap();
+    assert!(payout.fee_credited);
+    assert_eq!(payout.paid_out, 980);
+}
+
 /// 1. E2E: Create → Bet (winners + losers) → Settle → Winner claims → Loser gets nothing
 #[test]
 fn test_e2e_successful_lifecycle() {

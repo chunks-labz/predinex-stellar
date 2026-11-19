@@ -22,8 +22,16 @@ const FILTER_OPTIONS: { value: FilterType; label: string }[] = [
 
 const PAGE_SIZE = 10;
 
+/**
+ * `<input type="date">` values are local calendar dates, so compare against
+ * the local date too. `toISOString()` gave the UTC date, which put activity
+ * near midnight on the wrong day for anyone outside UTC.
+ */
 function toDateInput(timestamp: number) {
-  return new Date(timestamp * 1000).toISOString().slice(0, 10);
+  const date = new Date(timestamp * 1000);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 export default function ActivityPage() {
@@ -125,7 +133,19 @@ export default function ActivityPage() {
           </section>
 
           <div className="p-8 rounded-3xl border border-border bg-card/40 glass shadow-xl">
-            <ActivityFeed activities={paginatedActivities} isLoading={isLoading} error={error} onRefresh={refresh} />
+            <ActivityFeed
+              activities={paginatedActivities}
+              isLoading={isLoading}
+              error={error}
+              onRefresh={refresh}
+              isFiltered={activities.length > 0 && (activeFilter !== 'all' || !!fromDate || !!toDate)}
+              onClearFilters={() => {
+                setActiveFilter('all');
+                setFromDate('');
+                setToDate('');
+                resetPage();
+              }}
+            />
           </div>
 
           {!isLoading && !error && filteredActivities.length > 0 && (

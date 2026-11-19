@@ -24,6 +24,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { authMiddleware } from '../middleware/auth.js';
 import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
+import { logger, serializeError } from '../lib/logger.js';
 
 // ============================================================================
 // Types & Interfaces
@@ -402,7 +403,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
             error: error.message || 'On-chain pool allocation service is not implemented',
           });
         }
-        console.error('Error creating budget plan:', error);
+        logger.error('budget_plan_creation_failed', serializeError(error));
         res.status(500).json({
           success: false,
           error: 'Failed to create budget plan',
@@ -440,7 +441,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
             error: error.message || 'Not implemented',
           });
         }
-        console.error('Error fetching portfolio metrics:', error);
+        logger.error('budget_portfolio_fetch_failed', serializeError(error));
         res.status(500).json({
           success: false,
           error: 'Failed to fetch portfolio metrics',
@@ -484,7 +485,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
             error: error.message || 'Not implemented',
           });
         }
-        console.error('Error projecting liquidity:', error);
+        logger.error('budget_liquidity_projection_failed', serializeError(error));
         res.status(500).json({
           success: false,
           error: 'Failed to project liquidity',
@@ -527,7 +528,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
           data: optimization,
         });
       } catch (error) {
-        console.error('Error optimizing fees:', error);
+        logger.error('budget_fee_optimization_failed', serializeError(error));
         res.status(500).json({
           success: false,
           error: 'Failed to optimize fees',
@@ -569,7 +570,7 @@ export function createBudgetRouter(service: ContractService = contractService): 
             error: error.message || 'Not implemented',
           });
         }
-        console.error('Error assessing risk:', error);
+        logger.error('budget_risk_assessment_failed', serializeError(error));
         res.status(500).json({
           success: false,
           error: 'Failed to assess risk',

@@ -16,7 +16,7 @@ function makeActivity(overrides: Partial<ActivityItem> = {}): ActivityItem {
     functionName: 'place-bet',
     timestamp: Date.parse('2026-03-15T12:00:00.000Z') / 1000,
     status: 'success',
-    amount: 2_500_000,
+    amount: 25_000_000, // stroops: 25_000_000 / 10^7 = 2.5 tokens
     poolId: 7,
     poolTitle: 'Will it rain?',
     explorerUrl: 'https://explorer.example/tx/0xabc',

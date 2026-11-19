@@ -80,6 +80,7 @@ stateDiagram-v2
 - `packages/widget` — the embeddable pool widget for third-party sites.
 - `bot` — automated off-chain workflows (oracle reporting, market upkeep).
 - `docs` — protocol, contract API, deployment, and development documentation (including the [Market Lifecycle State Machine](docs/MARKET_LIFECYCLE.md)).
+- [Operations and documentation index](docs/README.md) — incident response, deployment, and local runbooks.
 - `scripts` — bootstrap and CI/verification helpers.
 
 ## 🚀 Getting Started

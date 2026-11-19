@@ -17,7 +17,14 @@ export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   sortBy: 'newest',
 };
 
-const STATUS_VALUES = new Set<MarketStatusFilter>(['all', 'open', 'settled', 'disputed', 'frozen']);
+const STATUS_VALUES = new Set<MarketStatusFilter>([
+  'all',
+  'open',
+  'settled',
+  'disputed',
+  'frozen',
+  'expired',
+]);
 const SORT_VALUES = new Set<SortOption>(['newest', 'ending-soon', 'volume', 'participants']);
 const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'all',
@@ -109,6 +116,9 @@ function matchesStatus(market: ProcessedMarket, status: MarketStatusFilter): boo
   if (status === 'settled') return market.status === 'settled';
   if (status === 'frozen') return market.status === 'frozen';
   if (status === 'disputed') return market.status === 'disputed';
+  // #1537 — expired markets are produced by processMarketData but were
+  // unreachable through the status filter, so they only ever surfaced under "all".
+  if (status === 'expired') return market.status === 'expired';
   return false;
 }
 

@@ -2,14 +2,13 @@
 import { createScopedLogger } from '@/app/lib/logger';
 const log = createScopedLogger('IncentivesDisplay');
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useIncentives } from '../lib/hooks/useIncentives';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { getStacksCoreApiBaseUrl, predinexReadApi } from '../lib/adapters/predinex-read-api';
 import { calculateTotalIncentive, DEFAULT_INCENTIVE_CONFIG, BetterIncentive } from '../lib/liquidity-incentives';
-import { TOKEN_SYMBOL } from '@/app/lib/formatting';
-import { Gift, TrendingUp, Award, Zap } from 'lucide-react';
-import { stroopsToUnits, unitsToStroops, TOKEN_SYMBOL } from '@/app/lib/formatting';
+import { Gift, TrendingUp, Award, Zap, Loader2 } from 'lucide-react';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface IncentivesDisplayProps {
   betterId?: string;
@@ -20,7 +19,9 @@ interface ContractIncentive {
   id?: string;
   poolId: number;
   betterId: string;
+  /** Token units (not stroops), like everything `calculateTotalIncentive` returns. */
   betAmount: number;
+  /** Token units (not stroops). */
   bonusAmount: number;
   bonusType: 'early-bird' | 'volume' | 'referral' | 'loyalty';
   claimedAt?: number;
@@ -31,6 +32,7 @@ async function fetchIncentivesFromContract(userAddress: string): Promise<Contrac
   try {
     const base = getStacksCoreApiBaseUrl();
     const response = await fetch(`${base}/extended/v1/address/${userAddress}/transactions?limit=50&type=contract_call`);
+    if (!response.ok) throw new Error(`Incentive history request failed: ${response.status}`);
     const data = await response.json();
     
     const incentives: ContractIncentive[] = [];
@@ -70,11 +72,12 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
     const userBet = await predinexReadApi.getUserBet(poolId, userAddress);
     if (!userBet || userBet.totalBet === 0) return [];
     
-    const totalVolume = pool.totalA + pool.totalB;
+    const totalVolume = BigInt(pool.totalA) + BigInt(pool.totalB);
     const previousBetsCount = 0;
+    const betUnits = stroopsToUnits(BigInt(userBet.totalBet));
     
     const { total, breakdown } = calculateTotalIncentive(
-      stroopsToUnits(userBet.totalBet),
+      betUnits,
       1,
       stroopsToUnits(totalVolume),
       previousBetsCount,
@@ -91,8 +94,11 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
       id: `pending-${userAddress}-${poolId}-${bonusType}`,
       poolId,
       betterId: userAddress,
-      betAmount: userBet.totalBet,
-      bonusAmount: unitsToStroops(total),
+      // Keep amounts in token units: the list renders them with TOKEN_SYMBOL.
+      // `unitsToStroops(total)` mixed a number into BigInt maths and threw,
+      // so pending incentives were always silently empty.
+      betAmount: betUnits,
+      bonusAmount: total,
       bonusType,
       status: 'pending'
     }];
@@ -103,9 +109,10 @@ async function calculateRealIncentives(userAddress: string, poolId: number): Pro
 }
 
 export default function IncentivesDisplay({ betterId, poolId }: IncentivesDisplayProps) {
-  const { incentives, getPendingIncentives, getTotalPendingBonus, getClaimedIncentives, getTotalClaimedBonus, setIncentives, claimIncentive } = useIncentives();
+  const { getPendingIncentives, getTotalPendingBonus, getClaimedIncentives, getTotalClaimedBonus, setIncentives } = useIncentives();
   const [selectedTab, setSelectedTab] = useState<'pending' | 'claimed'>('pending');
   const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const { address: userAddress } = useWallet();
   
   useEffect(() => {
@@ -114,9 +121,13 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
     
     async function loadIncentives() {
       setIsLoading(true);
+      setLoadError(null);
       try {
         const contractIncentives = await fetchIncentivesFromContract(address);
-        const pendingIncentives = await calculateRealIncentives(address, poolId || 0);
+        // Without a pool in scope (the /incentives page) there is nothing to
+        // estimate; this used to query pool #0 for every user.
+        const pendingIncentives =
+          poolId === undefined ? [] : await calculateRealIncentives(address, poolId);
         
         const allIncentives: BetterIncentive[] = [
           ...contractIncentives.map((inc, idx) => ({
@@ -138,6 +149,7 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
         }
       } catch (error) {
         log.error('Error loading incentives:', error);
+        setLoadError('Could not load your incentives. Please try again later.');
       } finally {
         setIsLoading(false);
       }
@@ -145,14 +157,6 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
     
     loadIncentives();
   }, [userAddress, poolId, setIncentives]);
-
-  const handleClaim = useCallback(async (incentiveId: string | number) => {
-    try {
-      await claimIncentive(incentiveId);
-    } catch (error) {
-      log.error('Failed to claim incentive:', error);
-    }
-  }, [claimIncentive]);
 
   if (!betterId) {
     return (
@@ -216,6 +220,8 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
       {/* Tabs */}
       <div className="flex gap-4 border-b border-border">
         <button
+          type="button"
+          aria-pressed={selectedTab === 'pending'}
           onClick={() => setSelectedTab('pending')}
           className={`px-4 py-2 font-bold transition-all ${selectedTab === 'pending'
               ? 'text-primary border-b-2 border-primary'
@@ -225,6 +231,8 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
           Pending ({pendingIncentives.length})
         </button>
         <button
+          type="button"
+          aria-pressed={selectedTab === 'claimed'}
           onClick={() => setSelectedTab('claimed')}
           className={`px-4 py-2 font-bold transition-all ${selectedTab === 'claimed'
               ? 'text-primary border-b-2 border-primary'
@@ -237,6 +245,18 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
 
       {/* Content */}
       <div className="space-y-3">
+        {loadError && (
+          <p role="alert" className="text-sm text-red-500 rounded-lg border border-red-500/20 bg-red-500/5 p-3">
+            {loadError}
+          </p>
+        )}
+        {isLoading ? (
+          <div role="status" className="glass p-6 rounded-xl border border-border flex items-center justify-center gap-2 text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+            Loading incentives…
+          </div>
+        ) : (
+        <>
         {selectedTab === 'pending' && (
           <>
             {pendingIncentives.length === 0 ? (
@@ -261,12 +281,14 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
                   </div>
                   <div className="text-right">
                     <p className="font-bold">{incentive.bonusAmount.toFixed(2)} {TOKEN_SYMBOL}</p>
-                    <button
-                      onClick={() => handleClaim(incentive.id ?? idx)}
-                      className="text-xs px-2 py-1 bg-primary/20 hover:bg-primary/30 rounded mt-1 transition-all"
-                    >
-                      Claim
-                    </button>
+                    {/*
+                      There is no on-chain incentive claim yet. The old button only
+                      flipped local state to "claimed", so users believed they had
+                      been paid and the bonus reappeared on refresh.
+                    */}
+                    <span className="inline-block text-xs px-2 py-1 bg-muted/50 rounded mt-1 text-muted-foreground">
+                      Claiming opens soon
+                    </span>
                   </div>
                 </div>
               ))
@@ -303,6 +325,8 @@ export default function IncentivesDisplay({ betterId, poolId }: IncentivesDispla
               ))
             )}
           </>
+        )}
+        </>
         )}
       </div>
 

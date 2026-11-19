@@ -14,7 +14,6 @@ updates:
         update-types:
           - "patch"
           - "minor"
-
   - package-ecosystem: "npm"
     directory: "/bot"
     schedule:
@@ -29,7 +28,6 @@ updates:
         update-types:
           - "patch"
           - "minor"
-
   - package-ecosystem: "npm"
     directory: "/api"
     schedule:
@@ -44,7 +42,6 @@ updates:
         update-types:
           - "patch"
           - "minor"
-
   - package-ecosystem: "cargo"
     directory: "/contracts/predinex"
     schedule:
@@ -59,7 +56,6 @@ updates:
         update-types:
           - "patch"
           - "minor"
-
   - package-ecosystem: "cargo"
     directory: "/"
     schedule:

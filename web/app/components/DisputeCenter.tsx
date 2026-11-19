@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useState, useEffect } from 'react';
 import { useDisputes } from '../lib/hooks/useDisputes';
 import { AlertCircle, Vote, TrendingUp, Lock } from 'lucide-react';
@@ -94,7 +95,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeC
         <div className="glass p-4 rounded-lg border border-border">
           <p className="text-sm text-muted-foreground">Bond Locked</p>
           <p className="text-2xl font-bold text-blue-400">
-            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} STX
+            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} {TOKEN_SYMBOL}
           </p>
         </div>
       </div>
@@ -176,7 +177,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeC
                         {/* Bond Info */}
                         <div className="flex items-center gap-2 text-sm">
                           <Lock className="w-4 h-4" />
-                          <span>Bond: {dispute.bond.toFixed(2)} STX</span>
+                          <span>Bond: {dispute.bond.toFixed(2)} {TOKEN_SYMBOL}</span>
                         </div>
 
                         {/* Vote Button */}
@@ -256,7 +257,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeC
       {/* Info */}
       <div className="glass p-4 rounded-lg border border-border/50 bg-primary/5">
         <p className="text-sm text-muted-foreground">
-          💡 Disputes allow the community to challenge pool settlements. Vote with your STX balance to uphold or reject disputes.
+          💡 Disputes allow the community to challenge pool settlements. Vote with your {TOKEN_SYMBOL} balance to uphold or reject disputes.
         </p>
       </div>
     </div>

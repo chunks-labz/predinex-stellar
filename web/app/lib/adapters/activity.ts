@@ -143,7 +143,7 @@ export async function fetchPoolActivity(
     return { items: [], hasMore: false };
   }
 
-  const { fetchPoolActivityFromSoroban } = await import('../hooks/usePoolActivity');
+  const { fetchPoolActivityFromSoroban } = await import('../../hooks/usePoolActivity');
   const res = await fetchPoolActivityFromSoroban(poolId, limit, pagination.cursor);
   return {
     items: res.events,

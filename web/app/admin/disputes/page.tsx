@@ -29,6 +29,8 @@ import RouteErrorBoundary from "@/components/RouteErrorBoundary";
 import { TransactionFeeModal } from "@/components/TransactionFeeModal";
 import MarketCard from "@/components/MarketCard";
 import { formatRelativeTime } from "@/app/lib/formatting";
+import { createScopedLogger } from "@/app/lib/logger";
+const adminDisputesLog = createScopedLogger("AdminDisputes");
 
 export default function AdminDisputes() {
   const wallet = useWallet();
@@ -66,7 +68,7 @@ export default function AdminDisputes() {
         const freezeAdmin = await predinexReadApi.getFreezeAdmin();
         setIsAdmin(wallet.address === freezeAdmin);
       } catch (err) {
-        console.error("Failed to get freeze admin", err);
+        adminDisputesLog.error("Failed to get freeze admin", err);
         setIsAdmin(false);
       } finally {
         setCheckingAccess(false);
@@ -125,7 +127,7 @@ export default function AdminDisputes() {
       );
       setPools(filtered);
     } catch (err) {
-      console.error("Failed to load pools", err);
+      adminDisputesLog.error("Failed to load pools", err);
       showToast("Failed to load pools", "error");
     } finally {
       setLoadingPools(false);
@@ -145,7 +147,7 @@ export default function AdminDisputes() {
       const evs = await getPoolAdminActivityFromSoroban(poolId, 20, config);
       setHistory(evs);
     } catch (err) {
-      console.error("Failed to load history", err);
+      adminDisputesLog.error("Failed to load history", err);
     } finally {
       setLoadingHistory(false);
     }
@@ -207,7 +209,7 @@ export default function AdminDisputes() {
         loadHistory(poolId);
       }
     } catch (err) {
-      console.error(`Failed to ${action} pool`, err);
+      adminDisputesLog.error(`Failed to ${action} pool`, err);
       showError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsSubmitting(false);
@@ -274,7 +276,7 @@ export default function AdminDisputes() {
                   </div>
 
                   {pools.length === 0 && !loadingPools ? (
-                    <div className="p-8 text-center border rounded-xl bg-card/30 text-muted-foreground">
+                    <div className="p-8 text-center border rounded-xl bg-card/30 text-muted-foreground" role="status">
                       No frozen or disputed pools found.
                     </div>
                   ) : (
@@ -282,8 +284,17 @@ export default function AdminDisputes() {
                       {pools.map((pool) => (
                         <div
                           key={pool.poolId}
+                          role="button"
+                          tabIndex={0}
                           onClick={() => setSelectedPool(pool)}
-                          className={`cursor-pointer transition-all ${selectedPool?.poolId === pool.poolId ? "ring-2 ring-primary scale-[1.02]" : ""}`}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelectedPool(pool);
+                            }
+                          }}
+                          className={`cursor-pointer transition-all focus:outline-none focus:ring-2 focus:ring-primary ${selectedPool?.poolId === pool.poolId ? "ring-2 ring-primary scale-[1.02]" : ""}`}
+                          aria-pressed={selectedPool?.poolId === pool.poolId}
                         >
                           <MarketCard market={pool} />
                         </div>

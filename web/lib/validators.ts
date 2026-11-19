@@ -148,6 +148,56 @@ export function validateBetAmount(amount: number): { valid: boolean; error?: str
 }
 
 /**
+ * Limits a bet amount has to respect, in XLM.
+ *
+ * `minBet`/`maxBet` come from the pool configuration (0/absent means the pool
+ * does not constrain that side). `balance` is the connected wallet balance and
+ * caps the amount the user can actually afford.
+ */
+export interface BetAmountLimits {
+  minBet?: number;
+  maxBet?: number;
+  balance?: number | null;
+}
+
+/**
+ * Clamp a requested bet amount to the pool limits and the wallet balance.
+ *
+ * The quick-select buttons in the betting form used to fill in a raw
+ * percentage of the balance, which could land below the pool minimum or above
+ * the pool maximum and leave the form permanently invalid. Clamping keeps the
+ * quick selection usable: the amount is moved into the allowed range instead
+ * of failing validation.
+ *
+ * @param amount Requested amount in XLM
+ * @param limits Pool limits and the wallet balance
+ * @returns The clamped amount (rounded down to 2 decimals), or `null` when no
+ *          valid amount exists (e.g. the balance is below the pool minimum)
+ */
+export function clampBetAmount(
+  amount: number,
+  limits: BetAmountLimits
+): number | null {
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+
+  const min = limits.minBet && limits.minBet > 0 ? limits.minBet : 0;
+  const max = limits.maxBet && limits.maxBet > 0 ? limits.maxBet : Infinity;
+  const balance =
+    typeof limits.balance === 'number' && Number.isFinite(limits.balance)
+      ? limits.balance
+      : Infinity;
+
+  let target = Math.min(Math.max(amount, min), max);
+  if (target > balance) target = balance;
+
+  // The balance cannot cover the pool minimum, so no bet is possible.
+  if (target < min || target <= 0) return null;
+
+  // Round down so the clamped amount never exceeds the cap it was clamped to.
+  return Math.floor(target * 100) / 100;
+}
+
+/**
  * Validate Stellar address format
  * @param address Stellar address (G... strkey)
  * @returns Validation result

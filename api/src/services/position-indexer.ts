@@ -4,8 +4,8 @@
  * Responsibilities
  * ─────────────────
  * 1. Accept decoded `place_bet` events and persist them via a `PositionSource`.
- * 2. Guarantee idempotency: an event whose `txHash` was already stored is
- *    silently skipped so re-plays and duplicate deliveries are safe.
+ * 2. Guarantee idempotency: an event whose stable event identifier was
+ *    already stored is returned unchanged so duplicate deliveries are safe.
  * 3. Expose a `handleReorg(ledgerSeq)` helper that rolls back any positions
  *    written on orphaned ledgers above the given sequence number.
  *
@@ -76,6 +76,18 @@ function validateEvent(event: PlaceBetEvent): void {
   if (!isNonEmptyString(event.txHash)) {
     errors.push('txHash must be a non-empty string');
   }
+  if (
+    event.eventId !== undefined
+    && (!isNonEmptyString(event.eventId) || event.eventId.length > 256)
+  ) {
+    errors.push('eventId must be a non-empty string of at most 256 characters when provided');
+  }
+  if (
+    event.eventIndex !== undefined
+    && (!Number.isInteger(event.eventIndex) || event.eventIndex < 0)
+  ) {
+    errors.push('eventIndex must be a non-negative integer when provided');
+  }
   if (!Number.isInteger(event.ledgerSeq) || event.ledgerSeq < 0) {
     errors.push('ledgerSeq must be a non-negative integer');
   }
@@ -96,7 +108,7 @@ export class PositionIndexer {
    * Process a single decoded `place_bet` event.
    *
    * - Validates the event shape; throws `TypeError` on invalid input.
-   * - Delegates to `store.upsert()`, which handles idempotency by tx hash and
+   * - Delegates to `store.upsert()`, which handles idempotency by event id and
    *   upserts the (market, account, outcome) row.
    *
    * @returns The upserted (or existing, if duplicate) position row.

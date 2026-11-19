@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useEffect, useState, useMemo } from 'react';
 import {
   Plus,
@@ -170,7 +171,7 @@ function PoolActivityItem({
           {event.amount !== undefined && (
             <div className="flex items-center justify-between">
               <span>Amount</span>
-              <span className="text-foreground/70">{formatAmount(event.amount)} STX</span>
+              <span className="text-foreground/70">{formatAmount(event.amount)} {TOKEN_SYMBOL}</span>
             </div>
           )}
 

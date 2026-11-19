@@ -3,7 +3,7 @@
 import Navbar from '@/components/Navbar';
 import WalletConnectGate from '@/components/WalletConnectGate';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../../components/ui/accordion";
-import { Info, Trophy } from "lucide-react";
+import { Info, Loader2, Trophy } from "lucide-react";
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Leaderboard from "../../components/Leaderboard";
 import { useWallet } from '@/components/WalletAdapterProvider';
@@ -13,9 +13,11 @@ import { TOKEN_SYMBOL } from "@/app/lib/formatting";
 export default function RewardsPage() {
   const { address: stxAddress } = useWallet();
 
-  const { userRank, entries } = useLeaderboard(stxAddress);
+  // The hook exposes `userBettorRank` / `bettors`; destructuring the old
+  // `userRank` / `entries` names threw on every render and crashed the page.
+  const { userBettorRank: userRank, bettors, isLoading } = useLeaderboard(stxAddress);
 
-  const totalParticipants = entries.length;
+  const totalParticipants = bettors.length;
   const topPercent =
     userRank && totalParticipants > 0
       ? Math.ceil((userRank / totalParticipants) * 100)
@@ -40,7 +42,12 @@ export default function RewardsPage() {
             </div>
             <div className="lg:col-span-1">
               <div className="glass-panel p-6 rounded-xl h-full flex flex-col justify-center items-center text-center">
-                {userRank ? (
+                {isLoading ? (
+                  <div role="status" className="flex flex-col items-center gap-3 text-muted-foreground">
+                    <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
+                    <span className="text-sm">Loading your rank…</span>
+                  </div>
+                ) : userRank ? (
                   <>
                     <h2 className="text-lg font-medium text-muted-foreground mb-2">Your Rank</h2>
                     <div className="text-5xl font-extrabold text-primary mb-2">#{userRank}</div>

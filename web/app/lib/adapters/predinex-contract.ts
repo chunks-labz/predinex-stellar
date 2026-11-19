@@ -36,7 +36,7 @@ export const predinexContract = {
     depositDeadline?: number | null;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
-  }): Promise<{ txHash: string }> {
+  }): Promise<{ txHash: string; poolId?: number }> {
     const { soroban } = getRuntimeConfig();
     const service = getSorobanService();
 
@@ -88,7 +88,7 @@ export const predinexContract = {
     creatorDepositStroops?: number | bigint;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
-  }): Promise<{ txHash: string }> {
+  }): Promise<{ txHash: string; poolId?: number }> {
     const { soroban } = getRuntimeConfig();
     const service = getSorobanService();
 

@@ -16,6 +16,7 @@ Welcome, and thank you for your interest in contributing! This guide covers ever
 8. [CI Expectations](#8-ci-expectations)
 9. [Automated Dependency Updates (Dependabot)](#9-automated-dependency-updates-dependabot)
 10. [Dependency Vulnerability Auditing](#10-dependency-vulnerability-auditing)
+11. [API Schema Snapshots](#11-api-schema-snapshots)
 
 ---
 
@@ -334,3 +335,27 @@ The workflow in [`.github/workflows/security-audit.yml`](./.github/workflows/sec
 The audits run on every pull request that touches a manifest or lockfile, on pushes to `main` that do the same, weekly on Mondays, and on demand. `Dependency Audit` is the single status check to require in branch protection: it fails if any individual audit fails, is skipped, or is cancelled, so a missing audit can never be mistaken for a clean one.
 
 `/api` is **not** covered: it has no committed lockfile, and `npm audit` cannot resolve a dependency tree without one. The `stellar-lend` prototype contracts are not covered either — they sit outside the Cargo workspace and resolve their own dependency graphs. Bringing either into scope means committing a lockfile first.
+
+## 11. API Schema Snapshots
+
+The public API contract is committed at [`api/schema/openapi.json`](./api/schema/openapi.json). CI regenerates it and fails when the snapshot drifts, protecting consumers from accidental breaking changes.
+
+When an API change is intentional, run this one command from `api/`, review the JSON diff, and commit it with the code change:
+
+```bash
+npm run schema:update
+```
+
+Use `npm run schema:check` to verify the snapshot without changing files.
+
+## ADR workflow
+
+We use Architecture Decision Records (ADRs) to document significant design decisions. See [`docs/adr/`](docs/adr/) for existing ADRs and the [template](docs/adr/0000-adr-template.md).
+
+When proposing a significant architectural change:
+1. Check existing ADRs to avoid duplication.
+2. Create a new ADR in `docs/adr/` using the template (numbered sequentially).
+3. Start with status `Proposed` and open a PR for discussion.
+4. After consensus, update the status to `Accepted` and merge.
+
+ADR contents should include context, the decision made, and clear consequences (positive and negative).

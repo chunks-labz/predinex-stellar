@@ -115,7 +115,15 @@ vi.mock('../../app/lib/hooks/useMarketDiscovery', () => ({
 }));
 
 vi.mock('../../app/lib/hooks/useLeaderboard', () => ({
-  useLeaderboard: vi.fn(() => ({ userRank: null, entries: [] })),
+  useLeaderboard: vi.fn(() => ({
+    bettors: [],
+    creators: [],
+    userBettorRank: null,
+    userCreatorRank: null,
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(),
+  })),
 }));
 
 vi.mock('../../app/hooks/useUserActivity', () => ({

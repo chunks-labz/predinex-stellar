@@ -130,26 +130,31 @@ export default function Navbar() {
                             </button>
                         )}
 
-                        {/* Mobile Menu Toggle - Show only when not connected */}
-                        {!isConnected && (
-                            <div className="md:hidden flex items-center gap-2">
-                                <button
-                                    onClick={toggleTheme}
-                                    className="p-2 text-muted-foreground hover:text-primary transition-colors"
-                                    aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-                                >
-                                    {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
-                                </button>
-                                <button
-                                    onClick={() => setIsMenuOpen(!isMenuOpen)}
-                                    className="p-2 text-muted-foreground hover:text-foreground transition-colors"
-                                    aria-expanded={isMenuOpen}
-                                    aria-label={isMenuOpen ? "Close menu" : "Open menu"}
-                                >
-                                    {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
-                                </button>
-                            </div>
-                        )}
+                        </div>
+
+                        {/* Mobile Menu Toggle - #1540: this used to live INSIDE the
+                            desktop-only `hidden md:flex` actions container and was
+                            gated on `!isConnected`, so the hamburger was invisible at
+                            every breakpoint and connected users could never open the
+                            drawer. It is now a sibling of that container: visible on
+                            small screens for every wallet state. */}
+                        <div className="md:hidden flex items-center gap-2">
+                            <button
+                                onClick={toggleTheme}
+                                className="p-2 text-muted-foreground hover:text-primary transition-colors"
+                                aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                            >
+                                {theme === 'light' ? <Moon size={20} /> : <Sun size={20} />}
+                            </button>
+                            <button
+                                onClick={() => setIsMenuOpen(!isMenuOpen)}
+                                className="p-2 text-muted-foreground hover:text-foreground transition-colors"
+                                aria-expanded={isMenuOpen}
+                                aria-controls="mobile-nav-menu"
+                                aria-label={isMenuOpen ? "Close menu" : "Open menu"}
+                            >
+                                {isMenuOpen ? <X size={24} /> : <Menu size={24} />}
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -165,7 +170,10 @@ export default function Navbar() {
 
                 {/* Mobile Menu Content - Slide-in Drawer */}
                 {isMenuOpen && (
-                    <div className="md:hidden glass border-t border-border animate-in slide-in-from-top-4 duration-300">
+                    <div
+                        id="mobile-nav-menu"
+                        className="md:hidden glass border-t border-border animate-in slide-in-from-top-4 duration-300"
+                    >
                         <div className="px-4 pt-2 pb-6 space-y-1">
                             {/* Network badge — mobile */}
                             {isConnected && (

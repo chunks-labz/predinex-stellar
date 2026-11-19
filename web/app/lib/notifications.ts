@@ -277,12 +277,14 @@ export function useBrowserNotifications(options: UseBrowserNotificationsOptions 
           return;
         }
 
-        setEnabledState(true);
+        // Only persist "on" once the browser has granted permission
+        // (`requestPermission` does that itself). Setting it first left the
+        // toggle stuck "on" after the user denied the prompt.
         if (permission !== 'granted') {
           void requestPermission();
-        } else {
-          void syncSubscription();
+          return;
         }
+        setEnabledState(true);
       },
       requestPermission,
       syncSubscription,

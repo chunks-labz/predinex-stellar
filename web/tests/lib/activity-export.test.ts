@@ -19,7 +19,7 @@ function makeActivity(overrides: Partial<ActivityItem> = {}): ActivityItem {
     functionName: 'place-bet',
     timestamp: Date.parse('2026-03-15T12:00:00.000Z') / 1000,
     status: 'success',
-    amount: 2_500_000, // 2.5 STX in micro-STX
+    amount: 25_000_000, // 2.5 tokens in stroops (10^7 per token)
     poolId: 7,
     poolTitle: 'Will it rain?',
     explorerUrl: 'https://explorer.example/tx/0xabc',
@@ -74,7 +74,7 @@ describe('filterActivitiesForExport', () => {
 });
 
 describe('toExportRecords', () => {
-  it('maps the documented fields and converts amount to STX', () => {
+  it('maps the documented fields and converts amount to token units', () => {
     expect(toExportRecords([makeActivity()])).toEqual([
       {
         poolId: 7,

@@ -17,6 +17,7 @@ import {
   getPendingLpRewardsFromSoroban,
   getLpStakeFromSoroban,
   getUserPortfolioFromSoroban,
+  getCachedPoolExtMetadata,
   type Pool,
   type UserBetData,
   type LpPositionData,
@@ -161,6 +162,8 @@ export const predinexReadApi = {
   getPool,
   /** Canonical Soroban read: get user's bet in a pool */
   getUserBet,
+  /** Cached market metadata read with stale-while-revalidate */
+  getPoolExtMetadata: getCachedPoolExtMetadata,
   /** Canonical Soroban read: get total pool count */
   getPoolCount,
   /** Canonical Soroban read: get freeze admin */

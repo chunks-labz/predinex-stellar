@@ -93,6 +93,26 @@ function ActivitySkeleton() {
 
 // --- Empty State ---
 
+function FilteredEmptyState({ onClearFilters }: { onClearFilters?: () => void }) {
+    return (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+            <h3 className="text-xl font-bold mb-2">No matching activity</h3>
+            <p className="text-muted-foreground max-w-sm mb-6">
+                None of your transactions match the current filters.
+            </p>
+            {onClearFilters && (
+                <button
+                    type="button"
+                    onClick={onClearFilters}
+                    className="px-6 py-3 border border-border font-bold rounded-xl hover:bg-muted/50 transition-colors"
+                >
+                    Clear filters
+                </button>
+            )}
+        </div>
+    );
+}
+
 function EmptyState() {
     return (
         <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -178,8 +198,10 @@ const ActivityRow = memo(function ActivityRow({ item, nowSeconds }: { item: Acti
                     href={item.explorerUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="p-2 rounded-lg bg-muted/40 hover:bg-primary hover:text-white transition-all opacity-0 group-hover:opacity-100"
-                    aria-label="View on Stellar Explorer"
+                    // Always visible on touch screens; on larger screens it reveals on
+                    // hover and, for keyboard users, on focus.
+                    className="p-2 rounded-lg bg-muted/40 hover:bg-primary hover:text-white transition-all sm:opacity-0 sm:group-hover:opacity-100 focus-visible:opacity-100"
+                    aria-label="View on Stellar Explorer (opens in a new tab)"
                     onClick={(e) => e.stopPropagation()}
                 >
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -201,6 +223,9 @@ interface ActivityFeedProps {
     onRefresh?: () => void;
     limit?: number;
     showHeader?: boolean;
+    /** True when `activities` is a filtered subset, so an empty list means "no match", not "no history". */
+    isFiltered?: boolean;
+    onClearFilters?: () => void;
 }
 
 const ActivityFeed = memo(function ActivityFeed({
@@ -210,6 +235,8 @@ const ActivityFeed = memo(function ActivityFeed({
     onRefresh,
     limit,
     showHeader = true,
+    isFiltered = false,
+    onClearFilters,
 }: ActivityFeedProps) {
     const displayItems = limit ? activities.slice(0, limit) : activities;
 
@@ -250,7 +277,7 @@ const ActivityFeed = memo(function ActivityFeed({
             )}
 
             {error && (
-                <div className="p-4 rounded-xl border border-red-500/20 bg-red-500/10 text-red-400 text-sm mb-4">
+                <div role="alert" className="p-4 rounded-xl border border-red-500/20 bg-red-500/10 text-red-400 text-sm mb-4">
                     {error}
                 </div>
             )}
@@ -258,7 +285,13 @@ const ActivityFeed = memo(function ActivityFeed({
             {isLoading ? (
                 <ActivitySkeleton />
             ) : displayItems.length === 0 ? (
-                <EmptyState />
+                // With a load error the alert above already explains the empty
+                // list; "No Activity Yet" would contradict it.
+                error ? null : isFiltered ? (
+                    <FilteredEmptyState onClearFilters={onClearFilters} />
+                ) : (
+                    <EmptyState />
+                )
             ) : (
                 <div className="space-y-3" role="list" aria-label="Activity feed">
                     {displayItems.map((item) => (

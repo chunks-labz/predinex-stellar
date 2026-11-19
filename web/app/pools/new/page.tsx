@@ -54,9 +54,15 @@ export default function NewPoolPage() {
   const [redirecting, setRedirecting] = useState(false);
 
   const handleSuccess = useCallback(
-    async ({ txHash }: { txHash: string; poolId: number | null }) => {
-      log.info('Pool created, locating new pool id', { txHash });
+    async ({ txHash, poolId }: { txHash: string; poolId: number | null }) => {
       setRedirecting(true);
+      // Prefer the id decoded from the transaction result. Guessing from the
+      // pool count can land on another creator's pool created concurrently.
+      if (poolId !== null && poolId >= 0) {
+        router.push(`/pools/${poolId}`);
+        return;
+      }
+      log.info('Pool created, locating new pool id', { txHash });
       const newPoolId = await findLatestPoolId();
       if (newPoolId !== null && newPoolId >= 0) {
         router.push(`/pools/${newPoolId}`);

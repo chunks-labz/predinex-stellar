@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Distributed tracing across API and worker (settlement bot).
  *
  * Uses W3C `traceparent` context propagation and a configurable span exporter
@@ -20,6 +20,8 @@ export interface SpanContext {
   traceId: string;
   spanId: string;
   traceFlags: string;
+  /** Request/job correlation ID shared with the API that enqueued the job. */
+  correlationId: string;
 }
 
 export interface RecordedSpan {
@@ -135,6 +137,14 @@ export async function shutdownWorkerTracing(): Promise<void> {
 /**
  * Parses a W3C `traceparent` header (`00-<traceId>-<spanId>-<flags>`).
  */
+const CORRELATION_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+function normalizeCorrelationId(value: string | string[] | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return CORRELATION_ID_PATTERN.test(trimmed) ? trimmed : undefined;
+}
+
 export function parseTraceparent(header: string | undefined): SpanContext | null {
   if (!header) return null;
   const trimmed = header.trim();
@@ -146,6 +156,7 @@ export function parseTraceparent(header: string | undefined): SpanContext | null
     traceId: traceId.toLowerCase(),
     spanId: spanId.toLowerCase(),
     traceFlags: traceFlags.toLowerCase(),
+    correlationId: traceId.toLowerCase(),
   };
 }
 
@@ -155,6 +166,10 @@ export function formatTraceparent(ctx: SpanContext): string {
 
 export function getActiveSpanContext(): SpanContext | undefined {
   return traceStorage.getStore();
+}
+
+export function getActiveCorrelationId(): string | undefined {
+  return traceStorage.getStore()?.correlationId;
 }
 
 /**
@@ -167,6 +182,8 @@ export function injectWorkerTraceHeaders(
   const active = traceStorage.getStore();
   if (active) {
     headers["traceparent"] = formatTraceparent(active);
+    headers["x-correlation-id"] = active.correlationId;
+    headers["x-request-id"] = active.correlationId;
   }
   return headers;
 }
@@ -180,7 +197,25 @@ export function extractWorkerTraceContext(
   if (!carrier) return undefined;
   const raw = carrier["traceparent"] ?? carrier["TRACEPARENT"];
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return parseTraceparent(value) ?? undefined;
+  const parsed = parseTraceparent(value);
+  const correlationId = normalizeCorrelationId(
+    carrier["x-correlation-id"] ??
+      carrier["X-Correlation-ID"] ??
+      carrier["x-request-id"] ??
+      carrier["X-Request-ID"],
+  );
+
+  if (!parsed && !correlationId) return undefined;
+  if (!parsed) {
+    return {
+      traceId: randomHex(16),
+      spanId: randomHex(8),
+      traceFlags: tracingEnabled ? "01" : "00",
+      correlationId: correlationId!,
+    };
+  }
+
+  return { ...parsed, correlationId: correlationId ?? parsed.correlationId };
 }
 
 /**
@@ -206,10 +241,12 @@ export async function withWorkerSpan<T>(
         );
 
   const inherited = explicitParent ?? traceStorage.getStore();
+  const traceId = inherited?.traceId ?? randomHex(16);
   const spanCtx: SpanContext = {
-    traceId: inherited?.traceId ?? randomHex(16),
+    traceId,
     spanId: randomHex(8),
     traceFlags: inherited?.traceFlags ?? (tracingEnabled ? "01" : "00"),
+    correlationId: inherited?.correlationId ?? traceId,
   };
 
   const startTimeMs = Date.now();
@@ -227,7 +264,7 @@ export async function withWorkerSpan<T>(
           endTimeMs: Date.now(),
           durationMs: Date.now() - startTimeMs,
           status: "ok",
-          attributes: { ...(options?.attributes ?? {}) },
+          attributes: { ...(options?.attributes ?? {}), "predinex.correlation_id": spanCtx.correlationId },
         };
         await activeExporter.export([recorded]);
       }
@@ -244,7 +281,7 @@ export async function withWorkerSpan<T>(
           durationMs: Date.now() - startTimeMs,
           status: "error",
           error: err instanceof Error ? err.message : String(err),
-          attributes: { ...(options?.attributes ?? {}) },
+          attributes: { ...(options?.attributes ?? {}), "predinex.correlation_id": spanCtx.correlationId },
         };
         await activeExporter.export([recorded]);
       }
@@ -252,3 +289,4 @@ export async function withWorkerSpan<T>(
     }
   });
 }
+

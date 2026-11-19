@@ -73,8 +73,13 @@ function MarketsContent() {
     };
 
     filteredMarkets.forEach(market => {
-      counts[market.status]++;
-      if (market.disputed) counts.disputed++;
+      // #1537 — index by the count keys that exist: 'frozen' has no card and
+      // previously produced NaN, and disputed markets were counted twice
+      // (once by status, once by the disputed flag).
+      if (market.status === 'active') counts.active++;
+      else if (market.status === 'settled') counts.settled++;
+      else if (market.status === 'expired') counts.expired++;
+      else if (market.status === 'disputed' || market.disputed) counts.disputed++;
     });
 
     return counts;
@@ -94,10 +99,11 @@ function MarketsContent() {
         </div>
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
           <StatsCard title="Total Markets" value={filterCounts.all} />
-          <StatsCard title="Open" value={filterCounts.active} />
+          <StatsCard title="Active" value={filterCounts.active} />
           <StatsCard title="Settled" value={filterCounts.settled} />
+          <StatsCard title="Expired" value={filterCounts.expired} />
           <StatsCard title="Disputed" value={filterCounts.disputed} />
         </div>
 

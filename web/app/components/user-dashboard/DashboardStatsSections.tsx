@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { BarChart3, Wallet, Award } from 'lucide-react';
 import type { DashboardStats } from '@/app/lib/user-dashboard/types';
 import { formatStxAmount } from '@/app/lib/user-dashboard/model';
@@ -57,7 +58,7 @@ export function DashboardStatsSections({ stats, isLoading = false }: DashboardSt
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">{t('dashboard.totalWagered')}</p>
-              <p className="text-3xl font-bold">{formatStxAmount(stats.totalWagered)} STX</p>
+              <p className="text-3xl font-bold">{formatStxAmount(stats.totalWagered)} {TOKEN_SYMBOL}</p>
             </div>
             <Wallet className="w-8 h-8 text-blue-500 opacity-50" />
           </div>
@@ -67,7 +68,7 @@ export function DashboardStatsSections({ stats, isLoading = false }: DashboardSt
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">{t('dashboard.totalWinnings')}</p>
-              <p className="text-3xl font-bold text-green-400">{formatStxAmount(stats.totalWinnings)} STX</p>
+              <p className="text-3xl font-bold text-green-400">{formatStxAmount(stats.totalWinnings)} {TOKEN_SYMBOL}</p>
             </div>
             <Award className="w-8 h-8 text-green-500 opacity-50" />
           </div>

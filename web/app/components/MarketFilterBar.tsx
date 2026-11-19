@@ -30,10 +30,13 @@ interface MarketFilterBarProps {
 
 const statusOptions: Array<{ value: MarketStatusFilter; label: string }> = [
   { value: 'all', label: 'All statuses' },
-  { value: 'open', label: 'Open' },
+  // MarketCard badges the live state "Active" — keep the filter label in step
+  // with it so users are not choosing between two names for the same state.
+  { value: 'open', label: 'Active' },
   { value: 'settled', label: 'Settled' },
   { value: 'disputed', label: 'Disputed' },
   { value: 'frozen', label: 'Frozen' },
+  { value: 'expired', label: 'Expired' },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [

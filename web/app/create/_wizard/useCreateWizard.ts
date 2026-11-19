@@ -18,6 +18,7 @@ import {
   type SettlementType,
 } from '@/lib/validators';
 import {
+  defaultDepositDeadline,
   draftFromSavedTemplate,
   loadSavedTemplates,
   type SavedPoolTemplate,
@@ -56,6 +57,8 @@ export interface CreatePoolDraft {
   externalLinks: string;
   /** #721 — URL of a cover image shown on pool cards/detail page. */
   coverImage: string;
+  /** Save this configuration as a local template once the pool is created. */
+  saveAsTemplate: boolean;
 }
 
 /** @deprecated Use CreatePoolDraft */
@@ -77,6 +80,7 @@ export const EMPTY_DRAFT: CreatePoolDraft = {
   resolutionCriteria: '',
   externalLinks: '',
   coverImage: '',
+  saveAsTemplate: false,
 };
 
 export type FormErrors = Partial<Record<string, string>>;
@@ -243,7 +247,7 @@ export function useCreateWizard(): UseCreateWizard {
           description: template.description,
           outcomes: [...template.outcomes],
           duration: String(template.duration),
-          depositDeadline: String(Math.min(template.duration - 60, template.duration / 2)),
+          depositDeadline: String(defaultDepositDeadline(template.duration)),
         });
         return true;
       }

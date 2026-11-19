@@ -53,11 +53,25 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/rate-limit.js';
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
+import { logger } from '../lib/logger.js';
 import {
   MarketListQuery,
   MarketStatus,
   parseMarketListQuery,
 } from '../services/market-query.js';
+
+const ADMIN_AUDIT_LOG_DEFAULT_LIMIT = 20;
+const ADMIN_AUDIT_LOG_MAX_LIMIT = 100;
+
+function parseDateFilter(value: unknown, name: string): Date | null {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value !== 'string') return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`${name} must be a valid ISO date string`);
+  }
+  return date;
+}
 import { AuthContext, sharedAuthValidator } from '../middleware/auth.js';
 import { withSpan } from '../middleware/tracing.js';
 import {
@@ -509,14 +523,30 @@ export interface MarketsRouterOptions {
   idempotencyStore?: IdempotencyStore;
 }
 
+function isTradeHistorySource(value: unknown): value is TradeHistorySource {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as TradeHistorySource).listTrades === 'function'
+  );
+}
+
 export function createMarketsRouter(
   source: MarketSource = defaultMarketSource,
   creator?: MarketCreator,
+  tradeHistoryOrOptions?: TradeHistorySource | MarketsRouterOptions,
   options: MarketsRouterOptions = {}
 ): Router {
+  const tradeHistory = isTradeHistorySource(tradeHistoryOrOptions)
+    ? tradeHistoryOrOptions
+    : defaultTradeHistorySource;
+  const routerOptions = isTradeHistorySource(tradeHistoryOrOptions)
+    ? options
+    : (tradeHistoryOrOptions ?? {});
+
   const router = Router();
   const idempotency = createIdempotencyMiddleware({
-    store: options.idempotencyStore,
+    store: routerOptions.idempotencyStore,
   });
   router.use(rateLimitMiddleware);
 
@@ -739,7 +769,10 @@ export function createMarketsRouter(
       return;
     }
 
-    const parsedPage = parsePagination(req.query as Record<string, unknown>);
+    const parsedPage = parsePagination(req.query as Record<string, unknown>, {
+      limit: ADMIN_AUDIT_LOG_DEFAULT_LIMIT,
+      maxLimit: ADMIN_AUDIT_LOG_MAX_LIMIT,
+    });
     if (!parsedPage.ok) {
       sendError(res, 400, 'VALIDATION_ERROR', 'Invalid pagination parameters', parsedPage.errors);
       return;
@@ -755,16 +788,79 @@ export function createMarketsRouter(
       marketId = Number(raw);
     }
 
+    let actor: string | undefined;
+    if (req.query.actor !== undefined) {
+      const raw = req.query.actor;
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'actor must be a non-empty string');
+        return;
+      }
+      actor = raw.trim();
+    }
+
+    let action: 'cancelled' | 'restored' | undefined;
+    if (req.query.action !== undefined) {
+      const raw = req.query.action;
+      if (typeof raw !== 'string') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'action must be cancelled or restored');
+        return;
+      }
+      const normalized = raw.toLowerCase();
+      if (normalized !== 'cancelled' && normalized !== 'restored') {
+        sendError(res, 400, 'VALIDATION_ERROR', 'action must be cancelled or restored');
+        return;
+      }
+      action = normalized;
+    }
+
+    let fromDate: Date | null = null;
+    let toDate: Date | null = null;
+    try {
+      fromDate = parseDateFilter(req.query.from, 'from');
+      toDate = parseDateFilter(req.query.to, 'to');
+    } catch (error: any) {
+      sendError(res, 400, 'VALIDATION_ERROR', error.message);
+      return;
+    }
+
+    let cursorId: number | undefined;
+    if (req.query.cursor !== undefined) {
+      const raw = req.query.cursor;
+      if (typeof raw !== 'string' || !/^\d+$/.test(raw)) {
+        sendError(res, 400, 'VALIDATION_ERROR', 'cursor must be a non-negative integer');
+        return;
+      }
+      cursorId = Number(raw);
+    }
+
     try {
       const { params } = parsedPage;
       const entries = source.getAuditLog
         ? await source.getAuditLog(marketId)
         : [];
-      const page = entries.slice(params.offset, params.offset + params.limit);
+
+      const filteredEntries = entries.filter((entry) => {
+        if (actor && !entry.actor.toLowerCase().includes(actor.toLowerCase())) return false;
+        if (action && entry.action !== action) return false;
+        if (fromDate && new Date(entry.timestamp).getTime() < fromDate.getTime()) return false;
+        if (toDate && new Date(entry.timestamp).getTime() > toDate.getTime()) return false;
+        return true;
+      });
+
+      const cursorOffset = cursorId === undefined ? 0 : filteredEntries.findIndex((entry) => entry.id === cursorId) + 1;
+      const page = filteredEntries.slice(cursorOffset, cursorOffset + params.limit);
+      const nextCursor = cursorOffset + page.length < filteredEntries.length ? String(page[page.length - 1]?.id ?? '') : null;
+      const prevCursor = cursorId === undefined ? null : String(filteredEntries[Math.max(0, cursorOffset - params.limit)]?.id ?? null);
+
       res.json({
         success: true,
         data: page,
-        pagination: buildPageMeta(entries.length, params, page.length),
+        pagination: {
+          ...buildPageMeta(filteredEntries.length, { ...params, offset: cursorOffset }, page.length),
+          nextCursor,
+          prevCursor,
+          cursor: cursorId !== undefined ? String(cursorId) : null,
+        },
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
@@ -795,7 +891,7 @@ export function createMarketsRouter(
 
     try {
       const archivedCount = await source.archiveResolvedOlderThan(archiveWindowMs(windowDays));
-      console.info(`Archived ${archivedCount} resolved markets older than ${windowDays} day(s)`);
+      logger.info('markets_archived', { archivedCount, windowDays });
       res.json({
         success: true,
         data: { archivedCount, windowDays },

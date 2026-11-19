@@ -75,9 +75,8 @@ function readDisputeMockDataFlag(): string | undefined {
  * on-chain events.
  *
  * Lives here rather than in `adapters/activity` so the components that render
- * these rows can read it without importing that module, which has a pre-existing
- * broken dynamic import (`../hooks/usePoolActivity`) that fails to resolve.
- * `adapters/activity`'s `useFixtures` delegates here.
+ * these rows can read the flag without pulling in that module and its Soroban
+ * fetch path. `adapters/activity`'s `useFixtures` delegates here.
  */
 export function areActivityFixturesEnabled(): boolean {
   return isDemoDataFlagEnabled(ACTIVITY_FIXTURES_FLAG, readEnv()[ACTIVITY_FIXTURES_FLAG]);

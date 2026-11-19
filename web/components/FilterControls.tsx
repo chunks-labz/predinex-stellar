@@ -6,13 +6,9 @@ import { StatusFilter } from '@/app/lib/market-types';
 interface FilterControlsProps {
   selectedStatus: StatusFilter;
   onStatusChange: (status: StatusFilter) => void;
-  counts?: {
-    all: number;
-    open?: number;
-    active?: number;
-    settled: number;
-    disputed?: number;
-  };
+  // #1537 — keyed by the filter union so every selectable status (including the
+  // newly added 'expired' and the pre-existing 'frozen') can be indexed safely.
+  counts?: Partial<Record<StatusFilter, number>> & { active?: number };
 }
 
 interface FilterOption {

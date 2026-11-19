@@ -50,11 +50,10 @@ export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboa
     try {
       await new Promise<void>((resolve) => setTimeout(resolve, 400));
 
-      // Build bettors list (top 100 by volume)
+      // Build bettors list (top 100 by volume). The connected wallet is not
+      // injected with invented stats: it previously appeared as #1 with
+      // made-up wins and volume for every user.
       const bettorData = [...MOCK_BETTORS];
-      if (currentUserAddress && !bettorData.find((e) => e.address === currentUserAddress)) {
-        bettorData.push({ address: currentUserAddress, totalVolume: 850_000, wins: 7, totalPredictions: 12, winPercentage: 58.3 });
-      }
       const rankedBettors: BettorEntry[] = bettorData
         .sort((a, b) => b.totalVolume - a.totalVolume)
         .slice(0, 100)
@@ -62,9 +61,6 @@ export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboa
 
       // Build creators list (top 100 by volume)
       const creatorData = [...MOCK_CREATORS];
-      if (currentUserAddress && !creatorData.find((e) => e.address === currentUserAddress)) {
-        creatorData.push({ address: currentUserAddress, totalPools: 1, totalVolume: 200_000 });
-      }
       const rankedCreators: CreatorEntry[] = creatorData
         .sort((a, b) => b.totalVolume - a.totalVolume)
         .slice(0, 100)
@@ -73,10 +69,16 @@ export function useLeaderboard(currentUserAddress?: string | null): UseLeaderboa
       setBettors(rankedBettors);
       setCreators(rankedCreators);
 
-      if (currentUserAddress) {
-        setUserBettorRank(rankedBettors.find((e) => e.address === currentUserAddress)?.rank ?? null);
-        setUserCreatorRank(rankedCreators.find((e) => e.address === currentUserAddress)?.rank ?? null);
-      }
+      setUserBettorRank(
+        currentUserAddress
+          ? rankedBettors.find((e) => e.address === currentUserAddress)?.rank ?? null
+          : null
+      );
+      setUserCreatorRank(
+        currentUserAddress
+          ? rankedCreators.find((e) => e.address === currentUserAddress)?.rank ?? null
+          : null
+      );
     } catch (e) {
       log.error('useLeaderboard error:', e);
       setError('Failed to load leaderboard. Please try again.');

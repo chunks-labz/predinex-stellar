@@ -16,6 +16,7 @@ import {
   calculateBetProfitLoss
 } from "./dashboard-utils";
 import { getRuntimeConfig } from "./runtime-config";
+import { stroopsToUnits } from "./formatting";
 import { createScopedLogger } from "./logger";
 
 const log = createScopedLogger('dashboard-api');
@@ -147,18 +148,25 @@ async function createUserBetFromPool(
       outcome
     );
     
+    // #1539 — on-chain values are stroops (10^7 per token) but this DTO is
+    // rendered directly by formatCurrency(), which never scales. Leaving the raw
+    // integers here showed "1,000,000 XLM" for a 1 XLM bet. Convert once, at the
+    // boundary, so every downstream consumer (ActiveBetsCard, ClaimWinnings,
+    // BetHistoryTable, calculatePortfolio) shares one consistent unit.
     return {
       poolId: pool.poolId,
       marketTitle: pool.title,
       outcomeChosen: outcome,
       outcomeName: outcome === 'A' ? pool.outcomeAName : pool.outcomeBName,
-      amountBet: Number(betAmount),
+      amountBet: Number(stroopsToUnits(betAmount)),
       betTimestamp: pool.createdAt, // Mock: use pool creation time
       currentOdds,
-      potentialWinnings,
+      potentialWinnings:
+        potentialWinnings > 0 ? stroopsToUnits(BigInt(Math.round(potentialWinnings))) : 0,
       status,
       claimStatus,
-      claimableAmount: claimableAmount > 0 ? claimableAmount : undefined
+      claimableAmount:
+        claimableAmount > 0 ? stroopsToUnits(BigInt(Math.round(claimableAmount))) : undefined
     };
   } catch (error) {
     log.error('Failed to create user bet', error);

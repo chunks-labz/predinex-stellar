@@ -53,6 +53,8 @@ export interface CreatePoolSubmissionResult {
   composedDescription: string;
   /** The outcomes used to satisfy the contract call. */
   outcomes: string[];
+  /** The new pool's id, when the contract's return value could be decoded. */
+  poolId?: number;
 }
 
 const POOL_METADATA_DELIMITER = '\n\n---\nPool metadata:';
@@ -89,7 +91,7 @@ export async function createPool(
       : ['Yes', 'No'];
   const composedDescription = composePoolDescription(params);
 
-  const { txHash } = await predinexContract.createMultiOutcomePoolSoroban({
+  const { txHash, poolId } = await predinexContract.createMultiOutcomePoolSoroban({
     wallet: options.wallet,
     title: params.name.trim(),
     description: composedDescription,
@@ -99,5 +101,5 @@ export async function createPool(
     onFeeEstimated: options.onFeeEstimated,
   });
 
-  return { txHash, composedDescription, outcomes };
+  return { txHash, composedDescription, outcomes, poolId };
 }

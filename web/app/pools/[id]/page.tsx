@@ -116,6 +116,22 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         fetchUserBet();
     }, [fetchUserBet]);
 
+    // #1538 — manual retry for the failed-to-load state below, so a transient
+    // RPC hiccup does not leave the user stuck on an error screen.
+    const handleRetry = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            await fetchPool();
+        } catch (e) {
+            if (mountedRef.current) {
+                setError(e instanceof Error ? e.message : 'Failed to load pool');
+            }
+        } finally {
+            if (mountedRef.current) setIsLoading(false);
+        }
+    }, [fetchPool]);
+
 
     // Auto-refresh every 10 seconds and announce updates to screen readers.
     useEffect(() => {
@@ -139,20 +155,35 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     if (isLoading) return <LoadingSkeleton />;
 
     // Error state (no pool data).
+    // #1538 — a fetch failure is not proof that the pool does not exist, so it
+    // must not claim "Pool Not Found"; that drives users away from a market
+    // that is still live. The true not-found branch (below) keeps that copy.
     if (error && !pool) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
                 <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
                     <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-                    <h2 className="text-xl font-semibold text-red-500 mb-2">Pool Not Found</h2>
+                    <h2 className="text-xl font-semibold text-red-500 mb-2">Couldn&apos;t load this pool</h2>
                     <p className="text-muted-foreground text-center max-w-md mb-6">{error}</p>
-                    <Link
-                        href="/markets"
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
-                    >
-                        Back to Markets
-                    </Link>
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void handleRetry();
+                            }}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                            Retry
+                        </button>
+                        <Link
+                            href="/markets"
+                            className="px-4 py-2 border border-border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            Back to Markets
+                        </Link>
+                    </div>
                 </div>
             </main>
         );
@@ -203,9 +234,11 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         Updates every 10s &middot; Pool #{poolId}
                     </div>
 
-                    {/* Live region for price/volume updates - announces on query, not every tick */}
-                    <div role="status" aria-live="polite" aria-atomic="true" className="hidden">
-                        <span className="sr-only">Live pool update</span>
+                    {/* Live region for price/volume updates - announces on query, not every tick.
+                        #1538 — `hidden` (display:none) removes an element from the accessibility
+                        tree, so the announcement never reached screen readers. */}
+                    <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+                        <span>Live pool update</span>
                         <span id="live-pool-update" />
                     </div>
 
@@ -260,6 +293,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                                 className="font-bold justify-center"
                                 secondsRemaining={secondsUntil(pool.expiry)}
                                 settled={pool.settled}
+                                announce
                             />
                         </div>
                     </div>

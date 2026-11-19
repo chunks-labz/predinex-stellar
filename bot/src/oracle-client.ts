@@ -1,5 +1,6 @@
 import type { BotConfig } from "./config.js";
 import { logger } from "./logger.js";
+import { withUpstreamTimeout } from "./upstream.js";
 
 export class OracleRateLimitError extends Error {
   constructor(public readonly provider: string) {
@@ -191,7 +192,11 @@ export async function fetchOracleWithRetry(
     let requestError: unknown;
 
     try {
-      response = await fetch(url, { ...init, signal: abort.signal });
+      response = await withUpstreamTimeout(
+        fetch(url, { ...init, signal: abort.signal }),
+        provider,
+        config.oracleRequestTimeoutMs,
+      );
     } catch (error) {
       requestError = error;
     } finally {

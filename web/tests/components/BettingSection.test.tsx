@@ -261,6 +261,89 @@ describe('BettingSection', () => {
     expect(await axe(container).run()).toHaveLength(0);
   });
 
+  // #1534 — the quick-select buttons used to fill in a raw percentage of the
+  // wallet balance, which could fall outside the pool limits and leave the
+  // form permanently invalid.
+  describe('quick bet amounts', () => {
+    const limitedPool = {
+      ...mockPool,
+      // 5 XLM minimum, 50 XLM maximum.
+      minBet: 50_000_000,
+      maxBet: 500_000_000,
+    };
+
+    it('clamps a quick amount up to the pool minimum', async () => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+        address: connectedWallet.address,
+        balance: '20.0000000',
+        isConnected: true,
+      });
+
+      const user = userEvent.setup();
+      renderWithProviders(<BettingSection pool={limitedPool} poolId={0} />);
+
+      const input = screen.getByLabelText(/Enter bet amount/i);
+      // 10% of 20 XLM is 2 XLM, which is below the 5 XLM pool minimum.
+      await user.click(screen.getByRole('button', { name: /Set bet to 5 XLM \(10%\)/i }));
+
+      expect(input).toHaveValue(5);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.getByText(/Bet on Outcome A/i)).not.toBeDisabled();
+    });
+
+    it('clamps a quick amount down to the pool maximum', async () => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+        address: connectedWallet.address,
+        balance: '100.0000000',
+        isConnected: true,
+      });
+
+      const user = userEvent.setup();
+      renderWithProviders(<BettingSection pool={limitedPool} poolId={0} />);
+
+      const input = screen.getByLabelText(/Enter bet amount/i);
+      // 100% of 100 XLM is 100 XLM, which is above the 50 XLM pool maximum.
+      await user.click(screen.getByRole('button', { name: /Set bet to 50 XLM \(100%\)/i }));
+
+      expect(input).toHaveValue(50);
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('offers the largest allowed amount through the Max button', async () => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+        address: connectedWallet.address,
+        balance: '20.0000000',
+        isConnected: true,
+      });
+
+      const user = userEvent.setup();
+      renderWithProviders(<BettingSection pool={limitedPool} poolId={0} />);
+
+      const input = screen.getByLabelText(/Enter bet amount/i);
+      await user.click(screen.getByRole('button', { name: /Set bet to 20 XLM \(Max\)/i }));
+
+      expect(input).toHaveValue(20);
+    });
+
+    it('disables a quick amount that no balance can cover', async () => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+        address: connectedWallet.address,
+        balance: '2.0000000',
+        isConnected: true,
+      });
+
+      renderWithProviders(<BettingSection pool={limitedPool} poolId={0} />);
+
+      // The balance is below the 5 XLM pool minimum, so no quick amount exists.
+      expect(screen.getByRole('button', { name: /10% is not available/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /Max is not available/i })).toBeDisabled();
+    });
+  });
+
   it('disables buttons while betting is in progress', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 

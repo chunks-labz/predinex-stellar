@@ -89,14 +89,14 @@ export function StepReview({ draft, walletAddress, onEdit, setField }: StepRevie
           <SummaryRow
             label="Resolution criteria"
             value={draft.resolutionCriteria}
-            onEdit={() => onEdit(1)}
+            onEdit={() => onEdit(2)}
           />
         )}
         {draft.externalLinks && (
-          <SummaryRow label="External links" value={draft.externalLinks} onEdit={() => onEdit(2)} />
+          <SummaryRow label="External links" value={draft.externalLinks} onEdit={() => onEdit(4)} />
         )}
         {draft.coverImage && (
-          <SummaryRow label="Cover image" value={draft.coverImage} onEdit={() => onEdit(1)} />
+          <SummaryRow label="Cover image" value={draft.coverImage} onEdit={() => onEdit(2)} />
         )}
       </div>
 

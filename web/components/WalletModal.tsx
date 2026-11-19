@@ -7,11 +7,11 @@
  */
 
 import { X, Wallet, Smartphone, CheckCircle2, AlertCircle, Info, ExternalLink } from 'lucide-react';
-import { isWalletAvailable, WalletType } from '../lib/wallet-connector';
+import { isWalletAvailable, WalletType } from '../app/lib/wallet-connector';
 import { useState, useEffect, useId, useRef } from 'react';
-import { useFocusTrap } from '../lib/hooks/useFocusTrap';
-import { useEscapeDismiss } from '../lib/hooks/useEscapeDismiss';
-import { createScopedLogger } from '../lib/logger';
+import { useFocusTrap } from '../app/lib/hooks/useFocusTrap';
+import { useEscapeDismiss } from '../app/lib/hooks/useEscapeDismiss';
+import { createScopedLogger } from '../app/lib/logger';
 
 const log = createScopedLogger('WalletModal');
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  calculateOdds,
   calculateMarketStatus,
   calculateTimeRemaining,
   processMarketData,
@@ -138,5 +139,20 @@ describe('currentTimestampSeconds', () => {
     const now = currentTimestampSeconds();
     expect(Number.isInteger(now)).toBe(true);
     expect(Math.abs(now - Math.floor(Date.now() / 1000))).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('calculateOdds', () => {
+  it('splits an empty pool 50/50', () => {
+    expect(calculateOdds(BigInt(0), BigInt(0))).toEqual({ oddsA: 50, oddsB: 50 });
+  });
+
+  it('always sums to 100 even when both sides round up', () => {
+    // 12.5 / 87.5 rounded independently would be 13 / 88 = 101%.
+    expect(calculateOdds(BigInt(1), BigInt(7))).toEqual({ oddsA: 13, oddsB: 87 });
+    for (let a = 0; a <= 50; a++) {
+      const { oddsA, oddsB } = calculateOdds(BigInt(a), BigInt(97 - a));
+      expect(oddsA + oddsB).toBe(100);
+    }
   });
 });
