@@ -349,7 +349,14 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                     </div>
 
                     <h1 className="text-3xl font-bold mb-3">{pool.title}</h1>
-                    <p className="text-muted-foreground mb-8">{pool.description}</p>
+                    <p className="text-muted-foreground mb-2">{pool.description}</p>
+                    <p className="text-sm text-muted-foreground mb-8" data-testid="resolution-info">
+                        {pool.settled
+                            ? `Resolved: ${pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB} won.`
+                            : pool.status === 'disputed'
+                                ? 'Resolution is under dispute and not final yet.'
+                                : `Resolves to ${pool.outcomeA} or ${pool.outcomeB} after the market closes (${formatMarketDeadline(pool.expiry)}).`}
+                    </p>
 
                     {/* Stats */}
                     <div className="grid grid-cols-3 gap-4 mb-8">

@@ -136,6 +136,16 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
               {receipt.status === 'failed' && 'Transaction failed'}
               {receipt.status === 'pending' && 'Transaction pending...'}
             </div>
+            {receipt.status === 'pending' && (
+              <div className="text-xs text-muted-foreground mt-1">
+                Waiting for network confirmation. This usually takes a few seconds.
+              </div>
+            )}
+            {receipt.status === 'failed' && (
+              <div className="text-xs text-muted-foreground mt-1">
+                The transaction did not go through. Check your balance and try again.
+              </div>
+            )}
           </div>
         </div>
 

@@ -15,41 +15,6 @@ export default function PortfolioOverview({ portfolio, isLoading = false }: Port
   const profitLossData = useMemo(() => formatProfitLoss(portfolio.profitLoss), [portfolio.profitLoss]);
   const metrics = useMemo(() => selectPortfolioMetricCards(portfolio), [portfolio]);
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading portfolio">
-        <span className="sr-only">Loading portfolio…</span>
-        <div className="flex items-center justify-between">
-          <div className="h-8 bg-muted/50 rounded w-48 animate-pulse"></div>
-          <div className="h-4 bg-muted/50 rounded w-32 animate-pulse"></div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="glass p-6 rounded-xl animate-pulse">
-              <div className="p-3 rounded-lg bg-muted/20 w-12 h-12 mb-4"></div>
-              <div className="space-y-2">
-                <div className="h-3 bg-muted/50 rounded w-24"></div>
-                <div className="h-8 bg-muted/50 rounded w-32"></div>
-                <div className="h-2 bg-muted/50 rounded w-28"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="glass p-6 rounded-xl animate-pulse">
-          <div className="h-6 bg-muted/50 rounded w-40 mb-4"></div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="flex flex-col items-center">
-                <div className="h-8 bg-muted/50 rounded w-16 mb-2"></div>
-                <div className="h-3 bg-muted/50 rounded w-20"></div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const renderedMetrics = useMemo(
     () =>
       metrics.map((metric) => {
@@ -100,6 +65,41 @@ export default function PortfolioOverview({ portfolio, isLoading = false }: Port
       }),
     [metrics, profitLossData.isProfit],
   );
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6" role="status" aria-busy="true" aria-label="Loading portfolio">
+        <span className="sr-only">Loading portfolio…</span>
+        <div className="flex items-center justify-between">
+          <div className="h-8 bg-muted/50 rounded w-48 animate-pulse"></div>
+          <div className="h-4 bg-muted/50 rounded w-32 animate-pulse"></div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="glass p-6 rounded-xl animate-pulse">
+              <div className="p-3 rounded-lg bg-muted/20 w-12 h-12 mb-4"></div>
+              <div className="space-y-2">
+                <div className="h-3 bg-muted/50 rounded w-24"></div>
+                <div className="h-8 bg-muted/50 rounded w-32"></div>
+                <div className="h-2 bg-muted/50 rounded w-28"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="glass p-6 rounded-xl animate-pulse">
+          <div className="h-6 bg-muted/50 rounded w-40 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="flex flex-col items-center">
+                <div className="h-8 bg-muted/50 rounded w-16 mb-2"></div>
+                <div className="h-3 bg-muted/50 rounded w-20"></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

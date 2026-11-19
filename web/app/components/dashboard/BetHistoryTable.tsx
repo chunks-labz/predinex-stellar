@@ -310,6 +310,8 @@ export default function BetHistoryTable({
                       <td className="p-4">
                         <Link 
                           href={`/markets/${bet.poolId}`}
+                          title={bet.marketTitle}
+                          aria-label={`View market: ${bet.marketTitle}`}
                           className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                         >
                           <span className="truncate max-w-[120px] sm:max-w-[200px]">{bet.marketTitle}</span>
