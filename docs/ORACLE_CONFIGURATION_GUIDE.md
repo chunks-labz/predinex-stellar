@@ -134,6 +134,9 @@ window, configurable via `set_dispute_window`.
   bettors cannot claim before it.
 - **Do not rely on re-settlement as a correction path.** It does not exist. If a
   resolution may need review, keep the dispute window open long enough to use.
+- **Rotate the settlement key on a schedule.** Follow
+  [`ORACLE_ROTATION.md`](./ORACLE_ROTATION.md) for the two-step admin transfer,
+  per-pool re-delegation, rollback and verification.
 
 ## Failure reference
 
