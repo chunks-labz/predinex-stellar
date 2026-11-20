@@ -40,6 +40,7 @@ mod multi_user_tests;
 mod pause_tests;
 mod pool_categories_tests;
 mod protocol_fee_tests;
+mod resolver_tests;
 mod settlement_tests;
 mod stale_oracle_tests;
 mod test;
