@@ -19,7 +19,7 @@ import {
   useCallback,
 } from "react";
 import WalletModal from "@/components/WalletModal";
-import { createScopedLogger } from "../lib/logger";
+import { createScopedLogger } from "../app/lib/logger";
 
 const log = createScopedLogger("WalletProvider");
 

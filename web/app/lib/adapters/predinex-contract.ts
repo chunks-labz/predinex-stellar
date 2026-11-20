@@ -7,9 +7,8 @@ import type { Finished } from '@stacks/connect';
 import { uintCV, stringAsciiCV } from '@stacks/transactions';
 import { scValToNative } from '@stellar/stellar-sdk';
 import { getRuntimeConfig } from '../runtime-config';
-import { SorobanTransactionService, TxStage } from '../soroban-transaction-service';
+import { ChainIdValue, SorobanTransactionService, TxStage } from '../soroban-transaction-service';
 import { FreighterWalletClient } from '../freighter-adapter';
-import { scValToNative } from '@stellar/stellar-sdk';
 import { invalidateOnPlaceBet, invalidateOnClaimWinnings } from '../cache-invalidation';
 
 let sorobanService: SorobanTransactionService | null = null;
@@ -33,9 +32,11 @@ export const predinexContract = {
     outcomeA: string;
     outcomeB: string;
     durationSeconds: number;
+    creatorDepositStroops?: number | bigint;
+    depositDeadline?: number | null;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
-  }): Promise<{ txHash: string }> {
+  }): Promise<{ txHash: string; poolId?: number }> {
     const { soroban } = getRuntimeConfig();
     const service = getSorobanService();
 
@@ -48,6 +49,8 @@ export const predinexContract = {
         outcomeA: params.outcomeA,
         outcomeB: params.outcomeB,
         duration: params.durationSeconds,
+        amountStroops: params.creatorDepositStroops,
+        depositDeadline: params.depositDeadline,
       },
       params.onStageChange,
       params.onFeeEstimated
@@ -82,9 +85,10 @@ export const predinexContract = {
     outcomes: string[];
     durationSeconds: number;
     metadataUri?: string | null;
+    creatorDepositStroops?: number | bigint;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
-  }): Promise<{ txHash: string }> {
+  }): Promise<{ txHash: string; poolId?: number }> {
     const { soroban } = getRuntimeConfig();
     const service = getSorobanService();
 
@@ -97,6 +101,7 @@ export const predinexContract = {
         outcomes: params.outcomes,
         duration: params.durationSeconds,
         metadataUri: params.metadataUri,
+        amountStroops: params.creatorDepositStroops,
       },
       params.onStageChange,
       params.onFeeEstimated
@@ -123,10 +128,12 @@ export const predinexContract = {
 
   /**
    * Submit a `create_pool_from_template` Soroban contract call (wallet prompt).
+   * `amountStroops` is the creator deposit the contract collects.
    */
   async createPoolFromTemplateSoroban(params: {
     wallet: FreighterWalletClient;
     templateId: number;
+    amountStroops: number;
     overrides: {
       title?: string;
       description?: string;
@@ -145,6 +152,7 @@ export const predinexContract = {
       soroban.contractId,
       {
         templateId: params.templateId,
+        amountStroops: params.amountStroops,
         overrides: {
           title: params.overrides.title,
           description: params.overrides.description,
@@ -165,13 +173,102 @@ export const predinexContract = {
   },
 
   /**
+   * Submit a `create_pool_mirror` Soroban contract call (wallet prompt).
+   *
+   * Registers a pool mirror so a source pool (e.g. a Stellar pool) can be
+   * settled from a bridge contract on a target chain (#928). Uses the bridge
+   * contract address from `soroban.bridgeContractId` in the runtime config.
+   *
+   * @returns The transaction hash and the assigned unified pool ID.
+   */
+  async createPoolMirrorSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    sourceChain: ChainIdValue;
+    targetChain: ChainIdValue;
+    bridgeContractId: string;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string; unifiedPoolId: number }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.createPoolMirror(
+      params.wallet,
+      soroban.contractId,
+      {
+        sourcePoolId: params.poolId,
+        sourceChain: params.sourceChain,
+        targetChain: params.targetChain,
+        bridgeContractId: params.bridgeContractId,
+      },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    let unifiedPoolId = 0;
+    try {
+      const decoded =
+        result.returnValue !== undefined
+          ? scValToNative(result.returnValue)
+          : 0;
+      unifiedPoolId =
+        typeof decoded === 'number' || typeof decoded === 'bigint'
+          ? Number(decoded)
+          : 0;
+    } catch {
+      // fall back to 0 when the return value cannot be decoded
+    }
+
+    return { txHash: result.txHash, unifiedPoolId };
+  },
+
+  /**
+   * Submit a `cancel_pool_mirror` Soroban contract call (wallet prompt).
+   *
+   * Removes a pending mirror so the pool can be mirrored again. A mirror the
+   * bridge has already settled cannot be cancelled; the contract rejects that
+   * with `PoolAlreadySettled` (#1097).
+   *
+   * @returns The transaction hash of the accepted cancellation.
+   */
+  async cancelPoolMirrorSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    onStageChange?: (stage: TxStage) => void;
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const service = getSorobanService();
+
+    const result = await service.cancelPoolMirror(
+      params.wallet,
+      soroban.contractId,
+      { sourcePoolId: params.poolId },
+      params.onStageChange,
+      params.onFeeEstimated
+    );
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    return { txHash: result.txHash };
+  },
+
+  /**
    * Submit a `place_bet` Soroban contract call (wallet prompt).
    */
   async placeBetSoroban(params: {
     wallet: FreighterWalletClient;
     poolId: number;
     outcome: number;
-    amountStroops: number;
+    amountStroops: number | bigint;
+    referrer?: string | null;
     onStageChange?: (stage: TxStage) => void;
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>;
   }): Promise<{ txHash: string }> {
@@ -185,6 +282,7 @@ export const predinexContract = {
         poolId: params.poolId,
         outcome: params.outcome,
         amountStroops: params.amountStroops,
+        referrer: params.referrer,
       },
       params.onStageChange,
       params.onFeeEstimated

@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useState, useEffect } from 'react';
 import { useDisputes } from '../lib/hooks/useDisputes';
 import { AlertCircle, Vote, TrendingUp, Lock } from 'lucide-react';
@@ -8,11 +9,11 @@ interface DisputeCenterProps {
   poolId?: number;
   userId?: string;
   /** Voter's STX balance. Used to calculate voting power and validate eligibility.
-   *  Defaults to 100 STX until wallet integration supplies the real value. */
+   *  Must be provided by wallet integration. */
   voterBalance?: number;
 }
 
-export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: DisputeCenterProps) {
+export default function DisputeCenter({ poolId, userId, voterBalance }: DisputeCenterProps) {
   const { disputes, getPoolDisputes, getDisputeStats, hasUserVoted, addVote } = useDisputes();
   const [selectedTab, setSelectedTab] = useState<'active' | 'resolved'>('active');
   const [selectedDispute, setSelectedDispute] = useState<string | null>(null);
@@ -94,7 +95,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: Di
         <div className="glass p-4 rounded-lg border border-border">
           <p className="text-sm text-muted-foreground">Bond Locked</p>
           <p className="text-2xl font-bold text-blue-400">
-            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} STX
+            {poolDisputes.reduce((sum, d) => sum + d.bond, 0).toFixed(2)} {TOKEN_SYMBOL}
           </p>
         </div>
       </div>
@@ -176,7 +177,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: Di
                         {/* Bond Info */}
                         <div className="flex items-center gap-2 text-sm">
                           <Lock className="w-4 h-4" />
-                          <span>Bond: {dispute.bond.toFixed(2)} STX</span>
+                          <span>Bond: {dispute.bond.toFixed(2)} {TOKEN_SYMBOL}</span>
                         </div>
 
                         {/* Vote Button */}
@@ -256,7 +257,7 @@ export default function DisputeCenter({ poolId, userId, voterBalance = 100 }: Di
       {/* Info */}
       <div className="glass p-4 rounded-lg border border-border/50 bg-primary/5">
         <p className="text-sm text-muted-foreground">
-          💡 Disputes allow the community to challenge pool settlements. Vote with your STX balance to uphold or reject disputes.
+          💡 Disputes allow the community to challenge pool settlements. Vote with your {TOKEN_SYMBOL} balance to uphold or reject disputes.
         </p>
       </div>
     </div>

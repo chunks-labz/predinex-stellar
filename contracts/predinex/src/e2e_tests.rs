@@ -49,6 +49,63 @@ fn mint_e2e(env: &Env, token: &Address, user: &Address, amount: i128) {
 
 // ── E2E Test Cases ───────────────────────────────────────────────────────────
 
+/// Smoke-test one complete settlement and ensure a payout is applied only once.
+#[test]
+fn test_e2e_settlement_smoke_pays_once() {
+    let t = setup_e2e();
+    let creator = Address::generate(&t.env);
+    let winner = Address::generate(&t.env);
+    let loser = Address::generate(&t.env);
+    let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
+
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
+    mint_e2e(&t.env, &t.token, &winner, 1000);
+    mint_e2e(&t.env, &t.token, &loser, 1000);
+
+    t.env.ledger().with_mut(|li| li.timestamp = 100);
+    let pool_id = t.client.create_pool(
+        &creator,
+        &String::from_str(&t.env, "Settlement smoke"),
+        &String::from_str(&t.env, "Complete pool settlement path"),
+        &String::from_str(&t.env, "Yes"),
+        &String::from_str(&t.env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+    t.client
+        .place_bet(&winner, &pool_id, &0u32, &500i128, &None::<Address>);
+    t.client
+        .place_bet(&loser, &pool_id, &1u32, &500i128, &None::<Address>);
+
+    assert_eq!(token_client.balance(&winner), 500);
+    assert_eq!(token_client.balance(&loser), 500);
+
+    t.env.ledger().with_mut(|li| li.timestamp = 3701);
+    t.client.settle_pool(&creator, &pool_id, &0u32);
+
+    let settlement = t.client.get_pool(&pool_id).expect("pool must exist");
+    assert_eq!(settlement.status, PoolStatus::Settled(0));
+    assert!(settlement.settled);
+    assert_eq!(settlement.winning_outcome, Some(0));
+
+    assert_eq!(t.client.claim_winnings(&winner, &pool_id), 980);
+    assert_eq!(token_client.balance(&winner), 1480);
+    assert_eq!(token_client.balance(&loser), 500);
+    assert_eq!(t.client.get_treasury_balance(), 20);
+
+    assert_eq!(
+        t.client.try_claim_winnings(&winner, &pool_id),
+        Err(Ok(ContractError::NoBetFound))
+    );
+    assert_eq!(token_client.balance(&winner), 1480);
+    assert_eq!(t.client.get_treasury_balance(), 20);
+
+    let payout = t.client.get_pool_payout_state(&pool_id).unwrap();
+    assert!(payout.fee_credited);
+    assert_eq!(payout.paid_out, 980);
+}
+
 /// 1. E2E: Create → Bet (winners + losers) → Settle → Winner claims → Loser gets nothing
 #[test]
 fn test_e2e_successful_lifecycle() {
@@ -60,6 +117,7 @@ fn test_e2e_successful_lifecycle() {
     let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
 
     // Initial balances
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user_a, 1000);
     mint_e2e(&t.env, &t.token, &user_b, 1000);
 
@@ -89,7 +147,7 @@ fn test_e2e_successful_lifecycle() {
     // Verify token escrows and pool state
     assert_eq!(token_client.balance(&user_a), 500);
     assert_eq!(token_client.balance(&user_b), 500);
-    assert_eq!(token_client.balance(&t.client.address), 1000);
+    assert_eq!(token_client.balance(&t.client.address), 1000 + MIN_CREATOR_DEPOSIT);
 
     let pool = t.client.get_pool(&pool_id).expect("pool must exist");
     assert_eq!(pool.total_a, 500);
@@ -131,6 +189,7 @@ fn test_e2e_void_and_refund() {
 
     let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
 
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user_a, 1000);
     mint_e2e(&t.env, &t.token, &user_b, 1000);
 
@@ -168,7 +227,7 @@ fn test_e2e_void_and_refund() {
     // Verify original balances restored exactly with 0 fees taken
     assert_eq!(token_client.balance(&user_a), 1000);
     assert_eq!(token_client.balance(&user_b), 1000);
-    assert_eq!(token_client.balance(&t.client.address), 0);
+    assert_eq!(token_client.balance(&t.client.address), MIN_CREATOR_DEPOSIT);
 }
 
 /// 3. E2E: Create → Bet → Settle → Dispute → Unfreeze → Claim
@@ -179,6 +238,7 @@ fn test_e2e_dispute_unfreeze_claim() {
     let user_a = Address::generate(&t.env);
     let user_b = Address::generate(&t.env);
 
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user_a, 1000);
     mint_e2e(&t.env, &t.token, &user_b, 1000);
 
@@ -218,12 +278,9 @@ fn test_e2e_dispute_unfreeze_claim() {
     t.client.unfreeze_pool(&t.freeze_admin, &pool_id);
 
     let pool = t.client.get_pool(&pool_id).unwrap();
-    assert_eq!(pool.status, PoolStatus::Open); // Returns to Open
+    assert_eq!(pool.status, PoolStatus::Settled(0)); // Returns to pre-dispute status
 
-    // Re-settle to enable claims again
-    t.client.settle_pool(&creator, &pool_id, &0u32);
-
-    // Step 5: Claim
+    // Step 5: Claim (pool is already settled, no re-settle needed)
     let winnings = t.client.claim_winnings(&user_a, &pool_id);
     assert_eq!(winnings, 980);
 }
@@ -233,6 +290,7 @@ fn test_e2e_dispute_unfreeze_claim() {
 fn test_e2e_pool_cancellation_before_bets() {
     let t = setup_e2e();
     let creator = Address::generate(&t.env);
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
 
     t.env.ledger().with_mut(|li| li.timestamp = 100);
 
@@ -244,6 +302,7 @@ fn test_e2e_pool_cancellation_before_bets() {
         &String::from_str(&t.env, "Yes"),
         &String::from_str(&t.env, "No"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &200, // Open at timestamp 200
     );
 
@@ -267,6 +326,7 @@ fn test_e2e_pool_cancellation_before_bets() {
 fn test_e2e_zero_activity_pool_cannot_settle() {
     let t = setup_e2e();
     let creator = Address::generate(&t.env);
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
 
     // Create pool at t=100; expires at t=3700.
     t.env.ledger().with_mut(|li| li.timestamp = 100);
@@ -308,6 +368,7 @@ fn test_e2e_expired_unsettled_refund() {
 
     let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
 
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user_a, 1000);
     mint_e2e(&t.env, &t.token, &user_b, 1000);
 
@@ -354,8 +415,8 @@ fn test_e2e_expired_unsettled_refund() {
     );
     assert_eq!(
         token_client.balance(&t.client.address),
-        0,
-        "contract holds nothing"
+        MIN_CREATOR_DEPOSIT,
+        "contract holds only the creator deposit"
     );
 
     // Double-claim is rejected: bet record was removed on first call.
@@ -370,6 +431,7 @@ fn test_e2e_min_bet_enforcement() {
     let creator = Address::generate(&t.env);
     let user = Address::generate(&t.env);
 
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user, 10_000);
 
     let pool_id = t.client.create_pool(
@@ -405,6 +467,7 @@ fn test_e2e_max_bet_enforcement() {
     let creator = Address::generate(&t.env);
     let user = Address::generate(&t.env);
 
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     mint_e2e(&t.env, &t.token, &user, 10_000);
 
     let pool_id = t.client.create_pool(
@@ -438,6 +501,7 @@ fn test_e2e_max_bet_enforcement() {
 fn test_e2e_multiple_bettors_proportional_distribution() {
     let t = setup_e2e();
     let creator = Address::generate(&t.env);
+    mint_e2e(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
 
     // 5 winners (outcome A): stakes 100, 200, 300, 400, 500 → total A = 1500
     let w1 = Address::generate(&t.env);
@@ -536,7 +600,7 @@ fn test_e2e_multiple_bettors_proportional_distribution() {
     // Contract holds nothing after all claims (fee stays until treasury withdrawal).
     let contract_balance = token_client.balance(&t.client.address);
     assert_eq!(
-        contract_balance, 45,
-        "contract holds only the unclaimed fee"
+        contract_balance, 45 + MIN_CREATOR_DEPOSIT,
+        "contract holds the unclaimed fee plus the creator deposit"
     );
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { AlertCircle, ExternalLink } from 'lucide-react';
 import type { Pool } from '../lib/adapters/types';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
 
 interface UserBet {
   pool: Pool;
@@ -55,7 +56,7 @@ export default function ActiveBets({ bets }: ActiveBetsProps) {
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Your Bet:</span>
                 <span className="font-semibold text-lg">
-                  {(bet.totalBet / 1_000_000).toFixed(2)} STX
+                  {stroopsToUnits(bet.totalBet).toFixed(2)} {TOKEN_SYMBOL}
                 </span>
               </div>
               <div className="flex justify-between items-center pt-2 border-t border-border">
@@ -67,7 +68,7 @@ export default function ActiveBets({ bets }: ActiveBetsProps) {
               <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
                 <span>Pool Total:</span>
                 <span>
-                  {((bet.pool.totalA + bet.pool.totalB) / 1_000_000).toFixed(2)} STX
+                  {stroopsToUnits(bet.pool.totalA + bet.pool.totalB).toFixed(2)} {TOKEN_SYMBOL}
                 </span>
               </div>
             </div>

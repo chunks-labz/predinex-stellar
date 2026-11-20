@@ -2,6 +2,7 @@ import { useToast } from "@/providers/ToastProvider";
 import { TxStage } from "@/app/lib/soroban-transaction-service";
 import { toastMessages } from "../toast-messages";
 import { useRef } from "react";
+import { parseContractError } from "@/app/lib/error-handler";
 
 /**
  * Hook to manage transaction status toast notifications.
@@ -57,8 +58,8 @@ export function useTransactionToast() {
     }
   };
 
-  const showError = (error: string) => {
-    const message = `Transaction failed: ${error}`;
+  const showError = (error: unknown) => {
+    const message = `Transaction failed: ${parseContractError(error)}`;
     if (toastIdRef.current) {
       updateToast(toastIdRef.current, message, "error");
       toastIdRef.current = null;

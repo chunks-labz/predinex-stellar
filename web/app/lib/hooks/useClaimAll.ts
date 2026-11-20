@@ -133,15 +133,18 @@ export function useClaimAll(userAddress?: string | null) {
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Failed to claim winnings";
-        setState((prev) => ({
-          ...prev,
-          status: "failed",
-          error: message,
-          pools: prev.pools.map((p) => ({ ...p, status: "pending" })),
-        }));
         if (message !== "Transaction cancelled by user") {
+          setState((prev) => ({
+            ...prev,
+            status: "failed",
+            error: message,
+            pools: prev.pools.map((p) => ({ ...p, status: "pending" })),
+          }));
           showError(message);
         } else {
+          // Declining the fee prompt is not a failure: return to idle rather
+          // than opening a "Claim failed" dialog next to the info toast.
+          setState({ ...emptyState });
           dismiss();
           showToast("Claim All transaction cancelled", "info");
         }

@@ -7,6 +7,13 @@ use soroban_sdk::{
 };
 use std::format;
 
+/// Mint `MIN_CREATOR_DEPOSIT * 100` to the given address so it can cover
+/// multiple `create_pool` creator-deposit transfers in a single test.
+fn fund_creator_deposit(env: &Env, token: &Address, who: &Address) {
+    soroban_sdk::token::StellarAssetClient::new(env, token)
+        .mint(who, &(MIN_CREATOR_DEPOSIT * 100));
+}
+
 fn xdr_topic_val(env: &Env, event: &soroban_sdk::xdr::ContractEvent, i: usize) -> Val {
     match &event.body {
         soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
@@ -24,11 +31,10 @@ fn test_create_pool() {
 
     let contract_id = env.register(PredinexContract, ());
     let client = PredinexContractClient::new(&env, &contract_id);
-    client.initialize(
-        &Address::generate(&env),
-        &Address::generate(&env),
-        &Address::generate(&env),
-    );
+
+    let admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
 
     let creator = Address::generate(&env);
     let title = String::from_str(&env, "Market 1");
@@ -36,6 +42,9 @@ fn test_create_pool() {
     let outcome_a = String::from_str(&env, "Yes");
     let outcome_b = String::from_str(&env, "No");
     let duration = 3600;
+
+    token::StellarAssetClient::new(&env, &token_id.address())
+        .mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     let pool_id = client.create_pool(
         &creator,
@@ -63,7 +72,13 @@ fn test_create_pool_rejects_duration_above_maximum() {
     let contract_id = env.register(PredinexContract, ());
     let client = PredinexContractClient::new(&env, &contract_id);
 
+    let admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
+
     let creator = Address::generate(&env);
+    token::StellarAssetClient::new(&env, &token_id.address())
+        .mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     client.create_pool(
         &creator,
         &String::from_str(&env, "Market"),
@@ -83,16 +98,18 @@ fn test_create_pool_accepts_duration_just_below_maximum() {
 
     let contract_id = env.register(PredinexContract, ());
     let client = PredinexContractClient::new(&env, &contract_id);
-    client.initialize(
-        &Address::generate(&env),
-        &Address::generate(&env),
-        &Address::generate(&env),
-    );
+
+    let admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
 
     env.ledger().with_mut(|li| li.timestamp = 42);
 
     let creator = Address::generate(&env);
     let duration = 999_999;
+
+    token::StellarAssetClient::new(&env, &token_id.address())
+        .mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     let pool_id = client.create_pool(
         &creator,
@@ -131,6 +148,7 @@ fn test_large_pool_payouts_with_checked_arithmetic() {
     let large_amount_a = 1_000_000_000_000_000_000i128;
     let large_amount_b = 2_000_000_000_000_000_000i128;
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &(large_amount_a + 100));
     token_admin_client.mint(&user2, &(large_amount_b + 100));
 
@@ -180,8 +198,9 @@ fn test_place_bet_rejects_pool_total_overflow() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
-    let huge_amount = i128::MAX - 1;
+    let huge_amount = i128::MAX - 1 - MIN_CREATOR_DEPOSIT;
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &huge_amount);
     token_admin_client.mint(&user2, &100);
 
@@ -227,6 +246,7 @@ fn test_place_bet() {
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10_000_000);
 
     let title = String::from_str(&env, "Market 1");
@@ -251,7 +271,7 @@ fn test_place_bet() {
     let pool = client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.total_a, 1_000_000);
     assert_eq!(token.balance(&user), 9_000_000);
-    assert_eq!(token.balance(&contract_id), 1_000_000);
+    assert_eq!(token.balance(&contract_id), 1_000_000 + MIN_CREATOR_DEPOSIT);
 }
 
 #[test]
@@ -273,6 +293,7 @@ fn test_fee_config_is_applied_to_bets_and_transferred_to_recipient() {
     let user = Address::generate(&env);
     let fee_recipient = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
     token_admin_client.mint(&fee_recipient, &0);
 
@@ -298,7 +319,7 @@ fn test_fee_config_is_applied_to_bets_and_transferred_to_recipient() {
     assert_eq!(pool.total_a, 98);
     assert_eq!(token.balance(&user), 900);
     assert_eq!(token.balance(&fee_recipient), 2);
-    assert_eq!(token.balance(&contract_id), 98);
+    assert_eq!(token.balance(&contract_id), 98 + MIN_CREATOR_DEPOSIT);
 }
 
 #[test]
@@ -348,6 +369,7 @@ fn test_settle_and_claim() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &1000);
     token_admin_client.mint(&user2, &1000);
 
@@ -411,6 +433,7 @@ fn test_duplicate_claim_rejected() {
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -474,6 +497,7 @@ fn test_initialize_succeeds_once() {
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -551,6 +575,7 @@ fn test_initialize_idempotency_preserves_original_token() {
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -568,7 +593,7 @@ fn test_initialize_idempotency_preserves_original_token() {
     client.place_bet(&user, &pool_id, &0, &100, &None::<Address>);
     let token = token::Client::new(&env, &token_id.address());
     assert_eq!(token.balance(&user), 900);
-    assert_eq!(token.balance(&contract_id), 100);
+    assert_eq!(token.balance(&contract_id), 100 + MIN_CREATOR_DEPOSIT);
 }
 
 // ============================================================================
@@ -597,6 +622,7 @@ fn test_settle_pool_before_expiry_rejected() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -634,6 +660,7 @@ fn test_settle_pool_after_expiry_succeeds() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -693,6 +720,7 @@ fn test_settle_pool_unauthorized_caller_rejected() {
     let creator = Address::generate(&env);
     let non_creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -736,6 +764,7 @@ fn test_settle_pool_unauthorized_then_authorized_succeeds() {
     let creator = Address::generate(&env);
     let non_creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -788,6 +817,10 @@ fn test_get_user_bet_returns_correct_amounts() {
 
     client.initialize(&token, &admin, &admin);
 
+    // Fund admin (pool creator) for creator deposit
+    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
+    token_client.mint(&admin, &(MIN_CREATOR_DEPOSIT * 10));
+
     let pool_id = client.create_pool(
         &admin,
         &String::from_str(&env, "Will it rain?"),
@@ -800,7 +833,6 @@ fn test_get_user_bet_returns_correct_amounts() {
     );
 
     // Fund user via the token admin
-    let token_client = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_client.mint(&user, &500i128);
 
     // Place bet on outcome A (100 tokens)
@@ -841,6 +873,10 @@ fn test_get_user_bet_returns_none_for_user_with_no_bet() {
     let client = PredinexContractClient::new(&env, &contract_id);
 
     client.initialize(&token, &admin, &admin);
+
+    // Fund admin (pool creator) for creator deposit
+    soroban_sdk::token::StellarAssetClient::new(&env, &token)
+        .mint(&admin, &(MIN_CREATOR_DEPOSIT * 10));
 
     let pool_id = client.create_pool(
         &admin,
@@ -888,9 +924,11 @@ fn setup() -> TestEnv<'static> {
 
     client.initialize(&token, &admin, &admin);
 
-    // Fund the user so token transfers in place_bet don't fail for balance reasons
+    // Fund the user so token transfers in place_bet don't fail for balance reasons.
+    // Fund the admin so creator-deposit transfers in create_pool don't fail.
     let token_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token);
     token_admin.mint(&user, &100_000_000i128);
+    token_admin.mint(&admin, &(MIN_CREATOR_DEPOSIT * 200));
 
     TestEnv {
         env,
@@ -1170,7 +1208,7 @@ fn c3_invalid_amount_does_not_mutate_pool_state() {
     let token = soroban_sdk::token::Client::new(&t.env, &t.token);
     assert_eq!(
         token.balance(&t.user),
-        10_000i128,
+        100_000_000i128,
         "user balance must be unchanged after rejected bet"
     );
 }
@@ -1297,6 +1335,7 @@ fn e1_get_pools_batch_returns_correct_slice() {
 
     // Create 5 pools
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     for i in 0..5 {
         client.create_pool(
             &creator,
@@ -1340,6 +1379,7 @@ fn e2_get_pools_batch_handles_partial_pages() {
 
     // Create 3 pools
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     for i in 0..3 {
         client.create_pool(
             &creator,
@@ -1375,6 +1415,7 @@ fn e3_get_pools_batch_empty_when_start_exceeds_count() {
 
     // Create 2 pools
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     client.create_pool(
         &creator,
         &String::from_str(&env, "Market 1"),
@@ -1425,6 +1466,7 @@ fn e4_get_pools_batch_caps_count_at_100() {
 
     // Create 105 pools
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     for i in 0..105 {
         client.create_pool(
             &creator,
@@ -1458,6 +1500,7 @@ fn e5_get_pools_batch_handles_gaps() {
     client.initialize(&token_id.address(), &token_admin, &token_admin);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
 
     // Create pools 1 and 3 (we'll simulate a gap at 2 by not creating it,
     // but since pools are sequential, we'll just verify the function returns
@@ -1679,6 +1722,7 @@ fn g3_after_rotation_only_new_recipient_can_withdraw() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &1000);
     token_admin_client.mint(&user2, &1000);
 
@@ -1827,6 +1871,7 @@ fn h1_successful_withdrawal_emits_event() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &1000);
     token_admin_client.mint(&user2, &1000);
 
@@ -1937,6 +1982,7 @@ fn h4_multiple_withdrawals_emit_separate_events() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &1000);
     token_admin_client.mint(&user2, &1000);
 
@@ -2001,6 +2047,7 @@ fn h5_withdrawal_event_includes_caller_and_recipient() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &1000);
     token_admin_client.mint(&user2, &1000);
 
@@ -2063,6 +2110,7 @@ fn test_settle_pool_event_includes_totals_and_fee() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user_a, &300);
     token_admin_client.mint(&user_b, &100);
 
@@ -2128,6 +2176,7 @@ fn test_settle_pool_event_outcome_b_totals() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user_a, &200);
     token_admin_client.mint(&user_b, &600);
 
@@ -2189,7 +2238,7 @@ fn test_create_pool_with_fee_transfers_correctly() {
     assert_eq!(client.get_creation_fee(), creation_fee);
 
     let creator = Address::generate(&env);
-    token_admin_client.mint(&creator, &creation_fee);
+    token_admin_client.mint(&creator, &(creation_fee + MIN_CREATOR_DEPOSIT));
 
     let initial_treasury_balance = token.balance(&treasury_recipient);
 
@@ -2214,7 +2263,7 @@ fn test_create_pool_with_fee_transfers_correctly() {
         initial_treasury_balance + creation_fee,
         "treasury recipient must receive the creation fee"
     );
-    // Creator's balance is now 0
+    // Creator's balance is now 0 (creation_fee + MIN_CREATOR_DEPOSIT both transferred)
     assert_eq!(token.balance(&creator), 0);
 }
 
@@ -2241,7 +2290,8 @@ fn test_create_pool_no_fee_succeeds() {
     assert_eq!(client.get_creation_fee(), 0);
 
     let creator = Address::generate(&env);
-    // Creator has zero balance — pool creation must still succeed (no fee charged)
+    // Creator needs MIN_CREATOR_DEPOSIT for the deposit transfer (no creation fee charged)
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     let pool_id = client.create_pool(
         &creator,
         &String::from_str(&env, "No Fee Pool"),
@@ -2329,8 +2379,8 @@ fn test_creation_fee_exemption_skips_fee() {
     client.set_creation_fee(&treasury_recipient, &creation_fee);
 
     let creator = Address::generate(&env);
-    // Exempt the creator. Note: no tokens are minted to the creator, so the
-    // pool can only be created if the fee transfer is genuinely skipped.
+    // Exempt the creator from creation fee; still needs MIN_CREATOR_DEPOSIT for deposit.
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     assert!(!client.is_creation_fee_exempt(&creator));
     client.set_creation_fee_exemption(&treasury_recipient, &creator, &true);
     assert!(client.is_creation_fee_exempt(&creator));
@@ -2352,7 +2402,7 @@ fn test_creation_fee_exemption_skips_fee() {
     assert!(!pool.unwrap().settled);
     // No fee moved to the treasury recipient.
     assert_eq!(token.balance(&treasury_recipient), initial_treasury_balance);
-    assert_eq!(token.balance(&creator), 0);
+    assert_eq!(token.balance(&creator), MIN_CREATOR_DEPOSIT * 100 - MIN_CREATOR_DEPOSIT);
 }
 
 /// Revoking an exemption restores normal fee charging.
@@ -2384,7 +2434,7 @@ fn test_creation_fee_exemption_revoked_charges_again() {
     client.set_creation_fee_exemption(&treasury_recipient, &creator, &false);
     assert!(!client.is_creation_fee_exempt(&creator));
 
-    token_admin_client.mint(&creator, &creation_fee);
+    token_admin_client.mint(&creator, &(creation_fee + MIN_CREATOR_DEPOSIT));
     let initial_treasury_balance = token.balance(&treasury_recipient);
 
     client.create_pool(
@@ -2453,6 +2503,7 @@ fn test_cumulative_volume_tracking() {
     let creator = Address::generate(&env);
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&alice, &1000);
     token_admin_client.mint(&bob, &1000);
 
@@ -2541,6 +2592,7 @@ fn tiered_pool_fee_and_payout(
     let creator = Address::generate(env);
     let winner = Address::generate(env);
     let loser = Address::generate(env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&winner, &winner_amt);
     token_admin_client.mint(&loser, &loser_amt);
 
@@ -2899,6 +2951,7 @@ fn test_settle_below_min_participants_rejected() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    mint.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     mint.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -2937,6 +2990,7 @@ fn test_settle_meets_min_participants_succeeds() {
     let creator = Address::generate(&env);
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
+    mint.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     mint.mint(&alice, &1000);
     mint.mint(&bob, &1000);
 
@@ -2964,10 +3018,13 @@ fn test_settle_meets_min_participants_succeeds() {
 /// Setting the threshold to 0 disables the check (empty pools may settle).
 #[test]
 fn test_min_settlement_participants_zero_disables_check() {
-    let (env, client, treasury, _mint) = min_participants_setup();
+    let (env, client, treasury, mint) = min_participants_setup();
     client.set_min_settlement_participants(&treasury, &0);
 
     let creator = Address::generate(&env);
+    let bettor = Address::generate(&env);
+    mint.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    mint.mint(&bettor, &1000);
     let pool_id = client.create_pool(
         &creator,
         &String::from_str(&env, "Empty Market"),
@@ -2978,6 +3035,9 @@ fn test_min_settlement_participants_zero_disables_check() {
         &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
+
+    // Place a bet on the winning side so settle_pool does not reject with NoWinningBets.
+    client.place_bet(&bettor, &pool_id, &0, &100, &None::<Address>);
 
     env.ledger().with_mut(|li| li.timestamp = 3601);
     client.settle_pool(&treasury, &pool_id, &0);
@@ -3206,13 +3266,13 @@ fn i2_cancel_pool_after_first_bet_succeeds() {
 
     let token_client = soroban_sdk::token::Client::new(&t.env, &t.token);
     let bal_before = token_client.balance(&t.user);
-    assert_eq!(bal_before, 10_000i128);
+    assert_eq!(bal_before, 100_000_000i128);
 
     t.client
         .place_bet(&t.user, &pool_id, &0u32, &100i128, &None::<Address>);
 
     let bal_after_bet = token_client.balance(&t.user);
-    assert_eq!(bal_after_bet, 9_900i128);
+    assert_eq!(bal_after_bet, 99_999_900i128);
 
     t.client.cancel_pool(
         &t.admin,
@@ -3236,7 +3296,7 @@ fn i2_cancel_pool_after_first_bet_succeeds() {
     // Verify participant is refunded immediately
     let bal_after_cancel = token_client.balance(&t.user);
     assert_eq!(
-        bal_after_cancel, 10_000i128,
+        bal_after_cancel, 100_000_000i128,
         "user balance must be fully refunded"
     );
 }
@@ -3445,6 +3505,7 @@ fn j5_get_user_pools_caps_count_at_100() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
 
     // Create 105 pools so 100+ exist in range
     for i in 0..105 {
@@ -3618,6 +3679,7 @@ fn l3_loser_claim_leaves_balances_unchanged() {
     let winner = Address::generate(&env);
     let loser = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&winner, &500);
     token_admin_client.mint(&loser, &500);
 
@@ -3692,6 +3754,7 @@ fn l4_successful_claim_reconciles_treasury_and_balances() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user_a, &300);
     token_admin_client.mint(&user_b, &200);
 
@@ -3737,8 +3800,8 @@ fn l4_successful_claim_reconciles_treasury_and_balances() {
     );
     assert_eq!(
         token.balance(&contract_id),
-        expected_fee,
-        "remaining contract balance must equal the unclaimed treasury fee"
+        expected_fee + MIN_CREATOR_DEPOSIT,
+        "remaining contract balance must equal the unclaimed treasury fee plus the creator deposit"
     );
 }
 
@@ -3766,6 +3829,7 @@ fn l5_claim_winnings_emits_claim_event() {
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user_a, &300);
     token_admin_client.mint(&user_b, &200);
 
@@ -4284,9 +4348,10 @@ fn test_settle_pools_batch_single_pool() {
     });
 
     let results = t.client.settle_pools(&t.admin, &reqs);
-    assert_eq!(results.len(), 1);
-    assert!(results.get(0).unwrap().success);
-    assert_eq!(results.get(0).unwrap().pool_id, pool_id);
+    assert_eq!(results.results.len(), 1);
+    assert!(!results.truncated);
+    assert!(results.results.get(0).unwrap().success);
+    assert_eq!(results.results.get(0).unwrap().pool_id, pool_id);
 
     let pool = t.client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.status, PoolStatus::Settled(0));
@@ -4323,11 +4388,16 @@ fn test_settle_pools_batch_partial_failure() {
     });
 
     let results = t.client.settle_pools(&t.admin, &reqs);
-    assert_eq!(results.len(), 2);
-    assert!(results.get(0).unwrap().success, "pool_a must settle");
+    assert_eq!(results.results.len(), 2);
+    assert!(!results.truncated);
+    assert!(results.results.get(0).unwrap().success, "pool_a must settle");
     assert!(
-        !results.get(1).unwrap().success,
+        !results.results.get(1).unwrap().success,
         "future pool must fail (not expired)"
+    );
+    assert!(
+        results.results.get(1).unwrap().error_code != 0,
+        "failed pool must carry error code"
     );
 }
 
@@ -4343,7 +4413,8 @@ fn test_settle_pools_caps_at_twenty() {
     }
 
     let results = t.client.settle_pools(&t.admin, &reqs);
-    assert_eq!(results.len(), 20, "must cap at 20 pools");
+    assert_eq!(results.results.len(), 25, "must return all requested pools");
+    assert!(results.truncated, "must signal truncation when > 20");
 }
 
 #[test]
@@ -4361,10 +4432,14 @@ fn test_settle_pools_unauthorized_rejected() {
     let stranger = Address::generate(&t.env);
 
     let results = t.client.settle_pools(&stranger, &reqs);
-    assert_eq!(results.len(), 1, "must return exactly 1 result");
+    assert_eq!(results.results.len(), 1, "must return exactly 1 result");
     assert!(
-        !results.get(0).unwrap().success,
+        !results.results.get(0).unwrap().success,
         "unauthorized caller must fail to settle"
+    );
+    assert!(
+        results.results.get(0).unwrap().error_code != 0,
+        "unauthorized must carry error code"
     );
 }
 
@@ -4437,6 +4512,7 @@ fn test_multi_outcome_pool_accepts_third_outcome_and_pays_winner() {
         &outcomes,
         &3_600u64,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
     );
 
     t.client
@@ -4492,6 +4568,7 @@ fn test_cancel_bet_on_third_outcome_preserves_binary_mirrors() {
         &outcomes,
         &3_600u64,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
     );
 
     t.client
@@ -4528,6 +4605,7 @@ fn test_pool_metadata_can_be_set_by_creator_only_and_validates_scheme() {
         &outcomes,
         &3_600u64,
         &Some(String::from_str(&t.env, "ipfs://market")),
+        &MIN_CREATOR_DEPOSIT,
     );
 
     assert_eq!(
@@ -4594,7 +4672,7 @@ fn test_pool_templates_are_treasury_managed_and_create_pools_with_overrides() {
 
     let pool_id = t
         .client
-        .create_pool_from_template(&t.user, &template_id, &overrides);
+        .create_pool_from_template(&t.user, &template_id, &MIN_CREATOR_DEPOSIT, &overrides);
     let pool = t.client.get_pool(&pool_id).unwrap();
     assert_eq!(pool.title, String::from_str(&t.env, "Final result"));
     assert_eq!(pool.expiry, pool.created_at + 7_200u64);
@@ -4695,6 +4773,7 @@ fn test_list_pools_limit_capped_at_20() {
     let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
     client.initialize(&token_id.address(), &token_admin, &token_admin);
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     // Create 25 pools.
     for i in 0..25u64 {
         client.create_pool(
@@ -4912,6 +4991,7 @@ fn g1_dispute_within_window_succeeds() {
     client.initialize(&token_id.address(), &admin, &admin);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     let pool_id = client.create_pool(
         &creator,
         &String::from_str(&env, "Pool"),
@@ -4923,6 +5003,12 @@ fn g1_dispute_within_window_succeeds() {
         &None::<u64>,
     );
 
+    client.set_freeze_admin(&admin, &admin);
+
+    // #1427 — Set a 7-day dispute window so the resolution enters
+    // ResolutionPending and the dispute path is exercisable.
+    client.set_dispute_window(&admin, &(7 * 24 * 3600));
+
     let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
     let bettor = Address::generate(&env);
     token_admin_client.mint(&bettor, &10_000);
@@ -4931,7 +5017,7 @@ fn g1_dispute_within_window_succeeds() {
     env.ledger().with_mut(|l| l.timestamp = 3601);
     client.settle_pool(&admin, &pool_id, &0);
 
-    // Default window is 7 days (604800 secs).
+    // Window is 7 days (604800 secs).
     // Dispute at settlement_time + 100 should succeed.
     env.ledger().with_mut(|l| l.timestamp = 3601 + 100);
     client.dispute_pool(&admin, &pool_id);
@@ -4954,6 +5040,7 @@ fn g2_dispute_after_window_rejected() {
     client.initialize(&token_id.address(), &admin, &admin);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
     let pool_id = client.create_pool(
         &creator,
         &String::from_str(&env, "Pool"),
@@ -5022,6 +5109,203 @@ fn g7_get_pool_dispute_returns_none_when_no_dispute() {
 }
 
 // ============================================================================
+// Issue #1427: Dispute window for market resolution
+// ============================================================================
+//
+// After resolution, a time-bounded dispute window opens during which
+// challenges can be submitted and payouts are paused. The resolution
+// becomes final once the window elapses without a challenge — either via
+// `finalize_resolution` or automatically when a winner claims. If a
+// challenge is filed, the pool enters Disputed status pending review.
+
+/// Test fixture for dispute-window lifecycle tests.
+struct DisputeEnv<'a> {
+    env: Env,
+    client: PredinexContractClient<'a>,
+    admin: Address,
+    bettor: Address,
+    pool_id: u32,
+    token: Address,
+}
+
+/// Create a pool with one bet on outcome 0, set the freeze admin and a
+/// dispute window of `window_secs`, expire, and settle to outcome 0.
+fn dispute_setup(window_secs: u64) -> DisputeEnv<'static> {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register(PredinexContract, ());
+    let client: PredinexContractClient<'static> =
+        PredinexContractClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    client.initialize(&token_id.address(), &admin, &admin);
+
+    let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Pool"),
+        &String::from_str(&env, "Desc"),
+        &String::from_str(&env, "Yes"),
+        &String::from_str(&env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    client.set_freeze_admin(&admin, &admin);
+    client.set_dispute_window(&admin, &window_secs);
+
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+    let bettor = Address::generate(&env);
+    token_admin_client.mint(&bettor, &10_000);
+    client.place_bet(&bettor, &pool_id, &0, &1_000, &None::<Address>);
+
+    env.ledger().with_mut(|l| l.timestamp = 3601);
+    client.settle_pool(&admin, &pool_id, &0);
+
+    DisputeEnv {
+        env,
+        client,
+        admin,
+        bettor,
+        pool_id,
+        token: token_id.address(),
+    }
+}
+
+/// D1: With a zero dispute window, settle_pool transitions directly to Settled —
+/// the resolution is immediately final and no deadline is stored.
+#[test]
+fn d1_zero_window_settles_directly_to_settled() {
+    let d = dispute_setup(0);
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+    assert_eq!(d.client.get_resolution_deadline(&d.pool_id), None);
+}
+
+/// D2: With a positive dispute window, settle_pool enters ResolutionPending
+/// and stores the resolution deadline.
+#[test]
+fn d2_positive_window_enters_resolution_pending() {
+    let d = dispute_setup(3600);
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::ResolutionPending(0));
+    // Deadline = settlement_time (3601) + window (3600) = 7201.
+    assert_eq!(d.client.get_resolution_deadline(&d.pool_id), Some(7201));
+}
+
+/// D3: A winner cannot claim while the dispute window is still open — the
+/// resolution is not final until the window closes.
+#[test]
+#[should_panic]
+fn d3_claim_blocked_during_dispute_window() {
+    let d = dispute_setup(3600);
+    // Still within the 3600-second window (settlement at 3601, deadline 7201).
+    d.client.claim_winnings(&d.bettor, &d.pool_id);
+}
+
+/// D4: finalize_resolution before the dispute window elapses is rejected.
+#[test]
+#[should_panic]
+fn d4_finalize_before_window_rejected() {
+    let d = dispute_setup(3600);
+    // Still within the window.
+    d.client.finalize_resolution(&d.pool_id);
+}
+
+/// D5: Unchallenged resolution — claiming after the window elapses
+/// auto-finalizes the pool and pays the winner.
+#[test]
+fn d5_auto_finalize_on_claim_after_window() {
+    let d = dispute_setup(3600);
+    let token = token::Client::new(&d.env, &d.token);
+
+    // Advance past the dispute window (deadline = 7201).
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    let winnings = d.client.claim_winnings(&d.bettor, &d.pool_id);
+    assert!(winnings > 0, "winner must receive a payout");
+
+    // Pool is now Settled (auto-finalized by the claim path).
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+
+    // Balance: 10_000 (minted) − 1_000 (bet) + winnings.
+    assert_eq!(token.balance(&d.bettor), 9_000 + winnings);
+}
+
+/// D6: Unchallenged resolution — explicit finalize_resolution after the
+/// window elapses transitions the pool to Settled, after which claims work.
+#[test]
+fn d6_explicit_finalize_after_window() {
+    let d = dispute_setup(3600);
+
+    // Advance past the dispute window.
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    d.client.finalize_resolution(&d.pool_id);
+
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Settled(0));
+
+    // Claim now succeeds.
+    let token = token::Client::new(&d.env, &d.token);
+    let winnings = d.client.claim_winnings(&d.bettor, &d.pool_id);
+    assert!(winnings > 0);
+    assert_eq!(token.balance(&d.bettor), 9_000 + winnings);
+}
+
+/// D7: Challenged resolution — a challenge during the window is recorded,
+/// the pool enters Disputed status, and the challenge data is queryable.
+#[test]
+fn d7_challenge_recorded_during_window() {
+    let d = dispute_setup(3600);
+
+    // Challenge at settlement_time + 100 (within the 3600-second window).
+    d.env.ledger().with_mut(|l| l.timestamp = 3701);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+
+    let pool = d.client.get_pool(&d.pool_id).unwrap();
+    assert_eq!(pool.status, crate::PoolStatus::Disputed);
+
+    // The challenge is recorded with the challenger and disputed outcome.
+    let challenges = d.client.get_pool_challenges(&d.pool_id);
+    assert_eq!(challenges.len(), 1);
+    let challenge = challenges.get(0).unwrap();
+    assert_eq!(challenge.challenger, d.admin);
+    assert_eq!(challenge.disputed_outcome, 0);
+    assert_eq!(challenge.timestamp, 3701);
+}
+
+/// D8: A challenge filed after the dispute window has elapsed is rejected.
+#[test]
+#[should_panic]
+fn d8_challenge_after_window_rejected() {
+    let d = dispute_setup(100);
+
+    // Advance past the 100-second window (settlement at 3601, deadline 3701).
+    d.env.ledger().with_mut(|l| l.timestamp = 3800);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+}
+
+/// D9: finalize_resolution on a pool that was challenged (Disputed) is
+/// rejected — the pool is not in ResolutionPending status.
+#[test]
+#[should_panic]
+fn d9_finalize_disputed_pool_rejected() {
+    let d = dispute_setup(3600);
+
+    // Challenge within the window.
+    d.env.ledger().with_mut(|l| l.timestamp = 3701);
+    d.client.dispute_pool(&d.admin, &d.pool_id);
+
+    // Advance past the window.
+    d.env.ledger().with_mut(|l| l.timestamp = 7202);
+    // Pool is Disputed, not ResolutionPending — finalize must fail.
+    d.client.finalize_resolution(&d.pool_id);
+}
+
+// ============================================================================
 // Issue #447: Security — double-fee fix (proportional treasury fee per claim)
 // ============================================================================
 
@@ -5048,6 +5332,7 @@ fn h1_double_fee_fix_treasury_correct_with_multiple_winners() {
     let winner2 = Address::generate(&env);
     let loser = Address::generate(&env);
 
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&winner1, &300i128);
     token_admin_client.mint(&winner2, &100i128);
     token_admin_client.mint(&loser, &200i128);
@@ -5110,6 +5395,7 @@ fn m1_create_pool_emits_pool_created_event() {
     env.ledger().with_mut(|li| li.timestamp = 100);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
 
     let pool_id = client.create_pool(
         &creator,
@@ -5176,6 +5462,7 @@ fn m2_place_bet_emits_bet_placed_event() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5249,6 +5536,7 @@ fn m3_settle_pool_emits_settle_pool_event() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5324,6 +5612,7 @@ fn m4_claim_winnings_emits_claim_event() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5407,6 +5696,7 @@ fn m5_cancel_bet_emits_bet_cancelled_event() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5481,6 +5771,7 @@ fn m6_extend_pool_duration_emits_pool_duration_extended_event() {
     env.ledger().with_mut(|li| li.timestamp = 100);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token_id.address(), &creator);
 
     let pool_id = client.create_pool(
         &creator,
@@ -5553,6 +5844,7 @@ fn m7_place_bet_with_referrer_emits_referral_bet_event() {
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
     let referrer = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5602,6 +5894,112 @@ fn m7_place_bet_with_referrer_emits_referral_bet_event() {
     assert_eq!(payload.amount, 500);
 }
 
+/// #1226 — Places a referred bet under `fee_rate` bps and returns the decoded
+/// `(place_bet, referral_bet)` payloads plus the pool's cumulative volume.
+fn place_referred_bet_with_fee(
+    fee_rate: u32,
+    amount: i128,
+) -> (crate::BetEvent, crate::ReferralBetEvent, i128) {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_admin = Address::generate(&env);
+    let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token_admin_client = token::StellarAssetClient::new(&env, &token_id.address());
+
+    let contract_id = env.register(PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract_id);
+
+    let treasury_recipient = Address::generate(&env);
+    client.initialize(
+        &token_id.address(),
+        &treasury_recipient,
+        &treasury_recipient,
+    );
+    let fee_recipient = Address::generate(&env);
+    client.set_fee_config(&treasury_recipient, &fee_rate, &fee_recipient);
+
+    let creator = Address::generate(&env);
+    let user = Address::generate(&env);
+    let referrer = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    token_admin_client.mint(&user, &amount);
+
+    let pool_id = client.create_pool(
+        &creator,
+        &String::from_str(&env, "Referral Fee Pool"),
+        &String::from_str(&env, "Event amounts net of fee"),
+        &String::from_str(&env, "A"),
+        &String::from_str(&env, "B"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    client.place_bet(&user, &pool_id, &0, &amount, &Some(referrer.clone()));
+
+    let events = env.events().all();
+    let mut place_bet: Option<crate::BetEvent> = None;
+    let mut referral_bet: Option<crate::ReferralBetEvent> = None;
+    for event in events.events().iter() {
+        let topic0: Result<soroban_sdk::Symbol, _> =
+            soroban_sdk::TryFromVal::try_from_val(&env, &xdr_topic_val(&env, event, 0));
+        let Ok(topic0) = topic0 else { continue };
+        let data_val: Val = match &event.body {
+            soroban_sdk::xdr::ContractEventBody::V0(v0) => <Val as soroban_sdk::TryFromVal<
+                Env,
+                soroban_sdk::xdr::ScVal,
+            >>::try_from_val(&env, &v0.data)
+            .unwrap(),
+        };
+        if topic0 == soroban_sdk::Symbol::new(&env, "place_bet") {
+            place_bet = Some(soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap());
+        } else if topic0 == soroban_sdk::Symbol::new(&env, "referral_bet") {
+            referral_bet = Some(soroban_sdk::TryFromVal::try_from_val(&env, &data_val).unwrap());
+        }
+    }
+
+    let cumulative_volume = client.get_pool(&pool_id).unwrap().cumulative_volume;
+    (
+        place_bet.expect("place_bet event must be emitted"),
+        referral_bet.expect("referral_bet event must be emitted"),
+        cumulative_volume,
+    )
+}
+
+/// #1226 — With a non-zero fee, place_bet and referral_bet report the same
+/// (net) amount, which reconciles against the pool's cumulative volume.
+#[test]
+fn test_1226_referral_bet_amount_matches_place_bet_with_fee() {
+    let amount: i128 = 1_000_000;
+    let fee_rate: u32 = 200;
+    let (place_bet, referral_bet, cumulative_volume) =
+        place_referred_bet_with_fee(fee_rate, amount);
+
+    let fee_amount = amount * fee_rate as i128 / 10_000;
+    let net_amount = amount - fee_amount;
+
+    assert_eq!(place_bet.amount, referral_bet.amount);
+    assert_eq!(place_bet.amount, net_amount);
+    assert_eq!(referral_bet.amount, 980_000);
+    assert_eq!(net_amount + fee_amount, amount);
+    assert_eq!(cumulative_volume, referral_bet.amount);
+}
+
+/// #1226 — With a 10% fee, the emitted amounts differ from the gross bet by
+/// exactly the fee.
+#[test]
+fn test_1226_bet_event_amounts_differ_from_gross_by_exactly_fee() {
+    let amount: i128 = 1_000_000;
+    let (place_bet, referral_bet, cumulative_volume) = place_referred_bet_with_fee(1000, amount);
+
+    let fee_amount = 100_000;
+    assert_eq!(amount - place_bet.amount, fee_amount);
+    assert_eq!(amount - referral_bet.amount, fee_amount);
+    assert_eq!(place_bet.amount, referral_bet.amount);
+    assert_eq!(cumulative_volume, 900_000);
+}
+
 /// M8: claim_referral_rewards emits an event with correct topics and payload.
 #[test]
 fn m8_claim_referral_rewards_emits_referral_reward_claimed_event() {
@@ -5628,6 +6026,7 @@ fn m8_claim_referral_rewards_emits_referral_reward_claimed_event() {
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
     let referrer = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -5702,6 +6101,7 @@ fn m9_update_twap_emits_twap_updated_event() {
     let creator = Address::generate(&env);
     let user_a = Address::generate(&env);
     let user_b = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user_a, &500);
     token_admin_client.mint(&user_b, &500);
 
@@ -5833,6 +6233,7 @@ fn test_create_pool_with_twap_period_not_initialized() {
         &String::from_str(&env, "A"),
         &String::from_str(&env, "B"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &3600,
     );
 }
@@ -5855,6 +6256,7 @@ fn test_create_multi_outcome_pool_not_initialized() {
         &outcomes,
         &3600,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
     );
 }
 
@@ -5876,6 +6278,7 @@ fn test_create_multi_pool_with_twap_not_initialized() {
         &outcomes,
         &3600,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
         &3600,
     );
 }
@@ -5920,6 +6323,7 @@ fn n1_get_total_user_claims_tracks_cumulative_winnings() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10_000);
 
     env.ledger().with_mut(|li| li.timestamp = 100);
@@ -6013,6 +6417,7 @@ fn n3_get_user_claim_history_returns_correct_entries() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10_000);
 
     env.ledger().with_mut(|li| li.timestamp = 100);
@@ -6065,6 +6470,7 @@ fn n4_get_user_claim_history_pagination() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &100_000);
 
     env.ledger().with_mut(|li| li.timestamp = 100);
@@ -6169,6 +6575,7 @@ fn multi_asset_setup() -> MultiAssetSetup {
     env.ledger().with_mut(|li| li.timestamp = 1_000);
 
     let creator = Address::generate(&env);
+    proto_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 100));
     MultiAssetSetup {
         env,
         client,
@@ -6204,6 +6611,7 @@ fn ma_c1_create_multi_asset_pool_happy_path() {
         &3_600u64,
         &tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
 
@@ -6241,6 +6649,7 @@ fn ma_c2_create_multi_asset_pool_rejects_token_without_exchange_rate() {
         &3_600u64,
         &tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
     assert!(result.is_err());
@@ -6265,6 +6674,7 @@ fn ma_c3_create_multi_asset_pool_rejects_empty_token_list() {
         &3_600u64,
         &empty_tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
     assert!(result.is_err());
@@ -6322,6 +6732,7 @@ fn create_ma_pool(s: &MultiAssetSetup) -> u32 {
         &3_600u64,
         &tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     )
 }
@@ -6786,6 +7197,7 @@ fn ma_e1_place_multi_asset_bet_no_exchange_rate_fails() {
         &3_600u64,
         &tokens,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
 
@@ -6906,6 +7318,7 @@ fn issue559_all_bettors_on_winning_side_no_division_by_zero() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &20_000_000);
 
     let pool_id = client.create_pool(
@@ -6952,6 +7365,7 @@ fn issue559_winning_outcome_with_no_bets_returns_no_winning_bets() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10_000_000);
 
     let pool_id = client.create_pool(
@@ -6969,13 +7383,10 @@ fn issue559_winning_outcome_with_no_bets_returns_no_winning_bets() {
     client.place_bet(&user, &pool_id, &1, &5_000_000, &None::<Address>);
 
     env.ledger().with_mut(|li| li.timestamp = 3_601);
-    // Settle with outcome 0 — no one bet on it.
-    client.settle_pool(&token_admin, &pool_id, &0);
-
-    // Any attempt to claim should return NoWinningsToClaim since the user
-    // has no stake on the winning outcome.
-    let result = client.try_claim_winnings(&user, &pool_id);
-    assert_eq!(result, Err(Ok(ContractError::NoWinningsToClaim)));
+    // Settle with outcome 0 — no one bet on it.  The NoWinningBets guard
+    // now rejects settlement when the declared winning side has zero bets.
+    let result = client.try_settle_pool(&token_admin, &pool_id, &0);
+    assert_eq!(result, Err(Ok(ContractError::NoWinningBets)));
 }
 
 /// #559-3: A user who bet only on the losing side cannot claim winnings;
@@ -6996,6 +7407,7 @@ fn issue559_loser_only_bet_cannot_claim() {
     let creator = Address::generate(&env);
     let winner = Address::generate(&env);
     let loser = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&winner, &5_000_000);
     token_admin_client.mint(&loser, &5_000_000);
 
@@ -7038,6 +7450,7 @@ fn issue559_preview_unclaimable_when_no_bets_on_winning_side() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &5_000_000);
 
     let pool_id = client.create_pool(
@@ -7055,17 +7468,10 @@ fn issue559_preview_unclaimable_when_no_bets_on_winning_side() {
     client.place_bet(&user, &pool_id, &1, &5_000_000, &None::<Address>);
 
     env.ledger().with_mut(|li| li.timestamp = 3_601);
-    // Settle with outcome 0 — nobody bet on it.
-    client.settle_pool(&token_admin, &pool_id, &0);
-
-    // User has no winning bet — preview should indicate not eligible.
-    let preview = client.preview_claimable_amount(&pool_id, &user);
-    assert_eq!(preview, ClaimPreview::NotEligible);
-
-    // Previewing as a random address that never bet should show NeverBet.
-    let stranger = Address::generate(&env);
-    let preview_stranger = client.preview_claimable_amount(&pool_id, &stranger);
-    assert_eq!(preview_stranger, ClaimPreview::NeverBet);
+    // Settle with outcome 0 — nobody bet on it.  The NoWinningBets guard
+    // now rejects settlement when the declared winning side has zero bets.
+    let result = client.try_settle_pool(&token_admin, &pool_id, &0);
+    assert_eq!(result, Err(Ok(ContractError::NoWinningBets)));
 }
 
 #[test]
@@ -7081,6 +7487,7 @@ fn test_bet_after_expiry_rejected() {
     client.initialize(&token_id.address(), &token_admin, &token_admin);
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10000000);
 
     let pool_id = client.create_pool(
@@ -7113,6 +7520,7 @@ fn test_multiple_bettors_proportional_reward() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
     let user3 = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &10000000);
     token_admin_client.mint(&user2, &10000000);
     token_admin_client.mint(&user3, &10000000);
@@ -7160,6 +7568,7 @@ fn test_fee_calculation_verification() {
     let creator = Address::generate(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user1, &10000000);
     token_admin_client.mint(&user2, &10000000);
 
@@ -7200,6 +7609,7 @@ fn test_zero_value_bet_rejected() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10000000);
 
     let pool_id = client.create_pool(
@@ -7229,6 +7639,7 @@ fn test_settle_expired_pool_success() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10000000);
 
     let pool_id = client.create_pool(
@@ -7265,6 +7676,7 @@ fn test_empty_winning_pool_handling() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &10000000);
 
     let pool_id = client.create_pool(
@@ -7282,10 +7694,9 @@ fn test_empty_winning_pool_handling() {
 
     env.ledger().with_mut(|li| li.timestamp = 3601);
 
-    client.settle_pool(&token_admin, &pool_id, &0);
-
-    let w = client.preview_claimable_amount(&pool_id, &user);
-    assert_eq!(w, ClaimPreview::NotEligible);
+    // Settling with an outcome that received zero bets must be rejected.
+    let result = client.try_settle_pool(&token_admin, &pool_id, &0);
+    assert_eq!(result, Err(Ok(ContractError::NoWinningBets)));
 }
 
 #[test]
@@ -7361,6 +7772,7 @@ fn test_create_pool_from_template_invalid_outcome_count_rejected() {
     client.initialize(&token, &admin, &admin);
 
     let creator = Address::generate(&env);
+    fund_creator_deposit(&env, &token, &creator);
 
     let mut outcomes = Vec::new(&env);
     outcomes.push_back(String::from_str(&env, "Yes"));
@@ -7382,6 +7794,7 @@ fn test_create_pool_from_template_invalid_outcome_count_rejected() {
     let res = client.try_create_pool_from_template(
         &creator,
         &template_id,
+        &MIN_CREATOR_DEPOSIT,
         &PoolTemplateOverrides {
             title: None,
             description: None,

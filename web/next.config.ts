@@ -7,6 +7,10 @@ const nextConfig: NextConfig = {
   },
   headers: async () => [
     {
+      source: "/admin/:path*",
+      headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+    },
+    {
       source: "/(.*)",
       headers: [
         { key: "X-Frame-Options", value: "DENY" },

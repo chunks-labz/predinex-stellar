@@ -97,7 +97,10 @@ describe('Navbar — mobile viewport', () => {
     const mobileMenus = document.querySelectorAll('.md\\:hidden');
     const mobileMenu = Array.from(mobileMenus).find(el => el.querySelector('a')) as HTMLElement;
     expect(within(mobileMenu).getByRole('link', { name: /markets/i })).toBeInTheDocument();
-    expect(within(mobileMenu).getByRole('link', { name: /create/i })).toBeInTheDocument();
+    // The drawer holds two links matching /create/i — "/create" (nav.create) and
+    // "Create pool" (/pools/new) — so disambiguate by destination instead.
+    expect(within(mobileMenu).getByRole('link', { name: /^create pool$/i })).toBeInTheDocument();
+    expect(within(mobileMenu).getByRole('link', { name: /nav\.create/i })).toBeInTheDocument();
   });
 
   it('closes the mobile menu when the hamburger is clicked again', async () => {

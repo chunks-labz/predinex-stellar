@@ -15,6 +15,8 @@ Welcome, and thank you for your interest in contributing! This guide covers ever
 7. [Error Code Stability Policy](#7-error-code-stability-policy)
 8. [CI Expectations](#8-ci-expectations)
 9. [Automated Dependency Updates (Dependabot)](#9-automated-dependency-updates-dependabot)
+10. [Dependency Vulnerability Auditing](#10-dependency-vulnerability-auditing)
+11. [API Schema Snapshots](#11-api-schema-snapshots)
 
 ---
 
@@ -82,6 +84,9 @@ All three checks must pass before opening a PR. Run them from the `web/` directo
 # Lint
 npm run lint
 
+# Auto-fix linting issues
+npm run lint:fix
+
 # Unit tests (single run, matches CI)
 npm test -- --run
 
@@ -131,8 +136,14 @@ Run these from `contracts/predinex/`:
 # Format check
 cargo fmt --check
 
+# Auto-fix formatting
+cargo fmt
+
 # Lint
 cargo clippy -- -D warnings
+
+# Auto-fix clippy suggestions where possible
+cargo clippy --fix --allow-dirty
 
 # Unit tests
 cargo test
@@ -144,7 +155,15 @@ To build the WASM artifact:
 stellar contract build
 ```
 
-The compiled output lands at `contracts/predinex/target/wasm32-unknown-unknown/release/predinex.wasm`.
+The compiled output lands at `contracts/predinex/target/wasm32v1-none/release/predinex.wasm`.
+
+### Troubleshooting Local Test Failures
+
+If tests fail locally but pass in CI, consult the [Contract Test Determinism Guide](./docs/CONTRACT_TEST_DETERMINISM.md). Common causes include:
+
+- **Rust version mismatch:** The workspace uses a pinned toolchain (1.87.0) via `rust-toolchain.toml`. Verify with `rustc --version`.
+- **Wrong WASM target:** Use `wasm32v1-none`, not `wasm32-unknown-unknown`. Add it with `rustup target add wasm32v1-none`.
+- **Stale build cache:** Clear with `cargo clean` before retrying.
 
 For a full local deploy-to-testnet walkthrough, see the [Local End-to-End Runbook](./docs/local-runbook.md).
 
@@ -172,11 +191,18 @@ Any change that touches the contract state or upgrade flow must follow the proce
 
 ## 6. Issue and PR Workflow
 
+### Stellar Wave Program
+
+This repository participates in the **Stellar Wave** program, a community-driven initiative to accelerate protocol development. Issues eligible for the Wave program are labeled with an `area:` tag indicating the impacted subsystem (`area: contract`, `area: web`, `area: docs`, or `area: ops`).
+
+For full details on the Wave program, area taxonomy, acceptance criteria, and triage process, see [`.github/PROGRAM.md`](./.github/PROGRAM.md).
+
 ### Picking up an issue
 
 1. Comment on the issue to let others know you are working on it.
-2. Fork the repository and clone your fork.
-3. Create a branch from `main` using the convention below.
+2. Check application limits if the issue is part of the Wave program.
+3. Fork the repository and clone your fork.
+4. Create a branch from `main` using the convention below.
 
 ### Branch naming
 
@@ -208,6 +234,7 @@ component suite.
 
 Before marking a PR ready for review:
 
+- [ ] Code is formatted and linted (`npm run lint:fix`, `cargo fmt`)
 - [ ] `npm run lint` passes
 - [ ] `npm test -- --run` passes (no new failures)
 - [ ] `npm run build` succeeds
@@ -245,9 +272,11 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every push and pull request
 
 | Job | Steps |
 |-----|-------|
+| **Lint & Format Gate** | Runs on every PR; checks `cargo fmt --all --check` (fails with diff), `cargo clippy --workspace -- -D warnings`, and `npm run lint`. Use auto-fix commands (`cargo fmt`, `npm run lint:fix`) to resolve violations. |
 | **Web Checks** | `npm ci` → `npm run lint` → `npm test -- --run` → `npm run build` |
 | **Bundle size budget** | Checked on PRs; fails if JS exceeds 350 KB, CSS exceeds 80 KB, or total static exceeds 500 KB |
 | **Contract Checks** | `cargo fmt --check` → `cargo clippy -- -D warnings` → `cargo test` |
+| **Dependency Audit** | `npm audit` and `cargo audit`; runs on PRs that touch a manifest or lockfile, and weekly. See [§10](#10-dependency-vulnerability-auditing) |
 
 Run all of these locally before pushing to avoid CI failures blocking your PR.
 
@@ -269,7 +298,10 @@ Dependabot is configured in [`.github/dependabot.yml`](./.github/dependabot.yml)
 | Ecosystem | Directory | Label |
 |-----------|-----------|-------|
 | npm | `/web` | `dependencies`, `npm` |
+| npm | `/bot` | `dependencies`, `npm` |
+| npm | `/api` | `dependencies`, `npm` |
 | Cargo | `/contracts/predinex` | `dependencies`, `cargo` |
+| Cargo | `/` (workspace root) | `dependencies`, `cargo` |
 
 ### Merge policy
 
@@ -283,4 +315,47 @@ The auto-merge workflow in [`.github/workflows/dependabot-auto-merge.yml`](./.gi
 
 Patch and minor updates are grouped into a single weekly PR per ecosystem so the review queue stays manageable. Major version bumps always arrive as separate PRs to make breaking-change review straightforward.
 
+Auto-merge additionally requires the **Dependency Audit** check to be green, so a Dependabot PR that pulls in a release with a known high or critical advisory is never auto-merged. See [§10](#10-dependency-vulnerability-auditing) below.
+
 If a Dependabot PR sits in CI failure, investigate the failure before merging — do not re-trigger or skip checks.
+
+---
+
+## 10. Dependency Vulnerability Auditing
+
+The workflow in [`.github/workflows/security-audit.yml`](./.github/workflows/security-audit.yml) audits every dependency set the repository ships:
+
+| Job | Scope | Tool |
+|-----|-------|------|
+| `npm dependency audit` | `/web` | `npm audit --audit-level=high` |
+| `Bot npm dependency audit` | `/bot` | `npm audit --audit-level=high` |
+| `Cargo dependency audit` | `/contracts/predinex` (and the workspace `Cargo.lock`) | `cargo audit` |
+| `Dependency Audit` | Summary gate over the three jobs above | — |
+
+The audits run on every pull request that touches a manifest or lockfile, on pushes to `main` that do the same, weekly on Mondays, and on demand. `Dependency Audit` is the single status check to require in branch protection: it fails if any individual audit fails, is skipped, or is cancelled, so a missing audit can never be mistaken for a clean one.
+
+`/api` is **not** covered: it has no committed lockfile, and `npm audit` cannot resolve a dependency tree without one. The `stellar-lend` prototype contracts are not covered either — they sit outside the Cargo workspace and resolve their own dependency graphs. Bringing either into scope means committing a lockfile first.
+
+## 11. API Schema Snapshots
+
+The public API contract is committed at [`api/schema/openapi.json`](./api/schema/openapi.json). CI regenerates it and fails when the snapshot drifts, protecting consumers from accidental breaking changes.
+
+When an API change is intentional, run this one command from `api/`, review the JSON diff, and commit it with the code change:
+
+```bash
+npm run schema:update
+```
+
+Use `npm run schema:check` to verify the snapshot without changing files.
+
+## ADR workflow
+
+We use Architecture Decision Records (ADRs) to document significant design decisions. See [`docs/adr/`](docs/adr/) for existing ADRs and the [template](docs/adr/0000-adr-template.md).
+
+When proposing a significant architectural change:
+1. Check existing ADRs to avoid duplication.
+2. Create a new ADR in `docs/adr/` using the template (numbered sequentially).
+3. Start with status `Proposed` and open a PR for discussion.
+4. After consensus, update the status to `Accepted` and merge.
+
+ADR contents should include context, the decision made, and clear consequences (positive and negative).

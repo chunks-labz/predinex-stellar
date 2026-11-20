@@ -145,8 +145,27 @@ describe('ShareButton', () => {
     await user.click(screen.getByRole('button', { name: /copy market link/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('Something went wrong')
+      expect(screen.getByRole('alert')).toHaveTextContent("Couldn't copy")
     );
+  });
+
+  it('falls back to a selection copy when the Clipboard API rejects', async () => {
+    spyClipboardFail();
+    teardownNativeShare();
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(document, 'execCommand', { value: execCommand, configurable: true });
+    const user = userEvent.setup();
+
+    try {
+      render(<ShareButton url="https://example.com/markets/1" />);
+      await user.click(screen.getByRole('button', { name: /copy market link/i }));
+
+      expect(execCommand).toHaveBeenCalledWith('copy');
+      await waitFor(() => expect(screen.getByText('Copied!')).toBeInTheDocument());
+    } finally {
+      // @ts-expect-error -- remove the test double again
+      delete document.execCommand;
+    }
   });
 
   // --- Native share --------------------------------------------------------
@@ -262,6 +281,24 @@ describe('ShareButton', () => {
 
     // Close
     await user.click(screen.getByRole('button', { name: /close qr code popover/i }));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: /qr code/i })).not.toBeInTheDocument()
+    );
+  });
+
+  it('closes the QR code popover on Escape and shows the full link', async () => {
+    spyClipboardSuccess();
+    teardownNativeShare();
+    const user = userEvent.setup();
+
+    render(<ShareButton url="https://example.com/markets/1" />);
+    await user.click(screen.getByRole('button', { name: /show qr code/i }));
+
+    expect(screen.getByRole('textbox', { name: /market link/i })).toHaveValue(
+      'https://example.com/markets/1'
+    );
+
+    await user.keyboard('{Escape}');
     await waitFor(() =>
       expect(screen.queryByRole('dialog', { name: /qr code/i })).not.toBeInTheDocument()
     );

@@ -69,6 +69,10 @@ fn setup_fuzz_env() -> FuzzEnv<'static> {
 
     client.initialize(&token_id.address(), &admin, &admin);
 
+    // Fund admin so creator-deposit transfers succeed when creating pools.
+    let sac = soroban_sdk::token::StellarAssetClient::new(&env, &token_id.address());
+    sac.mint(&admin, &(MIN_CREATOR_DEPOSIT * 200));
+
     FuzzEnv {
         env,
         client,
@@ -288,6 +292,7 @@ fn fuzz_settle_pool_target() {
         &String::from_str(&t.env, "A"),
         &String::from_str(&t.env, "B"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &200,
     );
 
@@ -298,6 +303,7 @@ fn fuzz_settle_pool_target() {
         &String::from_str(&t.env, "A"),
         &String::from_str(&t.env, "B"),
         &3600,
+        &MIN_CREATOR_DEPOSIT,
         &300,
     );
     t.client.cancel_scheduled_pool(&t.admin, &cancelled_pool_id);

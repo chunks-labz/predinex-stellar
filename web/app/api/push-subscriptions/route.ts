@@ -5,19 +5,28 @@ import {
   type NotificationPreferences,
   type WebPushSubscriptionPayload,
 } from '../../lib/push-notification-types';
-import { checkRateLimit, rateLimitHeaders } from '@/app/lib/rate-limit';
+import { checkRateLimit, rateLimitHeaders, clientIpFromHeaders } from '@/app/lib/rate-limit';
+import { verifyWalletProof } from '@/app/lib/wallet-auth';
 
 export const runtime = 'nodejs';
 
 const KV_PREFIX = 'push_sub:';
 
 // ---------------------------------------------------------------------------
-// Rate limit: max 30 requests per minute per wallet address.
+// Rate limit: max 30 requests per minute per verified wallet, plus a per-IP
+// cap. Both keys come from values the caller cannot freely rotate (a wallet
+// signature and the connecting IP), never from a payload field.
 // Abuse posture: prevents a single client from hammering subscription
 // management endpoints (spam-subscribing or bulk-deleting).
 // ---------------------------------------------------------------------------
 const RATE_LIMIT_MAX = 30;
+const IP_RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+
+/** Maximum number of push endpoints stored per wallet. */
+const MAX_SUBSCRIPTIONS_PER_USER = 10;
+
+const AUTH_SCOPE = 'push-subscriptions';
 
 interface StoredPushSubscription {
   userId: string;
@@ -87,19 +96,21 @@ function validateSubscription(value: unknown): WebPushSubscriptionPayload | null
   };
 }
 
-function getAuthenticatedUserId(request: NextRequest, bodyUserId?: unknown): string | null {
-  const headerUserId = request.headers.get('x-predinex-wallet-address')?.trim();
-  if (!headerUserId || typeof bodyUserId !== 'string') return null;
-  const normalizedBodyUserId = bodyUserId.trim();
-  if (!normalizedBodyUserId || headerUserId !== normalizedBodyUserId) return null;
-  return normalizedBodyUserId;
+function ipRateLimited(request: NextRequest): NextResponse | null {
+  const ipRl = checkRateLimit(`push-sub-ip:${clientIpFromHeaders(request.headers)}`, {
+    max: IP_RATE_LIMIT_MAX,
+    windowMs: RATE_LIMIT_WINDOW_MS,
+  });
+  if (!ipRl.allowed) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please slow down.' },
+      { status: 429, headers: rateLimitHeaders(ipRl) },
+    );
+  }
+  return null;
 }
 
-export async function GET(request: NextRequest) {
-  const userId = request.headers.get('x-predinex-wallet-address')?.trim();
-  if (!userId) return jsonError('Missing wallet identity.', 401);
-
-  // Rate limit by wallet address.
+function walletRateLimited(userId: string): NextResponse | null {
   const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
   if (!rl.allowed) {
     return NextResponse.json(
@@ -107,6 +118,31 @@ export async function GET(request: NextRequest) {
       { status: 429, headers: rateLimitHeaders(rl) },
     );
   }
+  return null;
+}
+
+/**
+ * Resolve the caller's identity from a verified wallet signature. A body
+ * `userId`, if present, must match the verified address.
+ */
+function getAuthenticatedUserId(request: NextRequest, bodyUserId?: unknown): string | null {
+  const verified = verifyWalletProof(request.headers, AUTH_SCOPE);
+  if (!verified) return null;
+  if (bodyUserId !== undefined && (typeof bodyUserId !== 'string' || bodyUserId.trim() !== verified)) {
+    return null;
+  }
+  return verified;
+}
+
+export async function GET(request: NextRequest) {
+  const ipLimited = ipRateLimited(request);
+  if (ipLimited) return ipLimited;
+
+  const userId = getAuthenticatedUserId(request);
+  if (!userId) return jsonError('Missing or invalid wallet signature.', 401);
+
+  const limited = walletRateLimited(userId);
+  if (limited) return limited;
 
   const endpoints = await kv.get<string[]>(userIndexKey(userId));
   if (!endpoints || endpoints.length === 0) {
@@ -134,17 +170,14 @@ export async function POST(request: NextRequest) {
 
   if (!isRecord(body)) return jsonError('Invalid request body.', 400);
 
-  const userId = getAuthenticatedUserId(request, body.userId);
-  if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
+  const ipLimited = ipRateLimited(request);
+  if (ipLimited) return ipLimited;
 
-  // Rate limit by wallet address.
-  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { error: 'Too many requests. Please slow down.' },
-      { status: 429, headers: rateLimitHeaders(rl) },
-    );
-  }
+  const userId = getAuthenticatedUserId(request, body.userId);
+  if (!userId) return jsonError('Missing or invalid wallet signature.', 401);
+
+  const limited = walletRateLimited(userId);
+  if (limited) return limited;
 
   const subscription = validateSubscription(body.subscription);
   if (!subscription) return jsonError('Invalid push subscription.', 400);
@@ -162,10 +195,15 @@ export async function POST(request: NextRequest) {
   const key = kvKey(userId, subscription.endpoint);
   const idxKey = userIndexKey(userId);
 
+  const endpoints = (await kv.get<string[]>(idxKey)) || [];
+  const isNewEndpoint = !endpoints.includes(subscription.endpoint);
+  if (isNewEndpoint && endpoints.length >= MAX_SUBSCRIPTIONS_PER_USER) {
+    return jsonError('Subscription limit reached for this wallet.', 409);
+  }
+
   await kv.set(key, entry);
 
-  const endpoints = (await kv.get<string[]>(idxKey)) || [];
-  if (!endpoints.includes(subscription.endpoint)) {
+  if (isNewEndpoint) {
     endpoints.push(subscription.endpoint);
     await kv.set(idxKey, endpoints);
   }
@@ -183,17 +221,14 @@ export async function DELETE(request: NextRequest) {
 
   if (!isRecord(body)) return jsonError('Invalid request body.', 400);
 
-  const userId = getAuthenticatedUserId(request, body.userId);
-  if (!userId) return jsonError('Missing or mismatched wallet identity.', 401);
+  const ipLimited = ipRateLimited(request);
+  if (ipLimited) return ipLimited;
 
-  // Rate limit by wallet address.
-  const rl = checkRateLimit(`push-sub:${userId}`, { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS });
-  if (!rl.allowed) {
-    return NextResponse.json(
-      { error: 'Too many requests. Please slow down.' },
-      { status: 429, headers: rateLimitHeaders(rl) },
-    );
-  }
+  const userId = getAuthenticatedUserId(request, body.userId);
+  if (!userId) return jsonError('Missing or invalid wallet signature.', 401);
+
+  const limited = walletRateLimited(userId);
+  if (limited) return limited;
 
   const idxKey = userIndexKey(userId);
   const endpoints = (await kv.get<string[]>(idxKey)) || [];

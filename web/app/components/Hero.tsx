@@ -19,12 +19,12 @@ export default function Hero() {
                 <h1 className="text-6xl md:text-8xl font-black tracking-tighter mb-8 leading-[0.9]">
                     PREDICT THE <span className="gradient-text inline-block">FUTURE</span>.
                     <br />
-                    WIN ON <span className="text-foreground">BITCOIN</span>.
+                    WIN ON <span className="text-foreground">STELLAR</span>.
                 </h1>
 
                 <p className="max-w-2xl mx-auto text-lg md:text-xl text-muted-foreground mb-12 leading-relaxed font-medium">
-                    The institutional-grade prediction market built for the Stacks ecosystem.
-                    Scalable, trustless, and powered by Clarity smart contracts.
+                    The institutional-grade prediction market built for the Stellar ecosystem.
+                    Scalable, trustless, and powered by Soroban smart contracts.
                 </p>
 
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-6">

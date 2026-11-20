@@ -82,7 +82,7 @@ export default function Pagination({ pagination, onPageChange }: PaginationProps
       </div>
 
       {/* Pagination controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-center gap-2">
         {/* Previous button */}
         <button
           onClick={handlePrevious}
@@ -97,8 +97,10 @@ export default function Pagination({ pagination, onPageChange }: PaginationProps
           <span className="hidden sm:inline">Previous</span>
         </button>
 
-        {/* Page numbers */}
-        <div className="flex items-center gap-1">
+        {/* Page numbers — hidden on small screens, where up to seven numbered
+            buttons plus prev/next overflow a 375px viewport. The "Page X of Y"
+            line below carries the same information there. */}
+        <div className="hidden sm:flex items-center gap-1">
           {pageNumbers.map((page, index) => {
             if (page === 'ellipsis') {
               return (

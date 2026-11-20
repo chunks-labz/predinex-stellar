@@ -1,7 +1,7 @@
 import type { ProcessedMarket } from './market-types';
 import type { PoolData } from './market-types';
 import { fetchAllPools, getEnhancedPool } from './enhanced-stacks-api';
-import { processMarketData, fetchCurrentBlockHeightLive } from './market-utils';
+import { processMarketData } from './market-utils';
 
 /**
  * Client-side cache for the markets list to make the first paint faster.
@@ -21,7 +21,12 @@ import { processMarketData, fetchCurrentBlockHeightLive } from './market-utils';
  */
 export const MARKET_LIST_CACHE_KEY = 'predinex_market_list_v2';
 export const MARKET_LIST_CACHE_VERSION = 2;
-export const MARKET_LIST_CACHE_TTL_MS = 30_000;
+/**
+ * List snapshots stay fresh for one full polling cycle (60s in
+ * `useMarketDiscovery`). Returning from a market detail page within that
+ * window reuses the snapshot instead of refetching every pool from the chain.
+ */
+export const MARKET_LIST_CACHE_TTL_MS = 60_000;
 
 export const POOL_CACHE_KEY_PREFIX = 'predinex_pool_';
 export const POOL_CACHE_VERSION = 1;
@@ -41,25 +46,6 @@ type MarketListCachePayload = {
 };
 
 let inFlightWarmPromise: Promise<ProcessedMarket[]> | null = null;
-
-function writeBlockHeightWarning(
-  warning: string | null,
-  now: number = Date.now()
-): void {
-  if (typeof window === 'undefined') return;
-
-  try {
-    if (!warning) {
-      window.localStorage.removeItem(BLOCK_HEIGHT_WARNING_KEY);
-      return;
-    }
-
-    const payload: BlockHeightWarningPayload = { cachedAt: now, message: warning };
-    window.localStorage.setItem(BLOCK_HEIGHT_WARNING_KEY, JSON.stringify(payload));
-  } catch {
-    // best-effort only
-  }
-}
 
 export function readBlockHeightWarning(now: number = Date.now()): string | null {
   if (typeof window === 'undefined') return null;
@@ -259,11 +245,9 @@ export async function warmMarketListCache(): Promise<ProcessedMarket[]> {
 
   inFlightWarmPromise = (async () => {
     const poolsData = await fetchAllPools();
-    const { height: currentBlockHeight, warning } = await fetchCurrentBlockHeightLive();
-    writeBlockHeightWarning(warning);
-    const processedMarkets = poolsData.map(pool =>
-      processMarketData(pool, currentBlockHeight)
-    );
+    // #1284 — status/expiry is derived from wall-clock time, so no chain-tip
+    // lookup is needed to classify markets.
+    const processedMarkets = poolsData.map(pool => processMarketData(pool));
     writeMarketListCache(processedMarkets);
     
     poolsData.forEach(pool => writePoolCache(pool));

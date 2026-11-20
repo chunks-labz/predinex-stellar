@@ -1,9 +1,13 @@
 /**
  * useFeePreview — derives market-creation fee breakdown from form inputs.
  *
- * Protocol fee: fixed 50 STX (matches the original placeholder label).
+ * ⚠️  PLACEHOLDER VALUES — not derived from actual contract or network fees.
+ * These will be replaced with real values from the contract and network once deployed.
+ *
+ * Current behavior:
+ * Protocol fee: hardcoded 50 STX (placeholder).
  * Network fee:  estimated from transaction byte-size proxy (title + description length).
- *               Base 0.001 STX + 0.000001 STX per character of user-supplied text.
+ *               Base 0.001 STX + 0.000001 STX per character of user-supplied text (placeholder).
  *
  * Both values are stable constants / simple math — no async fetch needed.
  */
@@ -17,13 +21,13 @@ export interface FeePreview {
   total: number;
 }
 
-/** Fixed protocol fee charged by the contract (in STX). */
+/** Fixed protocol fee charged by the contract (in STX). ⚠️  PLACEHOLDER — replace with actual contract fee. */
 export const PROTOCOL_FEE_STX = 50;
 
-/** Base network fee in STX (≈ 1 000 µSTX). */
+/** Base network fee in STX (≈ 1 000 µSTX). ⚠️  PLACEHOLDER — replace with actual network fee. */
 const BASE_NETWORK_FEE_STX = 0.001;
 
-/** Per-character fee increment in STX (≈ 1 µSTX / char). */
+/** Per-character fee increment in STX (≈ 1 µSTX / char). ⚠️  PLACEHOLDER — replace with actual fee model. */
 const PER_CHAR_FEE_STX = 0.000001;
 
 /**

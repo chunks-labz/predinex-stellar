@@ -7,6 +7,7 @@
  */
 
 import type { ActivityItem } from './market-types';
+import { TOKEN_CONFIG } from './config';
 
 export type ExportFormat = 'csv' | 'json';
 
@@ -14,9 +15,11 @@ export type ExportFormat = 'csv' | 'json';
 export const EXPORT_MAX_WINDOW_DAYS = 90;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-const MICRO_STX_PER_STX = 1_000_000;
+// #1539 — amounts on this chain are stroops (1 token = 10^7), but this
+// divisor was 10^6, inflating every exported amount by 10x.
+const STROOPS_PER_TOKEN = TOKEN_CONFIG.STROOPS_PER_UNIT;
 
-/** One exported activity row. `amount` is denominated in STX. */
+/** One exported activity row. `amount` is denominated in token units. */
 export interface ActivityExportRecord {
   poolId: number | null;
   type: ActivityItem['type'];
@@ -94,7 +97,7 @@ export function toExportRecords(activities: ActivityItem[]): ActivityExportRecor
   return activities.map((item) => ({
     poolId: item.poolId ?? null,
     type: item.type,
-    amount: item.amount === undefined ? null : item.amount / MICRO_STX_PER_STX,
+    amount: item.amount === undefined ? null : item.amount / STROOPS_PER_TOKEN,
     timestamp: new Date(item.timestamp * 1000).toISOString(),
     txHash: item.txId,
     poolTitle: item.poolTitle ?? '',
@@ -178,8 +181,8 @@ type PoolLike = {
 };
 
 export function poolToExportRecord(pool: PoolLike, poolId?: number): PoolExportRecord {
-  const totalA = (pool.totalA ?? 0) / MICRO_STX_PER_STX;
-  const totalB = (pool.totalB ?? 0) / MICRO_STX_PER_STX;
+  const totalA = (pool.totalA ?? 0) / STROOPS_PER_TOKEN;
+  const totalB = (pool.totalB ?? 0) / STROOPS_PER_TOKEN;
   const volume = totalA + totalB;
   const oddsA = volume > 0 ? ((totalA / volume) * 100).toFixed(1) : '50.0';
   const oddsB = volume > 0 ? ((totalB / volume) * 100).toFixed(1) : '50.0';

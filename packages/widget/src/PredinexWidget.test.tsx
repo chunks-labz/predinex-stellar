@@ -21,6 +21,11 @@ const fetchPool = vi.fn().mockResolvedValue(mockPool);
 const placeBet  = vi.fn().mockResolvedValue('abc123txid');
 
 describe('PredinexWidget', () => {
+  beforeEach(() => {
+    fetchPool.mockClear();
+    placeBet.mockClear();
+  });
+
   it('renders loading state while fetching', () => {
     render(<PredinexWidget contractId="C123" poolId={1} fetchPool={fetchPool} />);
     expect(screen.getByRole('status')).toHaveTextContent('Loading pool…');
@@ -44,7 +49,7 @@ describe('PredinexWidget', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('RPC down'));
   });
 
-  it('calls placeBet and shows success', async () => {
+  it('requires confirmation before placing a bet', async () => {
     const onBet = vi.fn();
     render(
       <PredinexWidget
@@ -61,8 +66,29 @@ describe('PredinexWidget', () => {
     fireEvent.change(screen.getByLabelText(/bet amount/i), { target: { value: '10' } });
     fireEvent.click(screen.getByText('Bet'));
 
+    expect(screen.getByRole('dialog', { name: /confirm wager/i })).toBeInTheDocument();
+    expect(screen.getByText(/expected payout/i)).toBeInTheDocument();
+    expect(placeBet).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /confirm wager/i }));
+
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('abc123tx'));
     expect(onBet).toHaveBeenCalledWith(1, 0, 10);
+  });
+
+  it('keeps form values when the confirmation dialog is cancelled', async () => {
+    render(<PredinexWidget contractId="C123" poolId={1} fetchPool={fetchPool} placeBet={placeBet} />);
+    await waitFor(() => screen.getByText('Yes'));
+
+    fireEvent.click(screen.getByText('No'));
+    fireEvent.change(screen.getByLabelText(/bet amount/i), { target: { value: '4.5' } });
+    fireEvent.click(screen.getByText('Bet'));
+
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    expect(screen.getByLabelText(/bet amount/i)).toHaveValue(4.5);
+    expect(screen.getByRole('button', { name: /bet/i })).toBeEnabled();
+    expect(placeBet).not.toHaveBeenCalled();
   });
 
   it('shows error for invalid amount', async () => {

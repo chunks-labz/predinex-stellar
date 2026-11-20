@@ -17,7 +17,14 @@ export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   sortBy: 'newest',
 };
 
-const STATUS_VALUES = new Set<MarketStatusFilter>(['all', 'open', 'settled', 'disputed', 'frozen']);
+const STATUS_VALUES = new Set<MarketStatusFilter>([
+  'all',
+  'open',
+  'settled',
+  'disputed',
+  'frozen',
+  'expired',
+]);
 const SORT_VALUES = new Set<SortOption>(['newest', 'ending-soon', 'volume', 'participants']);
 const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'all',
@@ -27,7 +34,6 @@ const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'created-30d',
 ]);
 
-const BLOCKS_PER_DAY = 144;
 const SECONDS_PER_DAY = 86_400;
 
 export function normalizeAssetType(asset?: string): string {
@@ -110,6 +116,9 @@ function matchesStatus(market: ProcessedMarket, status: MarketStatusFilter): boo
   if (status === 'settled') return market.status === 'settled';
   if (status === 'frozen') return market.status === 'frozen';
   if (status === 'disputed') return market.status === 'disputed';
+  // #1537 — expired markets are produced by processMarketData but were
+  // unreachable through the status filter, so they only ever surfaced under "all".
+  if (status === 'expired') return market.status === 'expired';
   return false;
 }
 
@@ -117,11 +126,11 @@ function matchesTimeRange(market: ProcessedMarket, timeRange: TimeRangeFilter, n
   if (timeRange === 'all') return true;
 
   if (timeRange === 'ending-24h') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY;
   }
 
   if (timeRange === 'ending-7d') {
-    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= BLOCKS_PER_DAY * 7;
+    return market.status === 'active' && market.timeRemaining !== null && market.timeRemaining <= SECONDS_PER_DAY * 7;
   }
 
   if (market.createdAt < 1_000_000_000) return true;
@@ -174,14 +183,15 @@ export function filterAndSortMarkets(
   const sorted = [...filtered];
   switch (normalized.sortBy) {
     case 'volume':
-      sorted.sort((a, b) => b.totalVolume - a.totalVolume || b.createdAt - a.createdAt);
+      sorted.sort((a, b) => b.totalVolume - a.totalVolume || b.createdAt - a.createdAt || b.poolId - a.poolId);
       break;
     case 'participants':
       sorted.sort(
         (a, b) =>
           (b.participantCount ?? 0) - (a.participantCount ?? 0) ||
           b.totalVolume - a.totalVolume ||
-          b.createdAt - a.createdAt,
+          b.createdAt - a.createdAt ||
+          b.poolId - a.poolId,
       );
       break;
     case 'ending-soon':
@@ -190,8 +200,14 @@ export function filterAndSortMarkets(
         const bActive = b.status === 'active' && b.timeRemaining !== null;
         if (aActive && !bActive) return -1;
         if (bActive && !aActive) return 1;
-        if (aActive && bActive) return (a.timeRemaining ?? Infinity) - (b.timeRemaining ?? Infinity);
-        return b.createdAt - a.createdAt;
+        if (aActive && bActive) {
+          return (
+            (a.timeRemaining ?? Infinity) - (b.timeRemaining ?? Infinity) ||
+            b.totalVolume - a.totalVolume ||
+            b.poolId - a.poolId
+          );
+        }
+        return b.createdAt - a.createdAt || b.poolId - a.poolId;
       });
       break;
     case 'newest':

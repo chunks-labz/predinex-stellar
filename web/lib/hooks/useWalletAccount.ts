@@ -1,5 +1,5 @@
 'use client';
-import { useWallet } from '../../app/components/WalletAdapterProvider';
+import { useWallet } from '@/components/WalletAdapterProvider';
 import { useQuery } from '@tanstack/react-query';
 import { getRuntimeConfig } from '../../app/lib/runtime-config';
 import { createScopedLogger } from '../../app/lib/logger';

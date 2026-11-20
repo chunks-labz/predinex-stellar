@@ -1,6 +1,11 @@
 export default function MarketCardSkeleton() {
     return (
-        <div className="p-8 rounded-3xl border border-border bg-card/40 h-full flex flex-col glass animate-pulse">
+        <div
+            className="p-8 rounded-3xl border border-border bg-card/40 h-full min-h-[320px] flex flex-col glass animate-pulse"
+            role="status"
+            aria-label="Loading market"
+            aria-busy="true"
+        >
             {/* Status Badge Skeleton */}
             <div className="flex justify-between items-center mb-6">
                 <div className="h-6 w-16 bg-muted rounded-full" />

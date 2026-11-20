@@ -9,6 +9,20 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 }
 
+/** When the user last dismissed the banner (epoch ms). */
+export const PWA_INSTALL_DISMISSED_KEY = 'predinex:pwa-install-dismissed-at';
+/** How long a dismissal is honoured before the banner may be offered again. */
+export const PWA_INSTALL_SNOOZE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isSnoozed(): boolean {
+  try {
+    const dismissedAt = Number(window.localStorage.getItem(PWA_INSTALL_DISMISSED_KEY));
+    return Number.isFinite(dismissedAt) && dismissedAt > 0 && Date.now() - dismissedAt < PWA_INSTALL_SNOOZE_MS;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Captures the browser's deferred install prompt and surfaces an "Install"
  * banner. The banner only appears when the browser deems the app installable
@@ -23,7 +37,9 @@ export default function PWAInstallPrompt() {
       // Prevent the default mini-infobar so we can present our own UI.
       event.preventDefault();
       setDeferredPrompt(event as BeforeInstallPromptEvent);
-      setVisible(true);
+      // The browser fires this on every load, so without remembering the
+      // dismissal the banner came straight back after each reload.
+      if (!isSnoozed()) setVisible(true);
     };
 
     const onAppInstalled = () => {
@@ -42,14 +58,25 @@ export default function PWAInstallPrompt() {
   if (!visible || !deferredPrompt) return null;
 
   const handleInstall = async () => {
-    await deferredPrompt.prompt();
     try {
+      // `prompt()` rejects if the event was already used; don't leave the
+      // banner stuck on screen when it does.
+      await deferredPrompt.prompt();
       await deferredPrompt.userChoice;
     } catch {
       // Ignore — the prompt result is best-effort.
     }
     setVisible(false);
     setDeferredPrompt(null);
+  };
+
+  const handleDismiss = () => {
+    try {
+      window.localStorage.setItem(PWA_INSTALL_DISMISSED_KEY, String(Date.now()));
+    } catch {
+      // Storage unavailable — the banner simply hides for this page view.
+    }
+    setVisible(false);
   };
 
   return (
@@ -78,7 +105,7 @@ export default function PWAInstallPrompt() {
         <button
           type="button"
           aria-label="Dismiss install prompt"
-          onClick={() => setVisible(false)}
+          onClick={handleDismiss}
           className="shrink-0 rounded-lg p-1 text-muted-foreground transition-colors hover:text-foreground"
         >
           <X className="h-4 w-4" aria-hidden="true" />

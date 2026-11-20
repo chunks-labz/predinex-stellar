@@ -136,6 +136,9 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'betting.actionName': 'Place Bet',
     'betting.successMessage': 'Bet placed successfully!',
     'betting.amountRequired': 'Amount is required',
+    'betting.sharesPayoutInfoLabel': 'How shares and payouts work',
+    'betting.sharesPayoutInfo': 'Your bet buys shares in the outcome you pick. Shares are proportional to your stake divided by the total staked on that side. If your outcome wins, you receive your portion of the pool after the 2% protocol fee: stake ÷ winning-side total × net pool.',
+    'betting.sharesPayoutHint': 'New here? Odds show how much of the pool backs each outcome. Winners split the pool after fees.',
     // Claim winnings
     'claim.button': 'Claim Winnings',
     'claim.processing': 'Processing...',
@@ -281,6 +284,9 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'betting.actionName': 'Realizar apuesta',
     'betting.successMessage': '¡Apuesta realizada con éxito!',
     'betting.amountRequired': 'El importe es obligatorio',
+    'betting.sharesPayoutInfoLabel': 'Cómo funcionan las acciones y los pagos',
+    'betting.sharesPayoutInfo': 'Tu apuesta compra acciones del resultado elegido. Las acciones son proporcionales a tu importe dividido por el total apostado en ese lado. Si gana tu resultado, recibes tu parte del mercado total después de la comisión del 2 %: importe ÷ total del lado ganador × mercado neto.',
+    'betting.sharesPayoutHint': '¿Es tu primera vez? Las probabilidades muestran qué parte del mercado respalda cada resultado; los ganadores se reparten el mercado menos las comisiones.',
     // Claim winnings
     'claim.button': 'Reclamar ganancias',
     'claim.processing': 'Procesando...',
@@ -426,6 +432,9 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'betting.actionName': 'Placer un pari',
     'betting.successMessage': 'Pari placé avec succès\u00a0!',
     'betting.amountRequired': 'Le montant est requis',
+    'betting.sharesPayoutInfoLabel': 'Comment fonctionnent les parts et les gains',
+    'betting.sharesPayoutInfo': 'Votre pari achète des parts sur le résultat choisi. Les parts sont proportionnelles à votre mise divisée par le total misé de ce côté. Si votre résultat gagne, vous recevez votre part du pot total après les frais de protocole de 2 % : mise ÷ total du camp gagnant × pot net.',
+    'betting.sharesPayoutHint': 'Première visite ? Les cotes indiquent la part du pot qui soutient chaque résultat ; les gagnants se partagent le pot après frais.',
     // Claim winnings
     'claim.button': 'Réclamer les gains',
     'claim.processing': 'Traitement en cours...',

@@ -27,6 +27,14 @@ function makeConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     oracleUrl: null,
     oracleSecret: null,
     oracleFallbackToDefault: false,
+    oracleRequestsPerSecond: 5,
+    oracleRateLimitBurst: 5,
+    oracleMaxConcurrency: 2,
+    oracleRateLimitMode: "wait",
+    oracleRetryMaxAttempts: 3,
+    oracleRetryBaseDelayMs: 500,
+    oracleRetryMaxDelayMs: 10_000,
+    oracleRequestTimeoutMs: 10_000,
     txPollIntervalMs: 3_000,
     txPollMaxAttempts: 30,
     maxRetries: 2,
@@ -151,5 +159,41 @@ describe("ContractClient retry behavior", () => {
     // Fails fast on 1st attempt (no retries)
     expect(mockGetAccount).toHaveBeenCalledTimes(1);
     expect(mockSimulate).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ContractClient cursor scan", () => {
+  it("reads one bounded window per cycle and wraps after the final pool", async () => {
+    const client = new ContractClient(makeConfig());
+    const count = vi.spyOn(client, "getPoolCount").mockResolvedValue(250);
+    const batches = vi.spyOn(client, "getPoolsBatch").mockImplementation(
+      async (_startId, size) => Array.from({ length: size }, () => null),
+    );
+
+    await client.findExpiredUnsettledPools(100);
+    expect(batches).toHaveBeenLastCalledWith(1, 100);
+    expect(client.getLastScanCount()).toBe(100);
+
+    await client.findExpiredUnsettledPools(100);
+    expect(batches).toHaveBeenLastCalledWith(101, 100);
+
+    await client.findExpiredUnsettledPools(100);
+    expect(batches).toHaveBeenLastCalledWith(201, 50);
+    expect(client.getLastScanCount()).toBe(50);
+
+    await client.findExpiredUnsettledPools(100);
+    expect(batches).toHaveBeenLastCalledWith(1, 100);
+    expect(count).toHaveBeenCalledTimes(4);
+    expect(batches).toHaveBeenCalledTimes(4);
+  });
+
+  it("resets cursor and scan metrics when no pools exist", async () => {
+    const client = new ContractClient(makeConfig());
+    vi.spyOn(client, "getPoolCount").mockResolvedValue(0);
+    const batches = vi.spyOn(client, "getPoolsBatch");
+
+    expect(await client.findExpiredUnsettledPools(100)).toEqual([]);
+    expect(client.getLastScanCount()).toBe(0);
+    expect(batches).not.toHaveBeenCalled();
   });
 });

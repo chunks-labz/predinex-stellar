@@ -97,11 +97,17 @@ export default function BetHistoryTable({
   const summaryStats = useMemo(() => {
     const totalBets = filteredHistory.length;
     const wonBets = filteredHistory.filter(bet => bet.status === 'won').length;
+    const lostBets = filteredHistory.filter(bet => bet.status === 'lost').length;
+    // #1536 — the win rate used to divide the wins by *every* row, so open
+    // bets and expired (refunded) bets counted as losses. A user with one
+    // win and one pending bet was told their win rate was 50%. Only settled
+    // bets (won + lost) can be won or lost.
+    const settledBets = wonBets + lostBets;
     const totalWagered = filteredHistory.reduce((sum, bet) => sum + bet.amountBet, 0);
     const totalProfit = filteredHistory.reduce((sum, bet) => sum + bet.profitLoss, 0);
-    const winRate = totalBets > 0 ? (wonBets / totalBets) * 100 : 0;
+    const winRate = settledBets > 0 ? (wonBets / settledBets) * 100 : 0;
 
-    return { totalBets, wonBets, totalWagered, totalProfit, winRate };
+    return { totalBets, wonBets, lostBets, settledBets, totalWagered, totalProfit, winRate };
   }, [filteredHistory]);
 
   const getStatusIcon = (status: BetHistory['status']) => {
@@ -145,7 +151,10 @@ export default function BetHistoryTable({
         
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <button
+            type="button"
             onClick={() => setShowFilters(!showFilters)}
+            aria-expanded={showFilters}
+            aria-controls="bet-history-filters"
             className="flex items-center gap-2 px-3 py-2 border border-muted/50 rounded-lg hover:bg-muted/50 transition-colors"
           >
             <Filter className="w-4 h-4" />
@@ -153,6 +162,7 @@ export default function BetHistoryTable({
           </button>
 
           <select
+            aria-label="Sort betting history"
             value={`${filters.sortBy}-${filters.sortOrder}`}
             onChange={(e) => {
               const [sortBy, sortOrder] = e.target.value.split('-') as [typeof filters.sortBy, typeof filters.sortOrder];
@@ -172,11 +182,12 @@ export default function BetHistoryTable({
 
       {/* Filters Panel */}
       {showFilters && (
-        <div className="glass p-4 rounded-xl">
+        <div className="glass p-4 rounded-xl" id="bet-history-filters">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium mb-2">Outcome</label>
+              <label htmlFor="bet-filter-outcome" className="block text-sm font-medium mb-2">Outcome</label>
               <select
+                id="bet-filter-outcome"
                 value={filters.historyOutcome}
                 onChange={(e) => onFiltersChange({ historyOutcome: e.target.value as DashboardFilters['historyOutcome'] })}
                 className="w-full px-3 py-2 border border-muted/50 rounded-lg bg-background"
@@ -189,8 +200,9 @@ export default function BetHistoryTable({
             </div>
             
             <div>
-              <label className="block text-sm font-medium mb-2">Market Status</label>
+              <label htmlFor="bet-filter-status" className="block text-sm font-medium mb-2">Market Status</label>
               <select
+                id="bet-filter-status"
                 value={filters.historyMarketStatus}
                 onChange={(e) => onFiltersChange({ historyMarketStatus: e.target.value as DashboardFilters['historyMarketStatus'] })}
                 className="w-full px-3 py-2 border border-muted/50 rounded-lg bg-background"
@@ -207,6 +219,7 @@ export default function BetHistoryTable({
               <div className="flex gap-2">
                 <input
                   type="date"
+                  aria-label="Start date"
                   value={filters.historyDateRange.start?.toISOString().split('T')[0] || ''}
                   onChange={(e) => onFiltersChange({
                     historyDateRange: {
@@ -218,6 +231,7 @@ export default function BetHistoryTable({
                 />
                 <input
                   type="date"
+                  aria-label="End date"
                   value={filters.historyDateRange.end?.toISOString().split('T')[0] || ''}
                   onChange={(e) => onFiltersChange({
                     historyDateRange: {
@@ -242,6 +256,11 @@ export default function BetHistoryTable({
         <div className="glass p-4 rounded-lg text-center">
           <div className="text-2xl font-bold text-green-500">{summaryStats.winRate.toFixed(1)}%</div>
           <div className="text-sm text-muted-foreground">Win Rate</div>
+          {/* The win rate only covers settled bets — open and expired bets are
+              not wins or losses and would distort the number. */}
+          <div className="text-xs text-muted-foreground mt-1">
+            {summaryStats.wonBets} of {summaryStats.settledBets} settled bets won
+          </div>
         </div>
         <div className="glass p-4 rounded-lg text-center">
           <div className="text-2xl font-bold text-purple-500">{formatCurrency(summaryStats.totalWagered)}</div>
@@ -271,14 +290,15 @@ export default function BetHistoryTable({
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
+              <caption className="sr-only">Betting history, one row per bet</caption>
               <thead className="bg-muted/30">
                 <tr>
-                  <th className="text-left p-4 font-medium">Market</th>
-                  <th className="text-left p-4 font-medium">Outcome</th>
-                  <th className="text-left p-4 font-medium">Amount</th>
-                  <th className="text-left p-4 font-medium">Status</th>
-                  <th className="text-left p-4 font-medium">Profit/Loss</th>
-                  <th className="text-left p-4 font-medium">Date</th>
+                  <th scope="col" className="text-left p-4 font-medium">Market</th>
+                  <th scope="col" className="text-left p-4 font-medium">Outcome</th>
+                  <th scope="col" className="text-left p-4 font-medium">Amount</th>
+                  <th scope="col" className="text-left p-4 font-medium">Status</th>
+                  <th scope="col" className="text-left p-4 font-medium">Profit/Loss</th>
+                  <th scope="col" className="text-left p-4 font-medium">Date</th>
                 </tr>
               </thead>
               <tbody>
@@ -290,6 +310,8 @@ export default function BetHistoryTable({
                       <td className="p-4">
                         <Link 
                           href={`/markets/${bet.poolId}`}
+                          title={bet.marketTitle}
+                          aria-label={`View market: ${bet.marketTitle}`}
                           className="font-medium hover:text-primary transition-colors flex items-center gap-2"
                         >
                           <span className="truncate max-w-[120px] sm:max-w-[200px]">{bet.marketTitle}</span>
@@ -320,7 +342,12 @@ export default function BetHistoryTable({
                         </span>
                       </td>
                       <td className="p-4 text-sm text-muted-foreground">
-                        {new Date(bet.betTimestamp * 1000).toLocaleDateString()}
+                        {/* #1536 — the date only hid the time of day, which
+                            makes two bets on the same market impossible to
+                            tell apart. */}
+                        <time dateTime={new Date(bet.betTimestamp * 1000).toISOString()}>
+                          {new Date(bet.betTimestamp * 1000).toLocaleString()}
+                        </time>
                       </td>
                     </tr>
                   );

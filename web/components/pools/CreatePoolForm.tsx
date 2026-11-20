@@ -48,7 +48,7 @@ import {
   getCharLimit,
   getHelpText,
 } from "@/lib/validators";
-import { createPool } from "@/lib/contract";
+import { composePoolDescription, createPool } from "@/lib/contract";
 import type { TxStage } from "@/app/lib/soroban-transaction-service";
 
 type PoolFormErrors = Partial<
@@ -155,6 +155,7 @@ export function CreatePoolForm({
     onStageChange: onTransactionStageChange,
     showError,
     showSuccess,
+    dismiss,
   } = useTransactionToast();
   const formId = useId();
 
@@ -231,7 +232,26 @@ export function CreatePoolForm({
       expirySeconds: Number.isNaN(expirySeconds) ? 0 : expirySeconds,
     });
     const outcomeResult = validateOutcomesList(form.outcomes);
-    return { ...baseResult.errors, ...outcomeResult.errors };
+    const errors: PoolFormErrors = { ...baseResult.errors, ...outcomeResult.errors };
+
+    // The metadata block appended on submit counts toward the contract's
+    // description limit; without this a description near the limit passed
+    // here and then failed simulation with an opaque error.
+    if (!errors.description) {
+      const composedLength = composePoolDescription({
+        name: form.name,
+        description: form.description,
+        asset: form.asset,
+        depositAmount: Number.isNaN(depositAmount) ? 0 : depositAmount,
+        expirySeconds: Number.isNaN(expirySeconds) ? 0 : expirySeconds,
+      }).length;
+      if (composedLength > MAX_DESCRIPTION_LENGTH) {
+        const overBy = composedLength - MAX_DESCRIPTION_LENGTH;
+        errors.description = `Description is ${overBy} character${overBy === 1 ? "" : "s"} too long once pool details are attached`;
+      }
+    }
+
+    return errors;
   }, [form]);
 
   const handleFieldBlur = useCallback(
@@ -320,11 +340,17 @@ export function CreatePoolForm({
         setTxHash(result.txHash);
         showSuccess("Pool created successfully!");
         resetForm();
-        onSuccess?.({ txHash: result.txHash, poolId: null });
+        onSuccess?.({ txHash: result.txHash, poolId: result.poolId ?? null });
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
-        showError(message);
+        if (message === "Transaction cancelled by user") {
+          // Declining the fee prompt is a choice, not a failure.
+          dismiss();
+          showToast("Pool creation cancelled", "info");
+        } else {
+          showError(message);
+        }
       } finally {
         setIsSubmitting(false);
         setStage("idle");

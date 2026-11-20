@@ -102,6 +102,8 @@ export interface PollerMetrics {
    * by the size of the active scan, so a steady climb here signals a leak.
    */
   trackedFailurePools: number;
+  /** Timeout totals by upstream origin/service. */
+  upstreamTimeouts?: Record<string, number>;
 }
 
 /**

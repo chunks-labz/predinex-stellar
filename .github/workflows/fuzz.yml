@@ -18,12 +18,21 @@ name: Fuzz-Style Test Suite
 #   cargo fuzz run <target> -- -max_total_time=60
 
 on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'stellar-lend/contracts/**'
+      - '.github/workflows/fuzz.yml'
   schedule:
     - cron: '0 0 * * 0' # Every Sunday at midnight
   workflow_dispatch:     # On-demand runs
 
 permissions:
   contents: read
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   fuzz-style-tests:

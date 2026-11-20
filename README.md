@@ -79,7 +79,8 @@ stateDiagram-v2
 - `web` — the Next.js frontend (App Router): markets, dashboard, analytics, admin, disputes, oracle management, portfolio.
 - `packages/widget` — the embeddable pool widget for third-party sites.
 - `bot` — automated off-chain workflows (oracle reporting, market upkeep).
-- `docs` — protocol, contract API, deployment, and development documentation.
+- `docs` — protocol, contract API, deployment, and development documentation (including the [Market Lifecycle State Machine](docs/MARKET_LIFECYCLE.md)).
+- [Operations and documentation index](docs/README.md) — incident response, deployment, and local runbooks.
 - `scripts` — bootstrap and CI/verification helpers.
 
 ## 🚀 Getting Started
@@ -141,6 +142,14 @@ Predinex Stellar ships in phases, growing from core on-chain mechanics to a full
 - ✅ Market discovery, market detail, and portfolio.
 - ✅ Admin, analytics, disputes, oracle management, and comparison tooling.
 - ✅ Embeddable pool widget.
+
+### Phase 3: Lending Security (IN PROGRESS)
+- ✅ Emergency withdrawal controls for lending pools.
+- ✅ TWAP oracle price manipulation guard modules.
+- ✅ Interest-rate manipulation detection and prevention modules.
+- ✅ MEV/sandwich attack protection modules.
+- 🔄 Production wiring for lending pool deployment and signed API submission.
+- 🔜 Multi-source oracle quorum weighting and asset-specific volatility limits.
 
 ## 🤝 Contributing & Releases
 

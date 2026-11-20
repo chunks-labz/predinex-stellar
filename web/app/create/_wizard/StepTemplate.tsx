@@ -6,6 +6,7 @@ import { predinexReadApi } from '@/app/lib/adapters/predinex-read-api';
 import type { OnChainPoolTemplate } from '@/app/lib/soroban-template-api';
 import {
   buildTemplateShareUrl,
+  defaultDepositDeadline,
   loadSavedTemplates,
   type SavedPoolTemplate,
 } from './pool-templates';
@@ -32,17 +33,23 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
   const [publicTemplates, setPublicTemplates] = useState<OnChainPoolTemplate[]>([]);
   const [savedTemplates, setSavedTemplates] = useState<SavedPoolTemplate[]>([]);
   const [loadingPublic, setLoadingPublic] = useState(true);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [publicLoadFailed, setPublicLoadFailed] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<{ key: string; ok: boolean } | null>(null);
 
   useEffect(() => {
     setSavedTemplates(loadSavedTemplates());
     let cancelled = false;
     (async () => {
       setLoadingPublic(true);
-      const templates = await predinexReadApi.getPublicTemplates();
-      if (!cancelled) {
-        setPublicTemplates(templates);
-        setLoadingPublic(false);
+      setPublicLoadFailed(false);
+      try {
+        const templates = await predinexReadApi.getPublicTemplates();
+        if (!cancelled) setPublicTemplates(templates);
+      } catch {
+        // Without this the spinner never stopped on an RPC failure.
+        if (!cancelled) setPublicLoadFailed(true);
+      } finally {
+        if (!cancelled) setLoadingPublic(false);
       }
     })();
     return () => {
@@ -51,11 +58,19 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
   }, []);
 
   const copyShareLink = async (source: 'public' | 'saved', id: string | number) => {
+    const key = `${source}-${id}`;
     const url = buildTemplateShareUrl(window.location.origin, source, id);
-    await navigator.clipboard.writeText(url);
-    setCopiedId(`${source}-${id}`);
-    window.setTimeout(() => setCopiedId(null), 2000);
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyStatus({ key, ok: true });
+    } catch {
+      setCopyStatus({ key, ok: false });
+    }
+    window.setTimeout(() => setCopyStatus(null), 2000);
   };
+
+  const copyLabel = (key: string) =>
+    copyStatus?.key === key ? (copyStatus.ok ? 'Link copied' : 'Copy failed') : 'Copy share link';
 
   return (
     <div className="space-y-6">
@@ -86,10 +101,15 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
           <h3 className="font-semibold">Public templates</h3>
         </div>
         {loadingPublic ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="w-4 h-4 animate-spin" />
+          <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
             Loading on-chain templates…
           </div>
+        ) : publicLoadFailed ? (
+          <p role="alert" className="text-sm text-red-500 rounded-lg border border-red-500/20 bg-red-500/5 p-4">
+            Couldn&apos;t load public templates. You can still start from a blank pool or one of
+            your saved templates.
+          </p>
         ) : publicTemplates.length === 0 ? (
           <p className="text-sm text-muted-foreground rounded-lg border border-dashed border-border p-4">
             No public templates are available yet. Start with a blank pool or save your own after
@@ -110,9 +130,7 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
                         description: template.description,
                         outcomes: [...template.outcomes],
                         duration: String(template.duration),
-                        depositDeadline: String(
-                          Math.max(300, Math.floor(template.duration * 0.8))
-                        ),
+                        depositDeadline: String(defaultDepositDeadline(template.duration)),
                       })
                     }
                     className="w-full text-left"
@@ -133,7 +151,7 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
                     className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
                     <Copy className="w-3 h-3" />
-                    {copiedId === `public-${template.id}` ? 'Link copied' : 'Copy share link'}
+                    {copyLabel(`public-${template.id}`)}
                   </button>
                 </div>
               );
@@ -189,7 +207,7 @@ export function StepTemplate({ draft, selectTemplate }: StepTemplateProps) {
                     className="mt-3 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
                     <Copy className="w-3 h-3" />
-                    {copiedId === `saved-${template.id}` ? 'Link copied' : 'Copy share link'}
+                    {copyLabel(`saved-${template.id}`)}
                   </button>
                 </div>
               );

@@ -79,24 +79,24 @@ fn set_fee_config_updates_rate_and_recipient() {
     assert_eq!(got, recipient);
 }
 
-/// The maximum (100% = 10_000 bps) is accepted at the boundary.
+/// The maximum (10% = 1_000 bps) is accepted at the boundary.
 #[test]
 fn set_fee_config_accepts_max_boundary() {
     let (env, client, _cid, admin, _token) = setup();
     let recipient = Address::generate(&env);
 
-    client.set_fee_config(&admin, &10_000, &recipient);
+    client.set_fee_config(&admin, &1_000, &recipient);
 
-    assert_eq!(client.get_fee_config().0, 10_000);
+    assert_eq!(client.get_fee_config().0, 1_000);
 }
 
-/// A rate above 10_000 bps is rejected.
+/// A rate above 1_000 bps (BET_FEE_MAX_BPS) is rejected.
 #[test]
 #[should_panic]
 fn set_fee_config_rejects_rate_above_max() {
     let (env, client, _cid, admin, _token) = setup();
     let recipient = Address::generate(&env);
-    client.set_fee_config(&admin, &10_001, &recipient);
+    client.set_fee_config(&admin, &1_001, &recipient);
 }
 
 /// Only the treasury recipient may change the fee config.
@@ -129,7 +129,7 @@ fn set_fee_config_emits_event() {
                     Symbol::new(&env, EVENT_SCHEMA_VERSION),
                 )
                     .into_val(&env),
-                (0u32, admin.clone(), 150u32, recipient).into_val(&env),
+                (0i128, Some(admin.clone()), 150i128, recipient).into_val(&env),
             ),
         ]
     );

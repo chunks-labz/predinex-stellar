@@ -1,7 +1,7 @@
 'use client';
 
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import IncentivesDisplay from "../components/IncentivesDisplay";
 import { useWallet } from '@/components/WalletAdapterProvider';
@@ -18,7 +18,7 @@ export default function IncentivesPage() {
       <Navbar />
 
       <RouteErrorBoundary routeName="Incentives">
-      <AuthGuard>
+      <WalletConnectGate>
         <div className="pt-32 pb-20 max-w-4xl mx-auto px-4 sm:px-6">
           <div className="glass p-8 rounded-2xl border border-border mb-8">
             <h1 className="text-4xl font-bold mb-2">Liquidity Incentives</h1>
@@ -27,7 +27,7 @@ export default function IncentivesPage() {
 
           <IncentivesDisplay betterId={userAddress} />
         </div>
-      </AuthGuard>
+      </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

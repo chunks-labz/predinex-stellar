@@ -1,22 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, StarOff, Snowflake, AlertTriangle } from 'lucide-react';
+import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, Snowflake, AlertTriangle } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
-import { formatTokenAmount } from '@/app/lib/formatting';
-import { blocksToSeconds } from '@/app/lib/countdown-utils';
+import { formatOdds, formatTokenAmount } from '@/app/lib/formatting';
 import { formatDisplayAddress } from '@/app/lib/address-display';
-import { usePoolFavorites } from '@/app/lib/hooks/usePoolFavorites';
+import { usePoolFavorites, POOL_FAVORITES_MAX } from '@/app/lib/hooks/usePoolFavorites';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '@/app/lib/hooks/usePoolComparison';
 import CountdownTimer from '@/components/CountdownTimer';
+import SettlementStatusBadge from '@/components/SettlementStatusBadge';
+import { formatMarketDeadline } from '@/app/lib/formatting';
 
 interface MarketCardProps {
   market: ProcessedMarket;
 }
 
 export default function MarketCard({ market }: MarketCardProps) {
-  const { isFavorite, toggleFavorite } = usePoolFavorites();
-  const favorite = isFavorite(market.poolId);
+  const favorites = usePoolFavorites();
+  const favorite = favorites.isFavorite(market.poolId);
+  const favoriteDisabled = !favorite && favorites.atCapacity;
   const compare = usePoolComparison();
   const isCompared = compare.isSelected(market.poolId);
   const compareDisabled = !isCompared && compare.atCapacity;
@@ -89,28 +91,46 @@ export default function MarketCard({ market }: MarketCardProps) {
                 {getStatusIcon(market.status)}
                 {getStatusText(market.status)}
               </span>
+              {(market.status === 'settled' || market.status === 'disputed') && (
+                <SettlementStatusBadge
+                  status={market.status}
+                  payoutStatus={market.settlementStatus}
+                />
+              )}
 
               <button
                 type="button"
                 aria-label={favorite ? `Unfavorite pool #${market.poolId}` : `Favorite pool #${market.poolId}`}
                 aria-pressed={favorite}
-                title={favorite ? 'Remove bookmark' : 'Bookmark pool'}
+                aria-disabled={favoriteDisabled || undefined}
+                title={
+                  favorite
+                    ? 'Remove bookmark'
+                    : favoriteDisabled
+                      ? `You can bookmark at most ${POOL_FAVORITES_MAX} pools`
+                      : 'Bookmark pool'
+                }
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  toggleFavorite(market.poolId);
+                  if (favoriteDisabled) return;
+                  favorites.toggleFavorite(market.poolId);
                 }}
                 className={`h-11 w-11 flex items-center justify-center rounded-lg border transition-colors shrink-0 ${
                   favorite
                     ? 'bg-yellow-400/10 border-yellow-400/30 text-yellow-400 hover:bg-yellow-400/15'
-                    : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
+                    : favoriteDisabled
+                      ? 'bg-muted/20 border-border/40 text-muted-foreground/50 cursor-not-allowed'
+                      : 'bg-muted/30 border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50'
                 }`}
               >
-                {favorite ? (
-                  <Star className="w-5 h-5" fill="currentColor" strokeWidth={2} aria-hidden="true" />
-                ) : (
-                  <StarOff className="w-5 h-5" aria-hidden="true" />
-                )}
+                {/* Outline star = not bookmarked; a crossed-out star read as "can't bookmark". */}
+                <Star
+                  className="w-5 h-5"
+                  fill={favorite ? 'currentColor' : 'none'}
+                  strokeWidth={2}
+                  aria-hidden="true"
+                />
               </button>
             </div>
           </div>
@@ -171,11 +191,11 @@ export default function MarketCard({ market }: MarketCardProps) {
             <div className="flex justify-between items-center text-sm p-3 bg-muted/30 rounded-lg min-w-0">
               <div className="flex items-center gap-2 truncate min-w-0">
                 <span className="font-medium text-green-400 truncate">{market.outcomeA}</span>
-                <span className="text-xs text-muted-foreground shrink-0">({market.oddsA}%)</span>
+                <span className="text-xs text-muted-foreground shrink-0">({formatOdds(market.oddsA)})</span>
               </div>
               <span className="text-muted-foreground text-xs shrink-0 px-2" aria-hidden="true">vs</span>
               <div className="flex items-center gap-2 truncate min-w-0 justify-end">
-                <span className="text-xs text-muted-foreground shrink-0">({market.oddsB}%)</span>
+                <span className="text-xs text-muted-foreground shrink-0">({formatOdds(market.oddsB)})</span>
                 <span className="font-medium text-red-400 truncate">{market.outcomeB}</span>
               </div>
             </div>
@@ -183,8 +203,12 @@ export default function MarketCard({ market }: MarketCardProps) {
             {/* Odds visualization bar */}
             <div
               className="w-full h-2 bg-muted/30 rounded-full overflow-hidden"
-              role="img"
-              aria-label={`Odds: ${market.outcomeA} ${market.oddsA}%, ${market.outcomeB} ${market.oddsB}%`}
+              role="progressbar"
+              aria-label={`Market odds: ${market.outcomeA} ${formatOdds(market.oddsA)}, ${market.outcomeB} ${formatOdds(market.oddsB)}`}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={market.oddsA}
+              aria-valuetext={`${market.outcomeA}: ${formatOdds(market.oddsA)}; ${market.outcomeB}: ${formatOdds(market.oddsB)}`}
             >
               <div className="h-full flex">
                 <div
@@ -208,12 +232,23 @@ export default function MarketCard({ market }: MarketCardProps) {
             <div className="flex items-center gap-1 text-muted-foreground shrink-0">
               <CountdownTimer
                 secondsRemaining={
-                  market.status === 'expired' ? 0 : blocksToSeconds(market.timeRemaining)
+                  market.timeRemaining ?? (market.status === 'active' ? null : 0)
                 }
                 settled={market.status === 'settled'}
                 showIcon
               />
             </div>
+          </div>
+
+          <div className="text-xs text-muted-foreground border-t border-muted/20 pt-2">
+            <span className="font-medium">Deadline:</span>{' '}
+            <time dateTime={
+              Number.isFinite(market.expiry) && market.expiry > 0
+                ? new Date(market.expiry * 1000).toISOString()
+                : undefined
+            }>
+              {formatMarketDeadline(market.expiry)}
+            </time>
           </div>
 
           {/* Creator info */}

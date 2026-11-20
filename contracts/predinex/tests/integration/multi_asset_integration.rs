@@ -13,7 +13,7 @@
 
 extern crate std;
 
-use predinex::{ContractError, PredinexContract, PredinexContractClient};
+use predinex::{ContractError, PredinexContract, PredinexContractClient, MIN_CREATOR_DEPOSIT};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     token, Address, Env, String, Vec,
@@ -85,6 +85,7 @@ fn set_rates_half(ctx: &MaCtx) {
 
 /// Create a two-outcome multi-asset pool with both base and alt tokens.
 fn make_ma_pool(ctx: &MaCtx, creator: &Address) -> u32 {
+    ctx.base_admin.mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     let mut allowed = Vec::new(&ctx.env);
     allowed.push_back(ctx.base_token.clone());
     allowed.push_back(ctx.alt_token.clone());
@@ -102,6 +103,7 @@ fn make_ma_pool(ctx: &MaCtx, creator: &Address) -> u32 {
         &3_600u64,
         &allowed,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     )
 }
@@ -181,6 +183,7 @@ fn ma1b_pool_creation_fails_without_exchange_rate() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
 

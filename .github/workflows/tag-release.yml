@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
 jobs:
   tag:
     name: Create Version Tag

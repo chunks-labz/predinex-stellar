@@ -53,4 +53,26 @@ describe('CountdownTimer', () => {
     // sr-only live region uses the verbose, minute-granular description.
     expect(screen.getByRole('timer')).toHaveTextContent('2 hours, 30 minutes remaining');
   });
+
+  it('stops ticking once expired', () => {
+    const clearSpy = vi.spyOn(window, 'clearInterval');
+    render(<CountdownTimer secondsRemaining={2} />);
+
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+
+    expect(screen.getByRole('timer')).toHaveTextContent('Expired');
+    expect(clearSpy).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    clearSpy.mockRestore();
+  });
+
+  it('only exposes a live region when asked to announce', () => {
+    const { container, rerender } = render(<CountdownTimer secondsRemaining={600} />);
+    expect(container.querySelector('[aria-live]')).toBeNull();
+
+    rerender(<CountdownTimer secondsRemaining={600} announce />);
+    expect(container.querySelector('[aria-live="polite"]')).not.toBeNull();
+  });
 });

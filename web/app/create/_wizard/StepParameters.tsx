@@ -9,6 +9,11 @@ import {
   SETTLEMENT_TYPES,
 } from '@/lib/validators';
 import { useFeePreview } from '@/app/lib/hooks/useFeePreview';
+import { MIN_CREATOR_DEPOSIT_STROOPS } from '@/app/lib/soroban-transaction-service';
+import { stroopsToUnits, TOKEN_SYMBOL } from '@/app/lib/formatting';
+
+/** The wizard creates pools with the contract-minimum creator deposit. */
+const CREATOR_DEPOSIT_UNITS = stroopsToUnits(BigInt(MIN_CREATOR_DEPOSIT_STROOPS));
 import { useI18n } from '@/app/lib/i18n';
 
 interface StepParametersProps {
@@ -39,7 +44,11 @@ export function StepParameters({
   blurField,
 }: StepParametersProps) {
   const { t } = useI18n();
-  const feePreview = useFeePreview(draft.title, draft.description);
+  // Only the network-fee estimate is used: the hook's protocol fee is a fixed
+  // placeholder that is never charged. The protocol fee comes out of
+  // winnings at settlement; what creation actually costs is the deposit.
+  const { networkFee } = useFeePreview(draft.title, draft.description);
+  const totalEstimate = parseFloat((CREATOR_DEPOSIT_UNITS + networkFee).toFixed(7));
 
   const onChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setField(e.target.name as keyof CreatePoolDraft, e.target.value);
@@ -206,16 +215,22 @@ export function StepParameters({
       <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm space-y-2">
         <p className="font-medium">{t('create.params.estimatedFeesTitle')}</p>
         <div className="flex justify-between text-xs text-muted-foreground">
-          <span>{t('create.params.protocolFeeRow')}</span>
-          <span>{feePreview.protocolFee} XLM</span>
+          <span>{t('create.params.creatorDepositRow')}</span>
+          <span>
+            {CREATOR_DEPOSIT_UNITS} {TOKEN_SYMBOL}
+          </span>
         </div>
         <div className="flex justify-between text-xs text-muted-foreground">
           <span>{t('create.params.networkFeeRow')}</span>
-          <span>{feePreview.networkFee} XLM</span>
+          <span>
+            {networkFee} {TOKEN_SYMBOL}
+          </span>
         </div>
         <div className="flex justify-between text-sm font-semibold pt-1 border-t border-border">
           <span>{t('create.params.totalEstimate')}</span>
-          <span>{feePreview.total} XLM</span>
+          <span>
+            {totalEstimate} {TOKEN_SYMBOL}
+          </span>
         </div>
       </div>
     </div>

@@ -5,7 +5,7 @@ extern crate std;
 use super::*;
 use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec};
 
-fn setup() -> (Env, Address, PredinexContractClient<'static>) {
+fn setup() -> (Env, Address, PredinexContractClient<'static>, Address) {
     let env = Env::default();
     env.mock_all_auths();
     let contract_id = env.register(PredinexContract, ());
@@ -16,10 +16,13 @@ fn setup() -> (Env, Address, PredinexContractClient<'static>) {
     let admin = Address::generate(&env);
     let treasury = Address::generate(&env);
     client.initialize(&token_id.address(), &treasury, &admin);
-    (env, admin, client)
+    (env, admin, client, token_id.address())
 }
 
-fn create_test_pool(env: &Env, client: &PredinexContractClient<'_>, creator: &Address) -> u32 {
+fn create_test_pool(env: &Env, client: &PredinexContractClient<'_>, creator: &Address, token: &Address) -> u32 {
+    // Mint tokens to creator for the creator deposit transfer.
+    soroban_sdk::token::StellarAssetClient::new(env, token)
+        .mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     client.create_pool(
         creator,
         &String::from_str(env, "Will BTC hit 100k?"),
@@ -36,9 +39,9 @@ fn create_test_pool(env: &Env, client: &PredinexContractClient<'_>, creator: &Ad
 
 #[test]
 fn test_set_and_get_pool_category() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     // Category is absent before being set.
     assert!(client.get_pool_category(&pool_id).is_none());
@@ -53,9 +56,9 @@ fn test_set_and_get_pool_category() {
 
 #[test]
 fn test_set_pool_category_admin_allowed() {
-    let (env, admin, client) = setup();
+    let (env, admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     client.set_pool_category(&admin, &pool_id, &PoolCategory::Finance);
 
@@ -67,9 +70,9 @@ fn test_set_pool_category_admin_allowed() {
 
 #[test]
 fn test_set_pool_category_unauthorized() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
     let stranger = Address::generate(&env);
 
     let result = client.try_set_pool_category(&stranger, &pool_id, &PoolCategory::Sports);
@@ -78,7 +81,7 @@ fn test_set_pool_category_unauthorized() {
 
 #[test]
 fn test_set_pool_category_pool_not_found() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, _token) = setup();
     let caller = Address::generate(&env);
 
     let result = client.try_set_pool_category(&caller, &999u32, &PoolCategory::General);
@@ -87,9 +90,9 @@ fn test_set_pool_category_pool_not_found() {
 
 #[test]
 fn test_set_pool_category_overwrite() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     client.set_pool_category(&creator, &pool_id, &PoolCategory::Sports);
     client.set_pool_category(&creator, &pool_id, &PoolCategory::Politics);
@@ -104,9 +107,9 @@ fn test_set_pool_category_overwrite() {
 
 #[test]
 fn test_set_and_get_pool_tags() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     // Tags are empty before being set.
     assert_eq!(client.get_pool_tags(&pool_id).len(), 0);
@@ -125,9 +128,9 @@ fn test_set_and_get_pool_tags() {
 
 #[test]
 fn test_set_pool_tags_admin_allowed() {
-    let (env, admin, client) = setup();
+    let (env, admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     let mut tags: Vec<String> = Vec::new(&env);
     tags.push_back(String::from_str(&env, "admin-tag"));
@@ -139,9 +142,9 @@ fn test_set_pool_tags_admin_allowed() {
 
 #[test]
 fn test_set_pool_tags_unauthorized() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
     let stranger = Address::generate(&env);
 
     let tags: Vec<String> = Vec::new(&env);
@@ -151,9 +154,9 @@ fn test_set_pool_tags_unauthorized() {
 
 #[test]
 fn test_set_pool_tags_too_many() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     let mut tags: Vec<String> = Vec::new(&env);
     // 11 tags — exceeds MAX_POOL_TAGS (10)
@@ -167,9 +170,9 @@ fn test_set_pool_tags_too_many() {
 
 #[test]
 fn test_set_pool_tags_tag_too_long() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     let mut tags: Vec<String> = Vec::new(&env);
     // 33-character tag — exceeds MAX_TAG_LENGTH (32)
@@ -181,9 +184,9 @@ fn test_set_pool_tags_tag_too_long() {
 
 #[test]
 fn test_set_pool_tags_clears_with_empty_vec() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
-    let pool_id = create_test_pool(&env, &client, &creator);
+    let pool_id = create_test_pool(&env, &client, &creator, &token);
 
     let mut tags: Vec<String> = Vec::new(&env);
     tags.push_back(String::from_str(&env, "crypto"));
@@ -197,7 +200,7 @@ fn test_set_pool_tags_clears_with_empty_vec() {
 
 #[test]
 fn test_set_pool_tags_pool_not_found() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, _token) = setup();
     let caller = Address::generate(&env);
     let tags: Vec<String> = Vec::new(&env);
 
@@ -209,11 +212,11 @@ fn test_set_pool_tags_pool_not_found() {
 
 #[test]
 fn test_category_and_tags_independent_across_pools() {
-    let (env, _admin, client) = setup();
+    let (env, _admin, client, token) = setup();
     let creator = Address::generate(&env);
 
-    let pool_a = create_test_pool(&env, &client, &creator);
-    let pool_b = create_test_pool(&env, &client, &creator);
+    let pool_a = create_test_pool(&env, &client, &creator, &token);
+    let pool_b = create_test_pool(&env, &client, &creator, &token);
 
     client.set_pool_category(&creator, &pool_a, &PoolCategory::Crypto);
     client.set_pool_category(&creator, &pool_b, &PoolCategory::Sports);

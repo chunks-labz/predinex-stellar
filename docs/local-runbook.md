@@ -196,6 +196,48 @@ Refresh the Markets page — the new pool should appear within one polling cycle
 
 ---
 
+## 5b. Seed demo markets and wagers (optional)
+
+Instead of creating pools by hand, seed a fixed set of demo markets (and
+wagers) with the seed script. It is idempotent — re-running never duplicates
+data — and refuses to run against production.
+
+```bash
+# From the repository root (web dependencies installed: cd web && npm install)
+./scripts/seed-demo-markets.sh \
+  --contract-id <your-contract-id> \
+  --source-identity deployer          # reads ~/.config/stellar/identity/deployer.toml
+
+# Preview what would be created without submitting anything
+./scripts/seed-demo-markets.sh --contract-id <your-contract-id> --source S... --dry-run
+
+# Testnet with two explicit bettors
+./scripts/seed-demo-markets.sh --network testnet --contract-id <your-contract-id> \
+  --source S... --bettor S... --bettor S...
+```
+
+> **Local standalone node:** the default network is `local`
+> (`http://localhost:8000/soroban/rpc`, `Standalone Network ; February 2017`).
+> Start it with `stellar container start local` before seeding.
+
+What it does:
+
+1. Refuses `mainnet`/`public` — and refuses any RPC URL or network passphrase
+   that points at mainnet.
+2. Reads the pools already on-chain and matches demo markets **by title**, so
+   a re-run reuses the markets it created before and prints their ids again.
+3. Creates any missing `[demo]` markets (10 XLM creator deposit each by
+   default; override with `--deposit`).
+4. Places one demo wager per market from each bettor (default: one generated,
+   friendbot-funded account; override with `--bettor`, size with
+   `--bet-amount`). Wagers already recorded on-chain are skipped.
+5. Prints every created market id and transaction hash, plus a summary.
+
+Pass `--help` for the full option list and environment fallbacks
+(`PREDINEX_CONTRACT_ID`, `PREDINEX_SEED_SOURCE_SECRET`, ...).
+
+---
+
 ## 6. Run the full test suite
 
 ### Contract tests

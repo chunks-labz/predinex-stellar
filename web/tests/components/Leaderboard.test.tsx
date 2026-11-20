@@ -67,7 +67,9 @@ describe('Leaderboard', () => {
   it('shows loading skeleton when loading with no data', () => {
     mockUseLeaderboard.mockReturnValue(makeReturn({ isLoading: true, bettors: [], creators: [] }));
     renderWithProviders(<Leaderboard />);
-    expect(screen.getByLabelText(/loading leaderboard/i)).toBeInTheDocument();
+    // Both the bettors' and the (hidden) creators' panels render their own
+    // skeleton, so more than one "Loading leaderboard" region is present.
+    expect(screen.getAllByLabelText(/loading leaderboard/i).length).toBeGreaterThan(0);
   });
 
   it('shows empty state when no bettors', () => {

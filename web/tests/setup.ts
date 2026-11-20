@@ -1,6 +1,30 @@
 import '@testing-library/jest-dom';
 import { vi } from 'vitest';
 
+// jsdom does not implement localStorage in all environments; provide a
+// no-op in-memory stub so providers (e.g. ThemeProvider) do not throw.
+const storage: Record<string, string> = {};
+const localStorageMock: Storage = {
+  getItem: (key: string) => storage[key] ?? null,
+  setItem: (key: string, value: string) => {
+    storage[key] = String(value);
+  },
+  removeItem: (key: string) => {
+    delete storage[key];
+  },
+  clear: () => {
+    Object.keys(storage).forEach((key) => delete storage[key]);
+  },
+  key: (index: number) => Object.keys(storage)[index] ?? null,
+  get length() {
+    return Object.keys(storage).length;
+  },
+};
+Object.defineProperty(window, 'localStorage', {
+  writable: true,
+  value: localStorageMock,
+});
+
 // jsdom does not implement matchMedia; provide a no-op stub so components that
 // read window.matchMedia (e.g. ThemeProvider) do not throw during tests.
 Object.defineProperty(window, 'matchMedia', {

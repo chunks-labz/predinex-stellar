@@ -13,8 +13,16 @@ export default function Footer() {
                     <div className="flex gap-8 text-sm text-muted-foreground">
                         <Link href="/markets" className="hover:text-primary transition-colors">Markets</Link>
                         <Link href="/create" className="hover:text-primary transition-colors">Create</Link>
-                        <Link href="/about" className="hover:text-primary transition-colors">About</Link>
-                        <Link href="/docs" className="hover:text-primary transition-colors">Documentation</Link>
+                        {/* /about and /docs had no pages, so these 404'd on every route. */}
+                        <Link href="/leaderboard" className="hover:text-primary transition-colors">Leaderboard</Link>
+                        <a
+                            href="https://github.com/chunks-labz/predinex-stellar/tree/main/docs"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="hover:text-primary transition-colors"
+                        >
+                            Documentation<span className="sr-only"> (opens in a new tab)</span>
+                        </a>
                     </div>
 
                     <p className="text-sm text-muted-foreground">
