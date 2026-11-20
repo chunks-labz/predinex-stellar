@@ -6647,7 +6647,7 @@ impl PredinexContract {
         emit_market_lifecycle(
             env,
             pool_id,
-            "settled",
+            if dispute_window == 0 { "settled" } else { "resolution_pending" },
             Some(previous_status),
             pool.status.clone(),
             Some(caller.clone()),

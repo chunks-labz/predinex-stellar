@@ -4,7 +4,7 @@ This document describes all events emitted by the Predinex Soroban smart contrac
 
 ## Overview
 
-The contract emits **47 typed events** across multiple categories. All events follow a structured schema:
+The contract emits **48 typed events** across multiple categories. All events follow a structured schema:
 
 - **Topic Position 0:** Event name (Symbol)
 - **Topic Position 1:** Schema version marker (Symbol = `"v1"`) — *except 4 legacy events*
