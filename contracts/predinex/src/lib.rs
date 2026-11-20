@@ -7834,6 +7834,12 @@ impl PredinexContract {
     /// claimable. The list is capped at 20 pool IDs per call to bound compute costs.
     pub fn claim_all_winnings(env: Env, user: Address, pool_ids: Vec<u32>) -> ClaimBatchResult {
         user.require_auth();
+        // #1600 — A batch must not report per-pool "skipped" results while the
+        // contract is paused; individual claim errors are swallowed into the
+        // result, so the pause check has to run at the batch boundary.
+        if Self::is_paused(env.clone()) {
+            panic_with_error!(&env, ContractError::ContractPaused);
+        }
 
         let mut results = Vec::new(&env);
         let total = pool_ids.len();
