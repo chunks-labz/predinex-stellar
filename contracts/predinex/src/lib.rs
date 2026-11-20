@@ -27,6 +27,7 @@ mod cross_chain_tests;
 mod e2e_tests;
 
 mod fee_config_tests;
+mod fee_on_transfer_tests;
 mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
@@ -12313,11 +12314,21 @@ impl PredinexContract {
             .persistent()
             .get(&DataKey::Token)
             .ok_or(ContractError::NotInitialized)?;
-        token::Client::new(&env, &token_address).transfer(
-            &user,
-            env.current_contract_address(),
-            &amount,
-        );
+        let token_client = token::Client::new(&env, &token_address);
+
+        // #1597 — Record the amount actually received, not the requested
+        // amount. A fee-on-transfer collateral token deducts part of every
+        // transfer, so crediting `amount` would overstate the pool's holdings
+        // and let LP withdrawals/claims claim tokens that never arrived.
+        let balance_before: i128 = token_client.balance(&env.current_contract_address());
+        token_client.transfer(&user, env.current_contract_address(), &amount);
+        let balance_after: i128 = token_client.balance(&env.current_contract_address());
+        let received = balance_after
+            .checked_sub(balance_before)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        if received <= 0 {
+            return Err(ContractError::InvalidLpAmount);
+        }
 
         let total_liquidity: i128 = env
             .storage()
@@ -12330,9 +12341,9 @@ impl PredinexContract {
             .get(&DataKey::LpTotalShares(pool_id))
             .unwrap_or(0);
         let shares_to_mint = if total_shares == 0 || total_liquidity == 0 {
-            amount
+            received
         } else {
-            amount
+            received
                 .checked_mul(total_shares)
                 .ok_or(ContractError::PoolTotalOverflow)?
                 / total_liquidity
@@ -12377,7 +12388,7 @@ impl PredinexContract {
         env.storage().persistent().set(
             &DataKey::LpTotalLiquidity(pool_id),
             &(total_liquidity
-                .checked_add(amount)
+                .checked_add(received)
                 .ok_or(ContractError::PoolTotalOverflow)?),
         );
         env.storage().persistent().extend_ttl(
@@ -12403,7 +12414,7 @@ impl PredinexContract {
             LpDepositEvent {
                 user: user.clone(),
                 pool_id,
-                amount,
+                amount: received,
                 shares_minted: shares_to_mint,
             },
         );
