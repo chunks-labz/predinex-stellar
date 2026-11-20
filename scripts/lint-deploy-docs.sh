@@ -23,6 +23,7 @@ REQUIRED_COMMANDS=(
     "stellar contract deploy"
     "stellar contract invoke"
     "initialize"
+    "check-deployment-health.py"
 )
 
 for cmd in "${REQUIRED_COMMANDS[@]}"; do
