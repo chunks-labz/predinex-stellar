@@ -5354,14 +5354,8 @@ impl PredinexContract {
         let token_client = token::Client::new(&env, &token_address);
 
         let (fee_rate, fee_recipient) = Self::get_fee_config(env.clone());
-        let fee_amount = if fee_rate > 0 {
-            amount
-                .checked_mul(fee_rate as i128)
-                .ok_or(ContractError::PoolTotalOverflow)?
-                / 10_000
-        } else {
-            0
-        };
+        let fee_amount = Self::calc_protocol_fee(amount, fee_rate as i128)
+            .ok_or(ContractError::PoolTotalOverflow)?;
         let net_amount = amount
             .checked_sub(fee_amount)
             .ok_or(ContractError::InvalidBetAmount)?;
