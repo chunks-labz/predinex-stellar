@@ -3,7 +3,7 @@ import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
 import { useMemo, useState } from 'react';
-import { Loader2, Wallet, AlertCircle } from 'lucide-react';
+import { Loader2, Wallet, AlertCircle, Lock, Clock } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '@/providers/ToastProvider';
@@ -41,6 +41,73 @@ export default function BettingSection({
     resolve: (v: boolean) => void;
   } | null>(null);
   const [stage, setStage] = useState<TxStage>("idle");
+
+  // Issue #1603: Field-level error mapping for simulation failures
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [rawError, setRawError] = useState<string | null>(null);
+
+  /**
+   * Maps known contract error codes to the relevant form field.
+   * Returns the field name and a user-friendly message.
+   * Unknown errors map to no field (generic toast only).
+   */
+  const mapContractErrorToField = (
+    errorMsg: string,
+  ): { field: string | null; message: string } => {
+    const lower = errorMsg.toLowerCase();
+
+    // Amount-related errors → bet-amount field
+    if (lower.includes("amount") && (lower.includes("zero") || lower.includes("negative") || lower.includes("invalid"))) {
+      return { field: "bet-amount", message: "Invalid bet amount. Please enter a positive value." };
+    }
+    if (lower.includes("min") && lower.includes("bet")) {
+      return { field: "bet-amount", message: `Bet amount is below the minimum (${minBetXlm} XLM).` };
+    }
+    if (lower.includes("max") && lower.includes("bet")) {
+      return { field: "bet-amount", message: `Bet amount exceeds the maximum (${maxBetXlm ?? "—"} XLM).` };
+    }
+    if (lower.includes("insufficient") && (lower.includes("balance") || lower.includes("funds"))) {
+      return { field: "bet-amount", message: "Insufficient balance for this bet amount." };
+    }
+    if (lower.includes("overflow")) {
+      return { field: "bet-amount", message: "Bet amount is too large and would overflow the pool." };
+    }
+
+    // Pool state errors → pool (no specific field, show notice)
+    if (lower.includes("pool") && (lower.includes("expired") || lower.includes("closed"))) {
+      return { field: null, message: "This market has expired and can no longer accept bets." };
+    }
+    if (lower.includes("frozen")) {
+      return { field: null, message: "This market is frozen and cannot accept bets." };
+    }
+    if (lower.includes("disputed")) {
+      return { field: null, message: "This market is under dispute and cannot accept bets." };
+    }
+    if (lower.includes("settled")) {
+      return { field: null, message: "This market has already been settled." };
+    }
+
+    // Authorization errors → wallet connection
+    if (lower.includes("auth") || lower.includes("unauthorized") || lower.includes("signature")) {
+      return { field: "wallet", message: "Wallet authorization failed. Please reconnect and try again." };
+    }
+    if (lower.includes("not") && lower.includes("initialized")) {
+      return { field: null, message: "Contract is not initialized. Please contact support." };
+    }
+
+    // Simulation/preflight errors
+    if (lower.includes("simulation") || lower.includes("preflight") || lower.includes("simulate")) {
+      return { field: null, message: "Transaction simulation failed. Please check your inputs and try again." };
+    }
+
+    // Network errors
+    if (lower.includes("network") || lower.includes("timeout") || lower.includes("connection")) {
+      return { field: null, message: "Network error. Please check your connection and try again." };
+    }
+
+    // Fallback: generic message, raw error available behind details toggle
+    return { field: null, message: "Transaction failed. See details below." };
+  };
 
   const STROOPS_PER_XLM = 10_000_000;
 
@@ -148,10 +215,31 @@ export default function BettingSection({
       setBetAmount("");
       setStage("idle");
       setFeePrompt(null);
+      // Issue #1603: Clear field-level errors on success
+      setFieldErrors({});
+      setRawError(null);
       onBetSuccess?.(outcome, amountStroops);
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
-      showError(error instanceof Error ? error.message : "Unknown error");
+
+      // Issue #1603: Map known contract error codes to field-level messages
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const mapped = mapContractErrorToField(errorMessage);
+
+      if (mapped.field) {
+        setFieldErrors((prev) => ({ ...prev, [mapped.field]: mapped.message }));
+        // Also show as toast for visibility
+        showToastPayload(showToast, {
+          title: mapped.message,
+          description: undefined,
+          variant: "error",
+        });
+      } else {
+        showError(mapped.message);
+      }
+
+      // Keep the raw error behind a details toggle
+      setRawError(errorMessage);
       setStage("idle");
       setFeePrompt(null);
     } finally {
@@ -160,11 +248,69 @@ export default function BettingSection({
   };
 
   if (pool.settled) {
+    // Issue #1602: Explain why a settled market cannot be traded
     return (
       <div className="text-center py-6 bg-muted/50 rounded-lg">
-        <p className="text-lg font-bold">This pool has been settled.</p>
-        <p className="text-muted-foreground">
+        <Lock className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
+        <p className="text-lg font-bold">Trading is Closed</p>
+        <p className="text-muted-foreground mb-2">
+          This market has been settled.
+        </p>
+        <p className="text-sm text-muted-foreground">
           Winner: {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground/70">
+          Settled markets cannot accept new bets. The outcome has been
+          determined on-chain.
+        </p>
+      </div>
+    );
+  }
+
+  // Issue #1602: Explain why non-active markets cannot be traded
+  if (pool.status === "expired") {
+    return (
+      <div className="text-center py-6 bg-yellow-500/5 rounded-lg border border-yellow-500/10">
+        <Clock className="w-8 h-8 mx-auto mb-3 text-yellow-500" />
+        <p className="text-lg font-bold">Trading is Closed</p>
+        <p className="text-muted-foreground mb-2">
+          This market has expired and is awaiting settlement.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground/70">
+          The expiry block has passed. Bets are locked until the market is
+          settled by the oracle.
+        </p>
+      </div>
+    );
+  }
+
+  if (pool.status === "frozen") {
+    return (
+      <div className="text-center py-6 bg-blue-500/5 rounded-lg border border-blue-500/10">
+        <Lock className="w-8 h-8 mx-auto mb-3 text-blue-500" />
+        <p className="text-lg font-bold">Trading is Paused</p>
+        <p className="text-muted-foreground mb-2">
+          This market has been frozen by the contract admin.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground/70">
+          Trading is temporarily disabled. This may occur during oracle
+          disputes or emergency halts.
+        </p>
+      </div>
+    );
+  }
+
+  if (pool.status === "disputed") {
+    return (
+      <div className="text-center py-6 bg-orange-500/5 rounded-lg border border-orange-500/10">
+        <AlertCircle className="w-8 h-8 mx-auto mb-3 text-orange-500" />
+        <p className="text-lg font-bold">Trading is Paused</p>
+        <p className="text-muted-foreground mb-2">
+          This market is under dispute and awaiting resolution.
+        </p>
+        <p className="mt-2 text-xs text-muted-foreground/70">
+          Bets cannot be placed while a dispute is active. Resolution will
+          determine the final outcome.
         </p>
       </div>
     );
@@ -342,6 +488,12 @@ export default function BettingSection({
             })}
           </div>
         )}
+        {/* Issue #1603: Field-level error for the bet amount */}
+        {fieldErrors["bet-amount"] && (
+          <p className="text-xs text-red-400 mt-1 animate-pulse" role="alert">
+            {fieldErrors["bet-amount"]}
+          </p>
+        )}
         <p id="bet-limits" className="text-xs text-muted-foreground mt-2">
           Bet limits: {hasMinBet ? `Min ${minBetXlm} XLM` : "No minimum"}
           {hasMaxBet && maxBetXlm !== null
@@ -399,6 +551,18 @@ export default function BettingSection({
           )}
         </button>
       </div>
+
+      {/* Issue #1603: Raw error details behind a toggle */}
+      {rawError && (
+        <details className="mt-2 text-xs text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground transition-colors">
+            Show technical error details
+          </summary>
+          <pre className="mt-2 p-3 bg-muted/30 rounded-lg border border-border/50 overflow-auto text-xs text-red-400/70 max-w-full whitespace-pre-wrap">
+            {rawError}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

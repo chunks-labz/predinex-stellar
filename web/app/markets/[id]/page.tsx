@@ -6,6 +6,7 @@ import Link from "next/link";
 import Navbar from '@/components/Navbar';
 import BettingSection from '@/components/BettingSection';
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
+import SettlementClaimCard from "@/components/SettlementClaimCard";
 import SettledPoolSummary from "../../components/SettledPoolSummary";
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useEffect, useState, useCallback } from "react";
@@ -373,11 +374,14 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                     {pool.settled ? (
                         <div className="mt-6">
                             <SettledPoolSummary pool={pool} />
-                            <ClaimWinningsButton
-                                poolId={poolId}
-                                isSettled={pool.settled}
+                            {/* Issue #1601: Show settlement status and claimable amount */}
+                            <SettlementClaimCard
+                                pool={pool}
+                                userBet={userBet}
+                                hasClaimedWinnings={hasClaimedWinnings}
                                 userHasWinnings={userHasWinnings}
-                                userAddress={stxAddress}
+                                stxAddress={stxAddress}
+                                poolId={poolId}
                                 onClaimSuccess={refreshPoolData}
                             />
                         </div>
