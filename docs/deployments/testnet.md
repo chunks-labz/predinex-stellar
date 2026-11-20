@@ -21,11 +21,8 @@ to find the current and recent contract IDs.
 | Name | Required | Purpose |
 | --- | --- | --- |
 | `STELLAR_TESTNET_SECRET_KEY` | Yes | Deployer key (S…). Becomes the contract treasury. |
-| `SLACK_WEBHOOK_URL` | Optional | Slack notification on success/failure. |
-| `DISCORD_WEBHOOK_URL` | Optional | Discord notification on success/failure. |
 
-When a webhook secret is absent the corresponding notification step is skipped
-without failing the workflow.
+See the [environment variable reference](../ENVIRONMENT_VARIABLES.md) for secrets used by the other workflows.
 
 ## Smoke coverage
 
