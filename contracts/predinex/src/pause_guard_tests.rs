@@ -200,7 +200,7 @@ fn privileged_writes_resume_after_unpause() {
     ctx.env.ledger().with_mut(|li| li.timestamp = 0);
     let creator = ctx.admin.clone();
     let token = ctx.token.clone();
-    token::StellarAssetClient::new(&ctx.env, &token).mint(&creator, &10_000);
+    token::StellarAssetClient::new(&ctx.env, &token).mint(&creator, &(MIN_CREATOR_DEPOSIT * 2));
     let pool_id = ctx.client.create_pool(
         &creator,
         &String::from_str(&ctx.env, "Resume market"),

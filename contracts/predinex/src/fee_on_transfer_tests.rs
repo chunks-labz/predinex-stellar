@@ -140,7 +140,7 @@ fn expected_received(requested: i128) -> i128 {
 fn fee_on_transfer_creator_deposit_does_not_overstate_pool_balances() {
     let ctx = FeeCtx::new();
     let creator = Address::generate(&ctx.env);
-    let deposit = 10_000i128;
+    let deposit = MIN_CREATOR_DEPOSIT;
 
     let pool_id = ctx.create_pool(&creator, deposit);
     let net = expected_received(deposit);
@@ -167,7 +167,7 @@ fn fee_on_transfer_creator_deposit_does_not_overstate_pool_balances() {
 fn fee_on_transfer_liquidity_deposit_records_received_amount() {
     let ctx = FeeCtx::new();
     let creator = Address::generate(&ctx.env);
-    let deposit = 10_000i128;
+    let deposit = MIN_CREATOR_DEPOSIT;
     let pool_id = ctx.create_pool(&creator, deposit);
 
     let lp = Address::generate(&ctx.env);
@@ -195,7 +195,7 @@ fn fee_on_transfer_liquidity_deposit_records_received_amount() {
 fn fee_on_transfer_liquidity_shares_use_received_amounts() {
     let ctx = FeeCtx::new();
     let creator = Address::generate(&ctx.env);
-    let pool_id = ctx.create_pool(&creator, 10_000);
+    let pool_id = ctx.create_pool(&creator, MIN_CREATOR_DEPOSIT);
 
     let lp_a = Address::generate(&ctx.env);
     let lp_b = Address::generate(&ctx.env);
