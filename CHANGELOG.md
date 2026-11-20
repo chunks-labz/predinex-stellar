@@ -11,6 +11,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### ⛓ Contract
 - LP liquidity deposits now credit the balance actually received from fee-on-transfer collateral tokens, so recorded pool liquidity matches the contract's real token balance (#1597)
+- Added regression coverage for partial-fill batch settlement and idempotent batch payouts (#1598)
 - `contracts/pool` now compiles and runs its test suite: 12 tests covering `extend_duration` (auth, expiry, max-duration cap, frozen/disputed, boundaries, and event emission) previously never ran because the module failed to compile. Three separate breakages were blocking it — a stale `ContractEvents` destructuring, a hardcoded `protocol_version: 20` below the host minimum of 22, and a storage fixture written outside a contract frame (closes #1305)
 - Added a CI assertion that fails when a crate declares `#[test]` functions that `cargo test` never compiles or runs. This is the failure mode behind #1305: `cargo test --workspace` was green while `contracts/pool` contributed zero tests
 - Removed `contracts/pool/src/test.rs` and `contracts/pool/src/test/` (1554 lines). Both were unreachable from the crate graph and referenced APIs that do not exist (`PoolDataKey`, `client.init`, `get_pool_expiry`) and two test frameworks that are not dependencies (`soroban_test`, `soroban_test_framework`)

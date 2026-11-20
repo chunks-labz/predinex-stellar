@@ -11,6 +11,7 @@ use soroban_sdk::{
 
 mod benchmark_tests;
 mod benchmarks;
+mod batch_settlement_tests;
 mod bet_management_tests;
 mod budget_planner;
 pub mod audit_log;
