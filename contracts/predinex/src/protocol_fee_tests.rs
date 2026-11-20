@@ -21,7 +21,13 @@ fn setup_contract() -> (Env, PredinexContractClient<'static>, Address, Address) 
 }
 
 /// Like `setup_contract` but returns the contract_id for event assertion.
-fn setup_contract_for_events() -> (Env, PredinexContractClient<'static>, Address, Address, Address) {
+fn setup_contract_for_events() -> (
+    Env,
+    PredinexContractClient<'static>,
+    Address,
+    Address,
+    Address,
+) {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -41,6 +47,62 @@ fn test_get_protocol_fee_returns_default() {
     let (_env, client, _, _) = setup_contract();
     let fee = client.get_protocol_fee();
     assert_eq!(fee, 200, "default fee should be 200 basis points (2%)");
+}
+
+#[test]
+fn test_fee_cap_defaults_to_hard_safety_ceiling() {
+    let (_env, client, _, _) = setup_contract();
+    assert_eq!(client.get_max_protocol_fee_bps(), 1000);
+}
+
+#[test]
+fn test_configured_fee_cap_allows_updates_within_and_at_cap() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+    client.set_protocol_fee(&admin, &500);
+    client.set_protocol_fee(&admin, &600);
+
+    assert_eq!(client.get_max_protocol_fee_bps(), 600);
+    assert_eq!(client.get_protocol_fee(), 600);
+}
+
+#[test]
+fn test_configured_fee_cap_rejects_over_cap_updates() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+
+    let result = client.try_set_protocol_fee(&admin, &601);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
+    assert_eq!(client.get_protocol_fee(), 200);
+}
+
+#[test]
+fn test_fee_cap_cannot_be_lowered_below_current_fee() {
+    let (_env, client, admin, _) = setup_contract();
+    client.set_protocol_fee(&admin, &500);
+
+    let result = client.try_set_max_protocol_fee_bps(&admin, &499);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
+    assert_eq!(client.get_max_protocol_fee_bps(), 1000);
+}
+
+#[test]
+fn test_fee_tiers_cannot_exceed_configured_fee_cap() {
+    let (env, client, admin, _) = setup_contract();
+    client.set_max_protocol_fee_bps(&admin, &600);
+    let tiers = vec![
+        &env,
+        FeeTier {
+            volume_threshold: 1_000,
+            fee_bps: 601,
+        },
+    ];
+
+    let result = client.try_set_volume_fee_tiers(&admin, &tiers);
+
+    assert_eq!(result, Err(Ok(ContractError::FeeOutOfBounds)));
 }
 
 #[test]
@@ -75,6 +137,7 @@ fn test_claim_winnings_uses_configured_fee() {
 
     let creator = Address::generate(&env);
     let user = Address::generate(&env);
+    token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
     token_admin_client.mint(&user, &1000);
 
     let pool_id = client.create_pool(
@@ -99,8 +162,9 @@ fn test_claim_winnings_uses_configured_fee() {
 
 #[test]
 fn test_create_pool_event_includes_metadata() {
-    let (_env, client, _admin, _) = setup_contract();
+    let (_env, client, _admin, token) = setup_contract();
     let creator = Address::generate(&_env);
+    token::StellarAssetClient::new(&_env, &token).mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     let pool_id = client.create_pool(
         &creator,

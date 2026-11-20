@@ -56,7 +56,7 @@ echo
 # ── confirmation ─────────────────────────────────────────────────────────────
 warn "⚠️  This will deploy a NEW mainnet contract from the $TARGET_VERSION WASM."
 warn "    The current contract will NOT be deactivated automatically."
-warn "    You must update NEXT_PUBLIC_CONTRACT_ADDRESS after this script completes."
+warn "    You must update NEXT_PUBLIC_SOROBAN_CONTRACT_ID after this script completes."
 echo
 read -rp "Type the version to confirm rollback: " CONFIRM
 [[ "$CONFIRM" == "$TARGET_VERSION" ]] || error "Confirmation mismatch — aborting."
@@ -131,7 +131,7 @@ echo
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
 echo -e "${GREEN}  ROLLBACK COMPLETE — manual steps required:${NC}"
 echo -e "${GREEN}════════════════════════════════════════════════════════${NC}"
-echo "  1. Update NEXT_PUBLIC_CONTRACT_ADDRESS to:"
+echo "  1. Update NEXT_PUBLIC_SOROBAN_CONTRACT_ID to:"
 echo "       $NEW_CONTRACT_ID"
 echo "  2. Redeploy the web app (or update your env and restart)."
 echo "  3. Commit $ROLLBACK_FILE to the repository."

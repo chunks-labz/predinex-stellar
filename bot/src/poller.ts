@@ -2,7 +2,7 @@
  * Polling orchestrator.
  *
  * Runs a periodic loop that:
- *   1. Scans all pools for expired-but-unsettled entries.
+ *   1. Scans the next bounded pool window for expired-but-unsettled entries.
  *   2. Determines the winning outcome for each (oracle or default).
  *   3. Batches them into settle_pools calls.
  *   4. Logs and notifies on results.
@@ -46,7 +46,10 @@ import type { Pool } from "./types.js";
 import { ContractClient } from "./contract-client.js";
 import { Executor } from "./executor.js";
 import { logger } from "./logger.js";
+import { injectWorkerTraceHeaders, withWorkerSpan } from "./tracing.js";
 import { notify } from "./webhook.js";
+import { fetchOracleWithRetry } from "./oracle-client.js";
+import { getUpstreamTimeoutMetrics } from "./upstream-metrics.js";
 
 // ─── Oracle hook ─────────────────────────────────────────────────────────────
 
@@ -88,28 +91,42 @@ async function queryOracle(
   oracleSecret: string | null,
   poolId: number,
   pool: Pool,
+  config: BotConfig,
+  signal?: AbortSignal,
 ): Promise<number | null | undefined> {
-  const url = `${oracleUrl.replace(/\/$/, "")}/resolve/${poolId}`;
+  return withWorkerSpan(
+    "oracle.fetch",
+    async () => {
+      const url = `${oracleUrl.replace(/\/$/, "")}/resolve/${poolId}`;
 
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-  if (oracleSecret) {
-    headers["Authorization"] = `Bearer ${oracleSecret}`;
-  }
+      const headers: Record<string, string> = injectWorkerTraceHeaders({
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      });
+      if (oracleSecret) {
+        headers["Authorization"] = `Bearer ${oracleSecret}`;
+      }
 
-  let response: Response;
-  try {
-    response = await fetch(url, { headers });
-  } catch (err) {
-    logger.warn("Oracle request failed (network error) — will try fallback", {
-      poolId,
-      url,
-      error: String(err),
-    });
-    return undefined; // signal: try next fallback
-  }
+      let response: Response;
+      try {
+        response = await fetchOracleWithRetry(url, {
+          headers,
+        }, config, { signal });
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          logger.info("Oracle request cancelled (cycle shutdown) — will try fallback", {
+            poolId,
+            url,
+          });
+        } else {
+          logger.warn("Oracle request failed (network error or timeout) — will try fallback", {
+            poolId,
+            url,
+            error: String(err),
+          });
+        }
+        return undefined; // signal: try next fallback
+      }
 
   if (!response.ok) {
     logger.warn("Oracle returned non-2xx status — will try fallback", {
@@ -172,6 +189,9 @@ async function queryOracle(
   });
 
   return outcome;
+    },
+    { attributes: { "pool.id": poolId } },
+  );
 }
 
 /**
@@ -203,6 +223,7 @@ export async function resolveWinningOutcome(
   poolId: number,
   pool: Pool,
   config: BotConfig,
+  signal?: AbortSignal,
 ): Promise<number | null> {
   // ── Step 1: external oracle ───────────────────────────────────────────────
   if (config.oracleUrl) {
@@ -211,6 +232,8 @@ export async function resolveWinningOutcome(
       config.oracleSecret,
       poolId,
       pool,
+      config,
+      signal,
     );
 
     if (oracleResult !== undefined) {
@@ -313,21 +336,26 @@ export class Poller {
    * Run one complete poll cycle.
    * Returns a summary of what was found and settled.
    */
-  async runCycle(): Promise<CycleSummary> {
+  async runCycle(
+    traceContext?: Record<string, string | string[] | undefined>,
+  ): Promise<CycleSummary> {
     const cycleStart = Date.now();
     this.cycleCount++;
 
-    // Create a new AbortController for this cycle
-    this.abortController = new AbortController();
-    this.executor.setSignal(this.abortController.signal);
+    return withWorkerSpan(
+      "worker.job.settlement_cycle",
+      async () => {
+        // Create a new AbortController for this cycle
+        this.abortController = new AbortController();
+        this.executor.setSignal(this.abortController.signal);
 
-    logger.info("Starting settlement cycle", {
-      cycle: this.cycleCount,
-      instance: this.instanceId,
-      dryRun: this.config.dryRun,
-      autoSettle: this.config.autoSettleEnabled,
-      settleBatchSize: this.config.settleBatchSize,
-    });
+        logger.info("Starting settlement cycle", {
+          cycle: this.cycleCount,
+          instance: this.instanceId,
+          dryRun: this.config.dryRun,
+          autoSettle: this.config.autoSettleEnabled,
+          settleBatchSize: this.config.settleBatchSize,
+        });
 
     let poolsScanned = 0;
     let poolsExpiredUnsettled = 0;
@@ -341,9 +369,9 @@ export class Poller {
         this.config.batchSize,
       );
 
-      // We need the total pool count for the "scanned" metric but we already
-      // fetched it inside findExpiredUnsettledPools. Re-fetch is cheap enough.
-      poolsScanned = await this.client.getPoolCount();
+      // The client already fetched the count and records the bounded window
+      // size, avoiding a second get_pool_count simulation each cycle.
+      poolsScanned = this.client.getLastScanCount();
       poolsExpiredUnsettled = expired.length;
 
       // Drop failure counters for pools that are no longer candidates (settled
@@ -388,7 +416,7 @@ export class Poller {
           continue;
         }
 
-        const winningOutcome = await resolveWinningOutcome(poolId, pool, this.config);
+        const winningOutcome = await resolveWinningOutcome(poolId, pool, this.config, this.abortController?.signal);
 
         if (winningOutcome === null) {
           logger.warn("Could not resolve winning outcome — skipping pool", {
@@ -475,12 +503,14 @@ export class Poller {
       const successfulSettlements = results.filter((r) => r.success);
       if (successfulSettlements.length > 0) {
         this.lastSettlementTs = Date.now();
+      }
+      if (results.length > 0) {
         const cycleContext: SettlementCycleContext = {
           cycleNumber: this.cycleCount,
           instanceId: this.instanceId,
           settlementTimestamp: new Date().toISOString(),
         };
-        await notify(this.config, successfulSettlements, cycleContext);
+        await notify(this.config, results, cycleContext);
       }
 
       logger.info("Settlement cycle complete", {
@@ -511,6 +541,12 @@ export class Poller {
       settlementsFailed,
       durationMs: Date.now() - cycleStart,
     };
+      },
+      {
+        parentContext: traceContext,
+        attributes: { "worker.cycle": this.cycleCount, "worker.instance": this.instanceId },
+      },
+    );
   }
 
   /**
@@ -614,6 +650,7 @@ export class Poller {
       pendingPoolsCount: this.pendingPoolsCount,
       errorCount: this.errorCount,
       trackedFailurePools: this.persistentFailures.size,
+      upstreamTimeouts: getUpstreamTimeoutMetrics(),
     };
   }
 }

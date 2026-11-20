@@ -14,46 +14,46 @@ import {
   MIN_POOL_DURATION_SECS,
   MAX_POOL_DURATION_SECS,
   MAX_OUTCOME_COUNT,
+  clampBetAmount,
 } from '../../app/lib/validators';
-} from '../../lib/validators';
 
 describe('validateContractId', () => {
-  it('accepts a valid Stellar contract address', () => {
+  it('accepts a valid contract identifier', () => {
     const result = validateContractId(
-      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
+      'SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool',
       'mainnet'
     );
     expect(result.valid).toBe(true);
     expect(result.error).toBeUndefined();
   });
 
-  it('does not require network-specific prefixes for Stellar contract addresses', () => {
-    const result = validateContractId(
-      'CCV2F3HHPJ5KQWZIQYBXLF3D5XDY4D5MHKXZ4FFLFKSKNIOGOHYRFTMP',
-      'testnet'
-    );
+  it('does not enforce network-specific prefixes when no network is given', () => {
+    const result = validateContractId('SP2PABAF9FTAJYNFZH93XQ79SXMJTNFYS8Y8XHGV.predinex-pool');
     expect(result.valid).toBe(true);
   });
 
-  it('rejects legacy Stacks contract identifiers', () => {
-    const result = validateContractId('ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM.predinex-pool');
+  it('rejects bare Stellar contract addresses without a <address>.<name> structure', () => {
+    const result = validateContractId(
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA',
+      'mainnet'
+    );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
   });
 
   it('rejects account public keys', () => {
     const result = validateContractId('GA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSGZ');
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Contract identifier must be in <address>.<name> format');
   });
 
-  it('rejects invalid Stellar contract characters', () => {
+  it('rejects invalid Stellar contract address prefixes', () => {
     const result = validateContractId(
-      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJVSG0',
+      'CA7QYNF7SOWQ3GLR2BGMZEHXAVIRZA4KVWLTJJFC7MGXUA74P7UJUWDA.escrow',
       'testnet'
     );
     expect(result.valid).toBe(false);
-    expect(result.error).toMatch(/stellar contract address/i);
+    expect(result.error).toBe('Invalid Stacks contract address format');
   });
 });
 
@@ -285,5 +285,44 @@ describe('validateOutcomesList (issue #1001)', () => {
   it('rejects an invalid outcome label', () => {
     const result = validateOutcomesList(['Yes', 'x']);
     expect(result.valid).toBe(false);
+  });
+});
+
+describe('clampBetAmount', () => {
+  it('returns the requested amount when it is within every limit', () => {
+    expect(clampBetAmount(2, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(2);
+  });
+
+  it('raises an amount below the pool minimum up to the minimum', () => {
+    // A quick-select button picking 10% of a 20 XLM wallet on a pool with a
+    // 5 XLM minimum used to produce 2 XLM, which failed validation.
+    expect(clampBetAmount(2, { minBet: 5, maxBet: 50, balance: 20 })).toBe(5);
+  });
+
+  it('lowers an amount above the pool maximum down to the maximum', () => {
+    expect(clampBetAmount(20, { minBet: 0.1, maxBet: 5, balance: 100 })).toBe(5);
+  });
+
+  it('never exceeds the wallet balance', () => {
+    expect(clampBetAmount(50, { minBet: 0.1, maxBet: 100, balance: 12.5 })).toBe(12.5);
+  });
+
+  it('returns null when the balance is below the pool minimum', () => {
+    expect(clampBetAmount(1, { minBet: 5, maxBet: 50, balance: 2 })).toBeNull();
+  });
+
+  it('returns null for a non-positive or non-finite amount', () => {
+    expect(clampBetAmount(0, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(-3, { minBet: 0.1, balance: 10 })).toBeNull();
+    expect(clampBetAmount(Number.NaN, { minBet: 0.1, balance: 10 })).toBeNull();
+  });
+
+  it('treats missing limits as unbounded', () => {
+    expect(clampBetAmount(7.5, {})).toBe(7.5);
+  });
+
+  it('rounds down to two decimals so the amount never exceeds the cap', () => {
+    expect(clampBetAmount(1.239, { minBet: 0.1, maxBet: 1.1, balance: 100 })).toBe(1.1);
+    expect(clampBetAmount(0.129, { minBet: 0.1, balance: 100 })).toBe(0.12);
   });
 });

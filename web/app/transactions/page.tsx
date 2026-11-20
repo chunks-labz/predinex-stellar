@@ -15,9 +15,11 @@ import {
   Filter,
   History,
 } from 'lucide-react';
+import Navbar from '@/components/Navbar';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Card from '../../components/ui/Card';
-import { ICON_CLASS } from '../lib/constants';
+import { DEFAULT_NETWORK, ICON_CLASS, NETWORK_CONFIG } from '../lib/constants';
+import { TOKEN_SYMBOL } from '../lib/formatting';
 import { exportRecords } from '../lib/export';
 
 interface Transaction {
@@ -36,7 +38,9 @@ interface Transaction {
 const STORAGE_KEY = 'predinex-tx-history';
 const ITEMS_PER_PAGE = 10;
 
-const STELLAR_EXPLORER_BASE = 'https://stellar.expert/explorer/testnet/tx';
+// Follow the configured network; a hardcoded testnet base sent mainnet
+// hashes to a "not found" page.
+const STELLAR_EXPLORER_BASE = `${(NETWORK_CONFIG[DEFAULT_NETWORK] ?? NETWORK_CONFIG.testnet).explorerUrl}/tx`;
 
 function loadTransactions(): Transaction[] {
   if (typeof window === 'undefined') return [];
@@ -186,6 +190,7 @@ function TransactionsContent() {
 
   return (
     <main className="min-h-screen bg-background">
+      <Navbar />
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
           <div>
@@ -342,7 +347,8 @@ function TransactionsContent() {
                             className="flex items-center gap-1 hover:text-primary transition-colors"
                           >
                             {tx.hash.slice(0, 8)}...{tx.hash.slice(-4)}
-                            <ExternalLink className="w-3 h-3" />
+                            <ExternalLink className="w-3 h-3" aria-hidden="true" />
+                            <span className="sr-only"> (view on explorer, opens in a new tab)</span>
                           </a>
                         )}
                         {tx.error && (
@@ -355,7 +361,7 @@ function TransactionsContent() {
                     {tx.amount !== 0 && (
                       <div className={`text-lg font-semibold ${tx.type === 'bet_placed' ? 'text-red-500' : 'text-green-500'}`}>
                         {tx.type === 'bet_placed' ? '-' : '+'}
-                        {Math.abs(tx.amount).toFixed(2)} XLM
+                        {Math.abs(tx.amount).toFixed(2)} {TOKEN_SYMBOL}
                       </div>
                     )}
                     {tx.status === 'failed' && tx.retryAction && (
@@ -386,9 +392,10 @@ function TransactionsContent() {
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page === 1}
+                aria-label="Previous page"
                 className="p-2 rounded-lg border border-border hover:bg-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ChevronLeft className="w-4 h-4" />
+                <ChevronLeft className="w-4 h-4" aria-hidden="true" />
               </button>
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                 const pageNum = page <= 3 ? i + 1 : page + i - 2;
@@ -398,6 +405,8 @@ function TransactionsContent() {
                     key={pageNum}
                     type="button"
                     onClick={() => setPage(pageNum)}
+                    aria-label={`Page ${pageNum}`}
+                    aria-current={pageNum === page ? 'page' : undefined}
                     className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
                       pageNum === page
                         ? 'bg-primary text-primary-foreground'
@@ -412,9 +421,10 @@ function TransactionsContent() {
                 type="button"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={page === totalPages}
+                aria-label="Next page"
                 className="p-2 rounded-lg border border-border hover:bg-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <ChevronRight className="w-4 h-4" />
+                <ChevronRight className="w-4 h-4" aria-hidden="true" />
               </button>
             </div>
           </div>

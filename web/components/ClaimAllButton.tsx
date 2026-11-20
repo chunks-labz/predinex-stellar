@@ -35,26 +35,47 @@ export default function ClaimAllButton({
     userAddress ?? address
   );
 
+  const modalOpen = state.status !== 'idle';
+  const titles: Record<number, string> = Object.fromEntries(
+    (claimablePools ?? []).map((p) => [p.poolId, p.marketTitle])
+  );
+
+  const progressModal = (
+    <ClaimAllProgressModal
+      isOpen={modalOpen && !feePrompt}
+      state={state}
+      titles={titles}
+      totalClaimableCount={claimablePools?.length}
+      onClose={() => {
+        const paidOut = state.status === 'success' || state.status === 'partial';
+        reset();
+        // Refresh the parent only once the user has seen the summary. Doing it
+        // as soon as the transaction landed removed the claimed pools, which
+        // unmounted this component (and the summary) straight away.
+        if (paidOut) onClaimSuccess?.();
+      }}
+    />
+  );
+
   if (!claimablePools || claimablePools.length === 0) {
     return (
-      <p data-testid="claim-all-empty" className="text-sm text-muted-foreground">
-        No claims available
-      </p>
+      <>
+        <p data-testid="claim-all-empty" className="text-sm text-muted-foreground">
+          No claims available
+        </p>
+        {progressModal}
+      </>
     );
   }
 
   const poolIds = claimablePools.slice(0, CLAIM_ALL_MAX_POOLS).map((p) => p.poolId);
-  const titles: Record<number, string> = Object.fromEntries(
-    claimablePools.map((p) => [p.poolId, p.marketTitle])
-  );
   const isClaiming = state.status === 'claiming';
-  const modalOpen = state.status !== 'idle';
   const hasMorePools = claimablePools.length > CLAIM_ALL_MAX_POOLS;
   const remainingCount = hasMorePools ? claimablePools.length - CLAIM_ALL_MAX_POOLS : 0;
 
   const handleClaimAll = () => {
     if (!isConnected || isClaiming) return;
-    void claimAll(poolIds, onClaimSuccess);
+    void claimAll(poolIds);
   };
 
   return (
@@ -93,16 +114,7 @@ export default function ClaimAllButton({
         isConfirming={stage === 'signing' || stage === 'submitting' || stage === 'polling'}
       />
 
-      <ClaimAllProgressModal
-        isOpen={modalOpen && !feePrompt}
-        state={state}
-        titles={titles}
-        totalClaimableCount={claimablePools.length}
-        onClose={() => {
-          reset();
-          if (state.status === 'success') onClaimSuccess?.();
-        }}
-      />
+      {progressModal}
     </div>
   );
 }

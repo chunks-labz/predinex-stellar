@@ -7,7 +7,7 @@ import {
 } from '../../app/lib/market-list-cache';
 import type { ProcessedMarket, PoolData } from '../../app/lib/market-types';
 
-// Mock runtime-config so fetchCurrentBlockHeightLive doesn't throw on missing env var
+// Mock runtime-config so read paths don't throw on a missing env var
 vi.mock('../../app/lib/runtime-config', () => ({
   getRuntimeConfig: vi.fn(() => ({
     network: 'testnet',
@@ -29,18 +29,7 @@ vi.mock('../../app/lib/enhanced-stacks-api', () => ({
   fetchAllPools: vi.fn()
 }));
 
-vi.mock('../../app/lib/market-utils', async () => {
-  const actual = await vi.importActual<typeof import('../../app/lib/market-utils')>(
-    '../../app/lib/market-utils'
-  );
-  return {
-    ...actual,
-    fetchCurrentBlockHeightLive: vi.fn()
-  };
-});
-
 import { fetchAllPools } from '../../app/lib/enhanced-stacks-api';
-import { fetchCurrentBlockHeightLive, processMarketData } from '../../app/lib/market-utils';
 
 function MarketsDiscoveryHarness() {
   const { isLoading, allMarkets, blockHeightWarning } = useMarketDiscovery();
@@ -101,10 +90,6 @@ describe('Market discovery cache', () => {
     vi.setSystemTime(new Date(baseNow));
 
     vi.mocked(fetchAllPools).mockResolvedValue([poolMock]);
-    vi.mocked(fetchCurrentBlockHeightLive).mockResolvedValue({
-      height: 200,
-      warning: null
-    });
   });
 
   afterEach(() => {
@@ -119,7 +104,7 @@ describe('Market discovery cache', () => {
     expect(screen.getByText(/loaded-1-active$/)).toBeInTheDocument();
   });
 
-  it('treats stale cached data as invalid and refreshes (classification uses live height)', async () => {
+  it('treats stale cached data as invalid and refreshes (expiry is a timestamp)', async () => {
     writeMarketListCache([cachedMarket], baseNow);
 
     // Move time beyond TTL before render so the cache reads as stale.
@@ -128,28 +113,31 @@ describe('Market discovery cache', () => {
     render(<MarketsDiscoveryHarness />);
     expect(screen.getByText(/loading-0-none/)).toBeInTheDocument();
 
-    // With live height=200 and pool expiry=100 => expired
+    // #1284 — expiry is compared against wall-clock time, so pool.expiry=100
+    // (Unix seconds) is long past and the refreshed market reads as expired.
     await flushMarketDiscoveryRefresh();
     expect(screen.getByText(/loaded-1-expired/)).toBeInTheDocument();
   });
 
-  it('surfaces a warning when live block-height lookup fails (fallback height used)', async () => {
+  it('surfaces a warning when a later refresh fails but markets are already on screen', async () => {
+    // Phase 1: a fresh cache seeds the market list and skips the network.
     writeMarketListCache([cachedMarket], baseNow);
-
-    // Move time beyond TTL before render so the cache reads as stale.
-    vi.setSystemTime(new Date(baseNow + MARKET_LIST_CACHE_TTL_MS + 10_000));
-
-    // Provide a fallback height that keeps the market active and includes a warning.
-    vi.mocked(fetchCurrentBlockHeightLive).mockResolvedValueOnce({
-      height: 50,
-      warning: 'Failed to fetch current chain height. Using last known block height for market statuses.'
-    });
+    vi.mocked(fetchAllPools).mockClear();
 
     render(<MarketsDiscoveryHarness />);
-    expect(screen.getByText(/loading-0-none/)).toBeInTheDocument();
+    expect(screen.getByText(/loaded-1-active$/)).toBeInTheDocument();
+    expect(fetchAllPools).not.toHaveBeenCalled();
 
-    // height=50, expiry=100 => active + warning surfaced
-    await flushMarketDiscoveryRefresh();
+    // Phase 2: let the cache go stale and the 60s poll fire into a failure.
+    vi.setSystemTime(new Date(baseNow + MARKET_LIST_CACHE_TTL_MS + 10_000));
+    vi.mocked(fetchAllPools).mockRejectedValue(new Error('Network request failed'));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    // The cached market stays on screen and a warning banner is raised in place
+    // of a hard error.
     expect(screen.getByText(/loaded-1-active-warn/)).toBeInTheDocument();
   });
 });

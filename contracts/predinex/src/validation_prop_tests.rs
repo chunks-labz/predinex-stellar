@@ -75,6 +75,11 @@ fn setup_test() -> TestEnv<'static> {
 
     client.initialize(&token_id.address(), &admin, &admin);
 
+    // Fund admin so creator-deposit transfers succeed when creating pools.
+    // v5 alone creates 504+ pools; other tests add more; budget 1000 deposits.
+    soroban_sdk::token::StellarAssetClient::new(&env, &token_id.address())
+        .mint(&admin, &(MIN_CREATOR_DEPOSIT * 1000));
+
     TestEnv { env, client, admin }
 }
 
@@ -249,6 +254,7 @@ fn v3_test_outcomes_validation() {
             &outcomes,
             &3600,
             &None,
+            &MIN_CREATOR_DEPOSIT,
         );
         assert!(result.is_ok(), "Valid outcomes should be accepted");
     }
@@ -263,6 +269,7 @@ fn v3_test_outcomes_validation() {
         &few_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidOutcome)));
 
@@ -278,6 +285,7 @@ fn v3_test_outcomes_validation() {
         &many_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::TooManyOutcomes)));
 
@@ -292,6 +300,7 @@ fn v3_test_outcomes_validation() {
         &long_outcome,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::OutcomeTooLong)));
 
@@ -306,6 +315,7 @@ fn v3_test_outcomes_validation() {
         &empty_outcome,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::OutcomeEmpty)));
 
@@ -321,6 +331,7 @@ fn v3_test_outcomes_validation() {
             &ws_outcome,
             &3600,
             &None,
+            &MIN_CREATOR_DEPOSIT,
         );
         assert_eq!(result, Err(Ok(ContractError::StringWhitespaceOnly)));
     }
@@ -342,6 +353,7 @@ fn v4_test_duplicate_outcome_detection() {
         &dup_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 
@@ -356,6 +368,7 @@ fn v4_test_duplicate_outcome_detection() {
         &ci_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 
@@ -370,6 +383,7 @@ fn v4_test_duplicate_outcome_detection() {
         &ws_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 
@@ -384,6 +398,7 @@ fn v4_test_duplicate_outcome_detection() {
         &combined_outcomes,
         &3600,
         &None,
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::DuplicateOutcomeLabels)));
 }
@@ -488,6 +503,7 @@ fn v6_test_metadata_uri_validation() {
             &outcomes,
             &3600,
             &Some(uri),
+            &MIN_CREATOR_DEPOSIT,
         );
         assert!(
             result.is_ok(),
@@ -505,6 +521,7 @@ fn v6_test_metadata_uri_validation() {
         &outcomes,
         &3600,
         &Some(invalid_uri),
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::InvalidOutcome)));
 
@@ -520,6 +537,7 @@ fn v6_test_metadata_uri_validation() {
         &outcomes,
         &3600,
         &Some(long_uri),
+        &MIN_CREATOR_DEPOSIT,
     );
     assert_eq!(result, Err(Ok(ContractError::DescriptionTooLong)));
 }

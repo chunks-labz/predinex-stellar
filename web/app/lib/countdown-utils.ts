@@ -1,14 +1,16 @@
 /**
  * Pure helpers backing the live pool-expiry countdown.
  *
- * Pool expiry is recorded on-chain as a block height, so a "live" countdown is
- * an estimate derived from the number of blocks remaining and the average block
- * time. The 10-minute assumption matches `formatTimeRemaining` in
- * `market-utils.ts`, keeping every block→time estimate in the UI consistent.
+ * #1284 — Pool expiry is recorded on-chain as a Unix timestamp in seconds
+ * (the contract sets it from `env.ledger().timestamp()`), *not* as a block
+ * height. Treating it as a height made `expiry - blockHeight` come out around
+ * 1.72e9, which the old block→seconds conversion then multiplied by 5 into
+ * roughly 273 years of "remaining" time, so countdowns never entered their
+ * urgent state and markets never reported as expired.
+ *
+ * Because expiry is already in seconds, the remaining time is plain wall-clock
+ * arithmetic against `Date.now()` and no block-time estimate is involved.
  */
-
-/** Average seconds per block (~5 sec on Stellar), mirrors `market-utils.ts`. */
-export const BLOCK_TIME_SECONDS = 5;
 
 /** Below this many seconds remaining the countdown is treated as urgent. */
 export const URGENT_THRESHOLD_SECONDS = 60 * 60; // 1 hour
@@ -18,15 +20,21 @@ const SECONDS_PER_HOUR = 60 * 60;
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
 /**
- * Converts a number of remaining blocks into estimated seconds.
+ * Seconds remaining until an expiry timestamp.
  *
- * @param blocksRemaining - Blocks until expiry, or `null` when already expired.
- * @returns Estimated seconds remaining, or `null` when expired/unknown.
+ * @param expiry - Unix timestamp in seconds at which the pool expires.
+ * @param nowSeconds - Current Unix time in seconds; defaults to `Date.now()`.
+ * @returns Whole seconds remaining, or `null` when the pool has expired or
+ *          `expiry` is not a usable timestamp.
  */
-export function blocksToSeconds(blocksRemaining: number | null): number | null {
-  if (blocksRemaining === null) return null;
-  if (!Number.isFinite(blocksRemaining) || blocksRemaining <= 0) return null;
-  return Math.round(blocksRemaining * BLOCK_TIME_SECONDS);
+export function secondsUntil(expiry: number | null, nowSeconds?: number): number | null {
+  if (expiry === null || !Number.isFinite(expiry) || expiry <= 0) return null;
+
+  const now = nowSeconds ?? Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(now)) return null;
+
+  const remaining = expiry - now;
+  return remaining > 0 ? Math.floor(remaining) : null;
 }
 
 /**

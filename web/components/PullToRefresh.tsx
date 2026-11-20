@@ -76,13 +76,18 @@ export default function PullToRefresh({ onRefresh, children }: PullToRefreshProp
                     className="flex items-center justify-center text-muted-foreground text-sm py-2 transition-all"
                     style={{ height: refreshing ? 40 : pullDistance }}
                     aria-live="polite"
+                    aria-atomic="true"
                 >
                     {refreshing ? (
-                        <span className="animate-spin inline-block w-5 h-5 border-2 border-primary border-t-transparent rounded-full" />
+                        <span
+                            className="animate-spin inline-block w-5 h-5 border-2 border-primary border-t-transparent rounded-full"
+                            role="status"
+                            aria-label="Refreshing content"
+                        />
                     ) : pullDistance >= THRESHOLD ? (
-                        'Release to refresh'
+                        <span>Release to refresh</span>
                     ) : (
-                        'Pull to refresh'
+                        <span>Pull to refresh</span>
                     )}
                 </div>
             )}

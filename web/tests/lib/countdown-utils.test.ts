@@ -1,21 +1,52 @@
 import { describe, it, expect } from 'vitest';
 import {
-  BLOCK_TIME_SECONDS,
-  blocksToSeconds,
+  secondsUntil,
   formatCountdown,
   formatCountdownAccessible,
   isUrgent,
 } from '../../app/lib/countdown-utils';
 
-describe('blocksToSeconds', () => {
-  it('converts remaining blocks using the average block time', () => {
-    expect(blocksToSeconds(3)).toBe(3 * BLOCK_TIME_SECONDS);
+describe('secondsUntil', () => {
+  // #1284 — expiry is a Unix timestamp in seconds, not a block height, so no
+  // block-time conversion is involved.
+  const NOW = 1_780_000_000;
+
+  it('returns the whole seconds between now and expiry', () => {
+    expect(secondsUntil(NOW + 3600, NOW)).toBe(3600);
+    expect(secondsUntil(NOW + 90, NOW)).toBe(90);
   });
 
-  it('returns null when expired or unknown', () => {
-    expect(blocksToSeconds(null)).toBeNull();
-    expect(blocksToSeconds(0)).toBeNull();
-    expect(blocksToSeconds(-5)).toBeNull();
+  it('truncates partial seconds rather than rounding up', () => {
+    expect(secondsUntil(NOW + 10.9, NOW)).toBe(10);
+  });
+
+  it('returns null once the expiry instant has passed', () => {
+    expect(secondsUntil(NOW, NOW)).toBeNull();
+    expect(secondsUntil(NOW - 1, NOW)).toBeNull();
+    expect(secondsUntil(NOW - 86400, NOW)).toBeNull();
+  });
+
+  it('returns null for missing or unusable expiry values', () => {
+    expect(secondsUntil(null, NOW)).toBeNull();
+    expect(secondsUntil(0, NOW)).toBeNull();
+    expect(secondsUntil(-1, NOW)).toBeNull();
+    expect(secondsUntil(Number.NaN, NOW)).toBeNull();
+  });
+
+  it('reproduces the reported bug: a real timestamp is no longer treated as a height', () => {
+    // The old code did `blocksToSeconds(expiry - blockHeight)`, turning a 2026-era
+    // timestamp into ~273 years of remaining time instead of expiring promptly.
+    const expiry = NOW + 2 * 60 * 60; // two hours out
+    const remaining = secondsUntil(expiry, NOW);
+    expect(remaining).toBe(7200);
+    expect(remaining!).toBeLessThan(86_400 * 365);
+  });
+
+  it('defaults to the current wall clock when now is omitted', () => {
+    const remaining = secondsUntil(Math.floor(Date.now() / 1000) + 120);
+    expect(remaining).not.toBeNull();
+    expect(remaining!).toBeGreaterThan(0);
+    expect(remaining!).toBeLessThanOrEqual(120);
   });
 });
 
@@ -37,7 +68,11 @@ describe('formatCountdown', () => {
   it('renders Expired at or below zero', () => {
     expect(formatCountdown(0)).toBe('Expired');
     expect(formatCountdown(-10)).toBe('Expired');
-    expect(formatCountdown(null)).toBe('Expired');
+  });
+
+  it('renders a placeholder when the remaining time is unknown', () => {
+    // `null` means "not loaded yet", which is distinct from an elapsed deadline.
+    expect(formatCountdown(null)).toBe('--');
   });
 });
 
@@ -75,6 +110,10 @@ describe('formatCountdownAccessible', () => {
 
   it('renders Expired at or below zero', () => {
     expect(formatCountdownAccessible(0)).toBe('Expired');
-    expect(formatCountdownAccessible(null)).toBe('Expired');
+    expect(formatCountdownAccessible(-10)).toBe('Expired');
+  });
+
+  it('announces a loading state when the remaining time is unknown', () => {
+    expect(formatCountdownAccessible(null)).toBe('Loading time remaining');
   });
 });

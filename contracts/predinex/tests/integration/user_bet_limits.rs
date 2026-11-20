@@ -67,8 +67,8 @@ fn configure_limits(
 ) {
     ctx.client.set_user_exposure_config(
         &ctx.treasury,
-        &0u32,   // max_exposure_per_pool_bps — disabled
-        &0i128,  // max_bet_per_transaction — disabled
+        &0u32,  // max_exposure_per_pool_bps — disabled
+        &0i128, // max_bet_per_transaction — disabled
         &daily_loss_limit,
         &DAY_SECS,
         &weekly_loss_limit,
@@ -80,6 +80,7 @@ fn configure_limits(
 
 /// Create a pool with a 30-day duration so bets stay valid across window tests.
 fn make_pool(ctx: &Ctx, creator: &Address) -> u32 {
+    ctx.token_admin.mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     ctx.client.create_pool(
         creator,
         &String::from_str(&ctx.env, "Will BTC hit $100k?"),

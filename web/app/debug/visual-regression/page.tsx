@@ -1,6 +1,8 @@
 'use client';
 
+import { notFound } from 'next/navigation';
 import MarketCard from '@/components/MarketCard';
+import MarketGrid from '@/components/MarketGrid';
 import ActivityFeed from '@/app/components/ActivityFeed';
 import PoolIntegration from '@/app/components/PoolIntegration';
 import ActiveBetsCard from '@/app/components/dashboard/ActiveBetsCard';
@@ -57,6 +59,9 @@ const MOCK_ACTIVITIES = [
 ];
 
 export default function VisualRegressionPage() {
+  // Debug-only fixture page: never serve it from a production build.
+  if (process.env.NODE_ENV === 'production') notFound();
+
   return (
     <div className="p-8 space-y-12 bg-background min-h-screen">
       <h1 className="text-3xl font-bold border-b pb-4">Visual Regression Test Surface</h1>
@@ -91,6 +96,22 @@ export default function VisualRegressionPage() {
             />
           </div>
         </div>
+      </section>
+
+      {/* Market Grid — static surface for tablet overflow checks */}
+      <section id="market-grid-tablet" className="space-y-6">
+        <h2 className="text-xl font-semibold opacity-70 uppercase tracking-wider">Market Grid (tablet layout)</h2>
+        <MarketGrid
+          markets={[
+            MOCK_MARKET,
+            { ...MOCK_MARKET, poolId: 2, title: 'Will Bitcoin close above $100,000 this year?' },
+            { ...MOCK_MARKET, poolId: 3, title: 'Will the next Fed meeting cut rates?' },
+            { ...MOCK_MARKET, poolId: 4, title: 'Will XLM flip DOT in market cap by 2026?' },
+          ]}
+          isLoading={false}
+          error={null}
+          onRetry={() => {}}
+        />
       </section>
 
       {/* Activity Feed */}

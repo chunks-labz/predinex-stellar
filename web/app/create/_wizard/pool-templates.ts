@@ -2,6 +2,7 @@
  * Local saved templates and metadata helpers for the pool creation wizard.
  */
 import type { CreatePoolDraft } from './useCreateWizard';
+import { MIN_POOL_DURATION_SECS } from '@/lib/validators';
 
 export const SAVED_POOL_TEMPLATES_KEY = 'predinex_saved_pool_templates_v1';
 export const MAX_SAVED_TEMPLATES = 20;
@@ -22,6 +23,17 @@ export interface SavedPoolTemplate {
   name: string;
   createdAt: number;
   draft: Omit<CreatePoolDraft, 'templateSource' | 'templateId' | 'saveAsTemplate'>;
+}
+
+/**
+ * Default deposit deadline for a template of `duration` seconds: 80% of the
+ * pool's life, but never below the minimum deadline and always strictly
+ * before expiry, so a template opens on a deadline that passes validation.
+ */
+export function defaultDepositDeadline(duration: number): number {
+  const upper = Math.floor(duration) - 1;
+  const preferred = Math.floor(duration * 0.8);
+  return Math.max(MIN_POOL_DURATION_SECS, Math.min(preferred, upper));
 }
 
 export function parseTagsInput(tags: string): string[] {
@@ -94,6 +106,9 @@ export function saveTemplateToLocalStorage(
       protocolFeeBps: draft.protocolFeeBps,
       settlementType: draft.settlementType,
       referenceLink: draft.referenceLink,
+      resolutionCriteria: draft.resolutionCriteria,
+      externalLinks: draft.externalLinks,
+      coverImage: draft.coverImage,
     },
   };
 

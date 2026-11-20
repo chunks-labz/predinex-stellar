@@ -6,6 +6,7 @@ import {
   useCreateWizard,
   CREATE_POOL_DRAFT_KEY,
   CREATE_MARKET_DRAFT_KEY,
+  CREATE_WIZARD_STEP_KEY,
 } from '../../app/create/_wizard/useCreateWizard';
 import { StepIndicator } from '../../app/create/_wizard/StepIndicator';
 
@@ -39,6 +40,7 @@ describe('useCreateWizard', () => {
     cleanup();
     localStorage.removeItem(DRAFT_KEY);
     localStorage.removeItem(CREATE_MARKET_DRAFT_KEY);
+    localStorage.removeItem(CREATE_WIZARD_STEP_KEY);
   });
 
   it('starts at step 1 with an empty draft and can advance from template step', () => {
@@ -121,6 +123,49 @@ describe('useCreateWizard', () => {
     expect(result.current.draft.outcomes).toHaveLength(3);
     act(() => result.current.removeOutcome(2));
     expect(result.current.draft.outcomes).toHaveLength(2);
+  });
+
+  it('#1059 persists the current step across refresh/remount', () => {
+    const first = renderHook(() => useCreateWizard());
+    fillBasics(first.result.current.setField);
+    act(() => first.result.current.next());
+    act(() => first.result.current.next());
+    expect(first.result.current.step).toBe(3);
+    act(() => first.result.current.setOutcome(0, 'Yes'));
+    act(() => first.result.current.setOutcome(1, 'No'));
+    act(() => first.result.current.next());
+    expect(first.result.current.step).toBe(4);
+
+    cleanup();
+
+    const second = renderHook(() => useCreateWizard());
+    expect(second.result.current.step).toBe(4);
+    expect(second.result.current.draft.title).toBe('Will BTC be above $100k?');
+    expect(second.result.current.hasSavedDraft).toBe(true);
+  });
+
+  it('#1059 surfaces hasSavedDraft when a draft was restored', () => {
+    const first = renderHook(() => useCreateWizard());
+    fillBasics(first.result.current.setField);
+    cleanup();
+
+    const second = renderHook(() => useCreateWizard());
+    expect(second.result.current.hasSavedDraft).toBe(true);
+  });
+
+  it('#1059 resetDraft clears the persisted step and draft', () => {
+    const first = renderHook(() => useCreateWizard());
+    fillBasics(first.result.current.setField);
+    act(() => first.result.current.next());
+    act(() => first.result.current.next());
+    expect(first.result.current.step).toBe(3);
+    act(() => first.result.current.resetDraft());
+    cleanup();
+
+    const second = renderHook(() => useCreateWizard());
+    expect(second.result.current.step).toBe(1);
+    expect(second.result.current.draft.title).toBe('');
+    expect(second.result.current.hasSavedDraft).toBe(false);
   });
 });
 

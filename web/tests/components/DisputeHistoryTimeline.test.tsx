@@ -60,3 +60,38 @@ describe('DisputeHistoryTimeline', () => {
     expect(within(alert).getByText('RPC unavailable')).toBeInTheDocument();
   });
 });
+
+// #1309 — the timeline must not imply a bettor performed an admin action.
+describe('DisputeHistoryTimeline — pool_unfrozen attribution (#1309)', () => {
+  const base = {
+    timestamp: Date.parse('2026-03-05T12:00:00Z') / 1000,
+    txHash: 'txunfreeze',
+    explorerUrl: 'https://explorer.example/tx/txunfreeze',
+  };
+
+  it('labels an admin-initiated unfreeze with a plain "By" attribution', () => {
+    render(
+      <DisputeHistoryTimeline
+        events={[{ type: 'unfrozen', actor: 'GADMIN', trigger: 'admin', ...base }]}
+      />
+    );
+    expect(screen.getByText(/^By/)).toBeInTheDocument();
+  });
+
+  it('does not present an auto-thaw as an administrative action', () => {
+    render(
+      <DisputeHistoryTimeline
+        events={[{ type: 'unfrozen', actor: 'GBETTOR', trigger: 'autoThaw', ...base }]}
+      />
+    );
+    expect(screen.getByText(/Auto-thawed by a bet from/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^By/)).not.toBeInTheDocument();
+  });
+
+  it('falls back to plain attribution when the trigger is unknown', () => {
+    // Historical events carry no trigger; must not be guessed as an admin action.
+    render(<DisputeHistoryTimeline events={[{ type: 'unfrozen', actor: 'GLEGACY', ...base }]} />);
+    expect(screen.getByText(/^By/)).toBeInTheDocument();
+    expect(screen.queryByText(/Auto-thawed/i)).not.toBeInTheDocument();
+  });
+});

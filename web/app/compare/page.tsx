@@ -8,10 +8,20 @@ import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import { useMarketDiscovery } from '../lib/hooks/useMarketDiscovery';
 import { usePoolComparison, POOL_COMPARISON_MAX } from '../lib/hooks/usePoolComparison';
 import { formatSTXAmount } from '../lib/market-utils';
-import { blocksToSeconds } from '../lib/countdown-utils';
+import { formatOdds } from '../lib/formatting';
 import { formatDisplayAddress } from '../lib/address-display';
 import CountdownTimer from '@/components/CountdownTimer';
 import type { ProcessedMarket } from '../lib/market-types';
+
+/**
+ * `timeRemaining` is `null` once a pool is past expiry, which the timer reads
+ * as "unknown" ("--" / "Loading time remaining"). Past-expiry pools that are
+ * no longer active must render as expired instead.
+ */
+function countdownSeconds(m: ProcessedMarket): number | null {
+  if (m.timeRemaining !== null) return m.timeRemaining;
+  return m.status === 'active' ? null : 0;
+}
 
 const COMPARISON_ROWS: Array<{
   label: string;
@@ -46,11 +56,11 @@ const COMPARISON_ROWS: Array<{
       <div className="space-y-1">
         <div className="flex justify-between text-sm">
           <span className="text-green-400">{m.outcomeA}</span>
-          <span className="font-mono">{m.oddsA}%</span>
+          <span className="font-mono">{formatOdds(m.oddsA)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-red-400">{m.outcomeB}</span>
-          <span className="font-mono">{m.oddsB}%</span>
+          <span className="font-mono">{formatOdds(m.oddsB)}</span>
         </div>
       </div>
     ),
@@ -74,7 +84,7 @@ const COMPARISON_ROWS: Array<{
     label: 'End time',
     render: (m) => (
       <CountdownTimer
-        secondsRemaining={m.status === 'expired' ? null : blocksToSeconds(m.timeRemaining)}
+        secondsRemaining={countdownSeconds(m)}
         settled={m.status === 'settled'}
         showIcon
       />
@@ -198,6 +208,19 @@ function CompareContent() {
           </div>
         )}
 
+        {isLoading && comparedMarkets.length === 0 ? (
+          <div role="status" aria-live="polite" className="space-y-4">
+            <span className="sr-only">Loading selected pools…</span>
+            {Array.from({ length: count }, (_, i) => (
+              <div
+                key={i}
+                aria-hidden="true"
+                className="h-24 rounded-xl border border-border bg-muted/30 animate-pulse"
+              />
+            ))}
+          </div>
+        ) : (
+        <>
         {/* Desktop / tablet table */}
         <div className="hidden md:block overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-left">
@@ -281,6 +304,8 @@ function CompareContent() {
             </div>
           ))}
         </div>
+        </>
+        )}
       </div>
     </main>
   );

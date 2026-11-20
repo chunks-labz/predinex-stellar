@@ -84,9 +84,9 @@ describe('ClaimAllButton', () => {
 
     await userEvent.click(screen.getByTestId('claim-all-button'));
 
-    // In-flight: modal shows the "Claiming 1/2…" counter and per-pool rows.
+    // In-flight: modal shows the "Claiming 2 pools…" header and per-pool rows.
     await waitFor(() => {
-      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claiming 1/2…');
+      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claiming 2 pools…');
     });
     expect(screen.getByTestId('claim-all-pool-1')).toHaveTextContent('BTC > 100k?');
     expect(screen.getByTestId('claim-all-pool-2')).toHaveTextContent('ETH > 5k?');
@@ -103,7 +103,40 @@ describe('ClaimAllButton', () => {
     });
     expect(screen.getByTestId('claim-all-pool-1')).toHaveTextContent('Claimed');
     expect(screen.getByTestId('claim-all-pool-2')).toHaveTextContent('Claimed');
-    expect(onSuccess).toHaveBeenCalled();
+
+    // The parent is refreshed only once the user dismisses the summary.
+    expect(onSuccess).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByTestId('claim-all-close'));
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('claim-all-header')).not.toBeInTheDocument();
+  });
+
+  it('keeps the summary open when the claimed pools drop out of the list', async () => {
+    mockClaimAll.mockResolvedValue({ txHash: 'abc123', claimedPoolIds: [1, 2] });
+
+    const { rerender } = renderWithProviders(
+      <ClaimAllButton claimablePools={POOLS} userAddress="GTESTADDRESS" />
+    );
+    await userEvent.click(screen.getByTestId('claim-all-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claimed 2/2');
+    });
+
+    // e.g. a background refetch removes the now-claimed pools.
+    rerender(<ClaimAllButton claimablePools={[]} userAddress="GTESTADDRESS" />);
+    expect(screen.getByTestId('claim-all-header')).toHaveTextContent('Claimed 2/2');
+  });
+
+  it('returns to idle without a failure dialog when the fee prompt is declined', async () => {
+    mockClaimAll.mockRejectedValue(new Error('Transaction cancelled by user'));
+
+    renderWithProviders(<ClaimAllButton claimablePools={POOLS} userAddress="GTESTADDRESS" />);
+    await userEvent.click(screen.getByTestId('claim-all-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('claim-all-button')).toHaveTextContent('Claim All (2)');
+    });
+    expect(screen.queryByTestId('claim-all-header')).not.toBeInTheDocument();
   });
 
   it('shows a partial state when only some pools pay out', async () => {

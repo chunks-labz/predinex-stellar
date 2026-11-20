@@ -9,6 +9,7 @@
 
 import { redactSensitiveData } from '../error-reporter';
 import { createScopedLogger } from '@/app/lib/logger';
+import { getRuntimeConfig, type SupportedNetwork } from '../runtime-config';
 const log = createScopedLogger('AnalyticsService');
 import type {
   AnalyticsEvent,
@@ -55,6 +56,7 @@ class AnalyticsService {
   private sessionId: string;
   private sessionStartTime: number;
   private interactionCount: number = 0;
+  private runtimeNetworkOverride: SupportedNetwork | null = null;
 
   constructor() {
     this.config = {
@@ -80,6 +82,15 @@ class AnalyticsService {
    */
   setProvider(provider: AnalyticsProvider): void {
     this.config.provider = provider;
+  }
+
+  /**
+   * Override the network type at runtime (e.g. based on the currently
+   * connected wallet/network). Pass `null` to revert to the build-time
+   * runtime-config value.
+   */
+  setNetworkTypeOverride(network: SupportedNetwork | null): void {
+    this.runtimeNetworkOverride = network;
   }
 
   /**
@@ -194,19 +205,30 @@ class AnalyticsService {
   }
 
   /**
-   * Get current network type from environment
+   * Get current network type from runtime config, or wallet override if set.
    */
   private getNetworkType(): 'mainnet' | 'testnet' {
-    // TODO: Read from runtime config
-    return process.env.NEXT_PUBLIC_NETWORK_TYPE === 'mainnet' ? 'mainnet' : 'testnet';
+    if (this.runtimeNetworkOverride) {
+      return this.runtimeNetworkOverride;
+    }
+    try {
+      const cfg = getRuntimeConfig();
+      return cfg.network;
+    } catch {
+      return 'testnet';
+    }
   }
 
   /**
-   * Get app version from package.json
+   * Get app version from build-time runtime-config constant.
    */
   private getAppVersion(): string {
-    // TODO: Read from build-time constant
-    return process.env.NEXT_PUBLIC_APP_VERSION || 'unknown';
+    try {
+      const cfg = getRuntimeConfig();
+      return cfg.appVersion || 'unknown';
+    } catch {
+      return 'unknown';
+    }
   }
 
   /**

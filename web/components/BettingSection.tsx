@@ -4,19 +4,26 @@ const log = createScopedLogger("BettingSection");
 
 import { useMemo, useState } from 'react';
 import { Loader2, Wallet, AlertCircle, Lock, Clock } from 'lucide-react';
+import { Loader2, Wallet, AlertCircle, Info } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '@/providers/ToastProvider';
 import { predinexContract } from '@/app/lib/adapters/predinex-contract';
 import { invalidateOnPlaceBet } from '@/app/lib/cache-invalidation';
 import { toastMessages, showToastPayload } from '@/lib/toast-messages';
-import { validateBetAmount } from '@/lib/validators';
+import { validateBetAmount, clampBetAmount } from '@/lib/validators';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
+import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
 import { useNetworkMismatch } from '@/lib/hooks/useNetworkMismatch';
 import { useWalletAccount } from '@/lib/hooks/useWalletAccount';
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
+import { useI18n } from '@/app/lib/i18n';
+import { BetConfirmationDialog } from '@/components/BetConfirmationDialog';
+import { formatOdds, formatPrice } from '@/app/lib/formatting';
+import Tooltip from '@/components/ui/Tooltip';
+import { parseContractError } from '@/app/lib/error-handler';
 
 interface BettingSectionProps {
   pool: Pool;
@@ -29,6 +36,7 @@ export default function BettingSection({
   poolId,
   onBetSuccess,
 }: BettingSectionProps) {
+  const { t } = useI18n();
   const wallet = useWallet();
   const { isConnected, address, connect } = wallet;
   const { showToast } = useToast();
@@ -41,6 +49,10 @@ export default function BettingSection({
     resolve: (v: boolean) => void;
   } | null>(null);
   const [stage, setStage] = useState<TxStage>("idle");
+  const [pendingOutcome, setPendingOutcome] = useState<number | null>(null);
+  // #1589 — the failure toast disappears on its own; keep the last failure next
+  // to the bet buttons so the user can read it and retry the same outcome.
+  const [betError, setBetError] = useState<{ outcome: number; message: string } | null>(null);
 
   // Issue #1603: Field-level error mapping for simulation failures
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -126,13 +138,43 @@ export default function BettingSection({
 
   const { isMismatch, expectedNetworkName } = useNetworkMismatch();
 
+  // #1534 — the quick-select buttons used to fill in a raw percentage of the
+  // wallet balance, which could land below the pool minimum or above the pool
+  // maximum and leave the form permanently invalid (the buttons stayed
+  // disabled with no obvious reason). Every quick amount is clamped into the
+  // allowed range instead, and a "Max" option bets the largest amount the
+  // wallet and the pool allow.
+  const quickBetOptions = useMemo(() => {
+    if (walletBalance === null || walletBalance <= 0) return [];
+
+    const limits = {
+      minBet: hasMinBet ? minBetXlm : undefined,
+      maxBet: hasMaxBet ? maxBetXlm ?? undefined : undefined,
+      balance: walletBalance,
+    };
+
+    const options = [10, 25, 50, 100].map((pct) => ({
+      key: `pct-${pct}`,
+      label: `${pct}%`,
+      amount: clampBetAmount((walletBalance * pct) / 100, limits),
+    }));
+
+    options.push({
+      key: 'max',
+      label: t('betting.quickBetMaxLabel'),
+      amount: clampBetAmount(walletBalance, limits),
+    });
+
+    return options;
+  }, [walletBalance, hasMinBet, minBetXlm, hasMaxBet, maxBetXlm, t]);
+
   // Inline, client-side validation of the bet amount. Returns a human-readable
   // error string, or null when the amount is valid for this pool. Runs on every
   // change/blur so the form can show feedback and disable submission before the
   // user ever triggers a transaction.
   const amountError = useMemo<string | null>(() => {
     if (betAmount.trim() === "") {
-      return "Amount is required";
+      return t('betting.amountRequired');
     }
     const amountXlm = parseFloat(betAmount);
     // Base checks (number, > 0, global bounds) reuse the shared validator.
@@ -151,10 +193,35 @@ export default function BettingSection({
       return `Amount exceeds your balance of ${walletBalance.toFixed(2)} XLM`;
     }
     return null;
-  }, [betAmount, hasMinBet, minBetXlm, hasMaxBet, maxBetXlm, walletBalance]);
+  }, [betAmount, hasMinBet, minBetXlm, hasMaxBet, maxBetXlm, walletBalance, t]);
 
   const isAmountInvalid = amountError !== null;
   const showAmountError = amountTouched && isAmountInvalid;
+  // #1538 — the bet buttons are disabled while the amount is empty, but the
+  // error message only appeared after blur, so an untouched field left the user
+  // staring at two permanently disabled buttons with no explanation. Show a
+  // quiet hint until they interact, then hand over to the error message.
+  const showAmountHint = !amountTouched && betAmount.trim() === '';
+  const describedBy = [
+    'bet-limits',
+    showAmountError ? 'bet-amount-error' : null,
+    showAmountHint ? 'bet-amount-hint' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const requestBet = (outcome: number) => {
+    if (!isConnected) {
+      connect();
+      return;
+    }
+
+    if (isAmountInvalid) {
+      setAmountTouched(true);
+      return;
+    }
+    setPendingOutcome(outcome);
+  };
 
   const placeBet = async (outcome: number) => {
     if (!isConnected) {
@@ -190,6 +257,7 @@ export default function BettingSection({
     }
 
     setIsBetting(true);
+    setBetError(null);
 
     try {
       await predinexContract.placeBetSoroban({
@@ -211,7 +279,7 @@ export default function BettingSection({
         invalidateOnPlaceBet({ poolId, userAddress: address });
       }
 
-      showSuccess("Bet placed successfully!");
+      showSuccess(t('betting.successMessage'));
       setBetAmount("");
       setStage("idle");
       setFeePrompt(null);
@@ -240,6 +308,13 @@ export default function BettingSection({
 
       // Keep the raw error behind a details toggle
       setRawError(errorMessage);
+      setPendingOutcome(null);
+      onBetSuccess?.(outcome, amountStroops);
+    } catch (error) {
+      log.error("[BettingSection] Bet transaction failed:", error);
+      showError(error);
+      setBetError({ outcome, message: parseContractError(error) });
+      setPendingOutcome(null);
       setStage("idle");
       setFeePrompt(null);
     } finally {
@@ -258,6 +333,9 @@ export default function BettingSection({
         </p>
         <p className="text-sm text-muted-foreground">
           Winner: {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
+        <p className="text-lg font-bold">{t('betting.poolSettled')}</p>
+        <p className="text-muted-foreground">
+          {t('betting.winner')} {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
         </p>
         <p className="mt-2 text-xs text-muted-foreground/70">
           Settled markets cannot accept new bets. The outcome has been
@@ -320,16 +398,16 @@ export default function BettingSection({
     return (
       <div className="text-center py-6 bg-muted/50 rounded-lg">
         <Wallet className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-        <p className="text-lg font-bold mb-2">Connect Wallet to Bet</p>
+        <p className="text-lg font-bold mb-2">{t('betting.connectTitle')}</p>
         <p className="text-muted-foreground mb-4">
-          You need to connect your wallet to place bets on this market.
+          {t('betting.connectBody')}
         </p>
         <button
           onClick={connect}
           className="flex items-center gap-2 bg-primary/10 hover:bg-primary/20 text-primary px-6 py-3 rounded-full border border-primary/20 transition font-medium mx-auto hover:scale-105"
         >
           <Wallet className="w-5 h-5" />
-          Connect Wallet
+          {t('betting.connectButton')}
         </button>
       </div>
     );
@@ -340,15 +418,41 @@ export default function BettingSection({
     totalPool > 0 ? ((pool.totalA / totalPool) * 100).toFixed(1) : "50.0";
   const oddsB =
     totalPool > 0 ? ((pool.totalB / totalPool) * 100).toFixed(1) : "50.0";
+  const pendingOdds = pendingOutcome === 0 ? oddsA : oddsB;
+  const pendingAmount = parseFloat(betAmount);
+  const pendingSelectedOutcome =
+    pendingOutcome === 0 ? pool.outcomeA : pool.outcomeB;
+  const selectedPoolTotal =
+    pendingOutcome === 0 ? pool.totalA : pendingOutcome === 1 ? pool.totalB : 0;
+  const potentialWinnings =
+    Number.isFinite(pendingAmount) && selectedPoolTotal > 0
+      ? ((pendingAmount * STROOPS_PER_XLM * (totalPool + pendingAmount * STROOPS_PER_XLM)) /
+          (selectedPoolTotal + pendingAmount * STROOPS_PER_XLM) /
+          STROOPS_PER_XLM)
+      : Number.isFinite(pendingAmount)
+        ? pendingAmount
+        : 0;
 
   return (
-    <div className="bg-muted/30 p-6 rounded-xl border border-border space-y-4">
-      <h3 className="font-bold">Place Bet</h3>
+    <div className="bg-muted/30 p-4 sm:p-6 rounded-xl border border-border space-y-4">
+      {pendingOutcome !== null && (
+        <BetConfirmationDialog
+          isOpen
+          onClose={() => setPendingOutcome(null)}
+          onConfirm={() => void placeBet(pendingOutcome)}
+          betAmount={pendingAmount.toFixed(2)}
+          selectedOutcome={pendingSelectedOutcome}
+          potentialWinnings={potentialWinnings.toFixed(2)}
+          currentOdds={parseFloat(pendingOdds)}
+          isProcessing={isBetting}
+        />
+      )}
+      <h3 className="font-bold">{t('betting.sectionTitle')}</h3>
 
       {/* Current odds */}
       <div className="p-4 bg-muted/30 rounded-lg border border-border/50">
-        <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
-        <div className="flex h-3 rounded-full overflow-hidden mb-2">
+        <p className="text-sm text-muted-foreground mb-2">{t('betting.currentOdds')}</p>
+        <div className="flex h-3 rounded-full overflow-hidden mb-2" aria-hidden="true">
           <div
             className="bg-green-500 transition-all duration-500"
             style={{ width: `${oddsA}%` }}
@@ -358,25 +462,28 @@ export default function BettingSection({
             style={{ width: `${oddsB}%` }}
           />
         </div>
-        <div className="flex justify-between text-sm">
-          <div className="text-green-400">
+        <div className="flex justify-between gap-3 text-sm">
+          <div className="text-green-400 min-w-0 break-words">
             <span className="font-medium">{pool.outcomeA}</span>
             <span className="ml-1 text-muted-foreground">{oddsA}%</span>
           </div>
-          <div className="text-red-400">
+          <div className="text-red-400 min-w-0 break-words text-right">
             <span className="mr-1 text-muted-foreground">{oddsB}%</span>
             <span className="font-medium">{pool.outcomeB}</span>
           </div>
         </div>
         <p className="text-xs text-muted-foreground mt-1 text-center">
-          Total pool: {(totalPool / STROOPS_PER_XLM).toLocaleString()} XLM
+          {t('betting.totalPool')} {formatPrice(totalPool / STROOPS_PER_XLM)}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1 text-center">
+          {t('betting.sharesPayoutHint')}
         </p>
       </div>
 
       {/* Transaction fee confirmation modal */}
       <TransactionFeeModal
         isOpen={!!feePrompt}
-        actionName="Place Bet"
+        actionName={t('betting.actionName')}
         feeStroops={feePrompt?.feeStroops || "0"}
         onConfirm={() => {
           feePrompt?.resolve(true);
@@ -396,18 +503,18 @@ export default function BettingSection({
       {/* Wallet info */}
       {address && (
         <div className="p-4 bg-primary/5 rounded-lg border border-primary/20">
-          <div className="flex justify-between items-center">
-            <div>
-              <p className="text-sm text-muted-foreground">Connected Wallet</p>
+          <div className="flex flex-wrap justify-between items-center gap-2">
+            <div className="min-w-0">
+              <p className="text-sm text-muted-foreground">{t('betting.connectedWallet')}</p>
               <TruncatedAddress
                 address={address}
                 className="font-mono text-sm"
               />
             </div>
             <div className="text-right">
-              <p className="text-sm text-muted-foreground">Balance</p>
+              <p className="text-sm text-muted-foreground">{t('betting.balance')}</p>
               <p className="font-bold">
-                {walletBalance?.toFixed(2) ?? "0"} XLM
+                {formatPrice(walletBalance ?? 0)}
               </p>
             </div>
           </div>
@@ -422,26 +529,25 @@ export default function BettingSection({
           <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex gap-2">
             <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
             <p className="text-sm text-yellow-600">
-              Insufficient balance. Minimum bet: {minBetXlm} XLM
+              {t('betting.insufficientBalance').replace('{min}', String(minBetXlm))}
             </p>
           </div>
         )}
 
-      {/* Network mismatch warning */}
-      {isMismatch && (
-        <div className="p-3 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex gap-2">
-          <AlertCircle className="w-5 h-5 text-yellow-500 shrink-0 mt-0.5" />
-          <p className="text-sm text-yellow-600">
-            Please switch to {expectedNetworkName} to place bets.
-          </p>
-        </div>
-      )}
+      {/* Network mismatch warning — the same component the navbar banner uses,
+          so the message and the switch action have one definition. The copy is
+          passed in so it stays localised. */}
+      <NetworkMismatchWarning
+        variant="inline"
+        message={t('betting.networkMismatch').replace('{network}', expectedNetworkName)}
+      />
 
       {/* Amount input */}
       <div>
         <label htmlFor="bet-amount" className="block text-sm font-medium mb-2">
-          Bet Amount (XLM)
+          {t('betting.amountLabel')}
         </label>
+        <div className="relative">
         <input
           id="bet-amount"
           type="number"
@@ -449,7 +555,7 @@ export default function BettingSection({
           step="0.1"
           min={hasMinBet ? String(minBetXlm) : undefined}
           max={hasMaxBet && maxBetXlm !== null ? String(maxBetXlm) : undefined}
-          placeholder="e.g., 10"
+          placeholder={t('betting.amountPlaceholder')}
           value={betAmount}
           onChange={(e) => setBetAmount(e.target.value)}
           onBlur={() => setAmountTouched(true)}
@@ -460,29 +566,46 @@ export default function BettingSection({
               walletBalance < minBetXlm) ||
             isMismatch
           }
-          aria-label="Enter bet amount in XLM"
-          aria-describedby="bet-limits"
-          className="w-full px-4 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
+          aria-label={t('betting.amountAriaLabel')}
+          aria-describedby={describedBy}
+          aria-invalid={showAmountError}
+          className="w-full pl-4 pr-14 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
+          onWheel={(e) => e.currentTarget.blur()}
         />
-        {/* #715 — Quick-select percentage buttons for mobile */}
-        {walletBalance !== null && walletBalance > 0 && (
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground">XLM</span>
+        </div>
+        {/* #715 — Quick-select buttons for mobile */}
+        {quickBetOptions.length > 0 && (
           <div
-            className="flex gap-2 mt-2"
+            className="flex flex-wrap gap-2 mt-2"
             role="group"
-            aria-label="Quick bet percentage"
+            aria-label={t('betting.quickBetAriaLabel')}
           >
-            {[10, 25, 50, 100].map((pct) => {
-              const amt = Math.floor(((walletBalance * pct) / 100) * 10) / 10;
+            {quickBetOptions.map((option) => {
+              const unavailable = option.amount === null;
+              const ariaLabel = unavailable
+                ? t('betting.quickBetUnavailableAriaLabel').replace('{label}', option.label)
+                : t('betting.quickBetAmountAriaLabel')
+                    .replace('{amount}', String(option.amount))
+                    .replace('{label}', option.label);
               return (
                 <button
-                  key={pct}
+                  key={option.key}
                   type="button"
-                  onClick={() => setBetAmount(String(amt))}
-                  disabled={isBetting || isMismatch}
-                  className="flex-1 py-2 text-xs font-semibold rounded-lg border border-border bg-muted/50 hover:bg-primary/10 hover:border-primary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50"
-                  aria-label={`Set bet to ${pct}% of balance`}
+                  onClick={() => {
+                    if (option.amount === null) return;
+                    setBetAmount(String(option.amount));
+                    // Show the validation feedback right away: a quick amount
+                    // that the pool rejects should not leave the user with a
+                    // silently disabled button.
+                    setAmountTouched(true);
+                  }}
+                  disabled={isBetting || isMismatch || unavailable}
+                  title={ariaLabel}
+                  className="flex-1 min-w-[3.5rem] min-h-[44px] py-2 text-xs font-semibold rounded-lg border border-border bg-muted/50 hover:bg-primary/10 hover:border-primary/30 text-muted-foreground hover:text-primary transition-colors disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  aria-label={ariaLabel}
                 >
-                  {pct}%
+                  {option.label}
                 </button>
               );
             })}
@@ -495,21 +618,36 @@ export default function BettingSection({
           </p>
         )}
         <p id="bet-limits" className="text-xs text-muted-foreground mt-2">
-          Bet limits: {hasMinBet ? `Min ${minBetXlm} XLM` : "No minimum"}
+          {t('betting.betLimits')}{' '}
+          {hasMinBet
+            ? t('betting.minLabel').replace('{min}', String(minBetXlm))
+            : t('betting.noMinimum')}
           {hasMaxBet && maxBetXlm !== null
-            ? `, Max ${maxBetXlm} XLM`
-            : ", No maximum"}
+            ? `, ${t('betting.maxLabel').replace('{max}', String(maxBetXlm))}`
+            : `, ${t('betting.noMaximum')}`}
         </p>
+        {showAmountHint && (
+          <p id="bet-amount-hint" className="text-sm text-muted-foreground mt-1">
+            {t('betting.amountHint')}
+          </p>
+        )}
+        {showAmountError && amountError && (
+          <p id="bet-amount-error" role="alert" className="text-sm text-red-500 mt-1">
+            {amountError}
+          </p>
+        )}
       </div>
 
       {/* Bet buttons */}
       <div
-        className="grid grid-cols-2 gap-4"
+        className="grid grid-cols-2 gap-3 sm:gap-4"
         role="group"
-        aria-label="Place your bet"
+        aria-label={t('betting.sectionTitle')}
       >
         <button
-          onClick={() => placeBet(0)}
+          type="button"
+          onClick={() => requestBet(0)}
+          aria-busy={isBetting}
           disabled={
             isBetting ||
             isAmountInvalid ||
@@ -518,19 +656,22 @@ export default function BettingSection({
               walletBalance < minBetXlm) ||
             isMismatch
           }
-          aria-label={`Bet on ${pool.outcomeA}`}
-          className="py-4 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+          aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeA)}
+          aria-pressed={pendingOutcome === 0}
+          className={`min-h-[44px] py-4 px-3 ${pendingOutcome === 0 ? "ring-4 ring-green-300 " : ""}bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-center break-words focus:outline-none focus-visible:ring-4 focus-visible:ring-green-300`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
           ) : isMismatch ? (
-            "Wrong Network"
+            t('betting.wrongNetwork')
           ) : (
-            `Bet on ${pool.outcomeA}`
+            t('betting.betOnButton').replace('{outcome}', pool.outcomeA)
           )}
         </button>
         <button
-          onClick={() => placeBet(1)}
+          type="button"
+          onClick={() => requestBet(1)}
+          aria-busy={isBetting}
           disabled={
             isBetting ||
             isAmountInvalid ||
@@ -539,15 +680,16 @@ export default function BettingSection({
               walletBalance < minBetXlm) ||
             isMismatch
           }
-          aria-label={`Bet on ${pool.outcomeB}`}
-          className="py-4 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
+          aria-label={t('betting.betOnAriaLabel').replace('{outcome}', pool.outcomeB)}
+          aria-pressed={pendingOutcome === 1}
+          className={`min-h-[44px] py-4 px-3 ${pendingOutcome === 1 ? "ring-4 ring-red-300 " : ""}bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2 text-center break-words focus:outline-none focus-visible:ring-4 focus-visible:ring-red-300`}
         >
           {isBetting ? (
             <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" />
           ) : isMismatch ? (
-            "Wrong Network"
+            t('betting.wrongNetwork')
           ) : (
-            `Bet on ${pool.outcomeB}`
+            t('betting.betOnButton').replace('{outcome}', pool.outcomeB)
           )}
         </button>
       </div>
@@ -563,6 +705,51 @@ export default function BettingSection({
           </pre>
         </details>
       )}
+      {betError && !isBetting && (
+        <div
+          role="alert"
+          className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex flex-col gap-2"
+        >
+          <div className="flex gap-2">
+            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
+            <p className="text-sm text-red-400">
+              Your bet on {betError.outcome === 0 ? pool.outcomeA : pool.outcomeB} did not go through: {betError.message}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-7">
+            <button
+              type="button"
+              onClick={() => requestBet(betError.outcome)}
+              disabled={isAmountInvalid || isMismatch}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => setBetError(null)}
+              className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* First-time-user explainer. Kept after the bet controls in the DOM so
+          it does not change the primary keyboard flow, but it is focusable. */}
+      <div className="flex items-center justify-center pt-1">
+        <Tooltip content={t('betting.sharesPayoutInfo')}>
+          <button
+            type="button"
+            aria-label={t('betting.sharesPayoutInfoLabel')}
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary rounded px-1 py-1 transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" aria-hidden="true" />
+            {t('betting.sharesPayoutInfoLabel')}
+          </button>
+        </Tooltip>
+      </div>
     </div>
   );
 }

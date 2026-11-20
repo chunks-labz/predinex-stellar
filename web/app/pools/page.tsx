@@ -14,6 +14,8 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import RouteErrorBoundary from '@/components/RouteErrorBoundary';
+import EmptyState from '@/components/EmptyState';
+import MarketCardSkeleton from '@/components/MarketCardSkeleton';
 import type { ProcessedMarket } from '@/app/lib/market-types';
 import { readMarketListCache, warmMarketListCache } from '@/app/lib/market-list-cache';
 import {
@@ -131,6 +133,14 @@ function PoolsContent() {
     [syncFiltersToUrl],
   );
 
+  // #1537 — committing the search on every keystroke triggered a router.replace
+  // plus a full re-render per character (jank, and history churn on mobile).
+  // Debounce to match SearchBar's 300ms behaviour.
+  useEffect(() => {
+    const timer = setTimeout(() => commitSearch(searchInput), 300);
+    return () => clearTimeout(timer);
+  }, [searchInput, commitSearch]);
+
   const counts = useMemo(() => countPoolsByStatus(markets), [markets]);
   const categoryCounts = useMemo(() => countPoolsByCategory(markets), [markets]);
   const uniqueTags = useMemo(() => getAllUniqueTags(markets), [markets]);
@@ -194,7 +204,6 @@ function PoolsContent() {
                 placeholder="Search by title or description…"
                 onChange={(e) => {
                   setSearchInput(e.target.value);
-                  commitSearch(e.target.value);
                 }}
                 className="w-full rounded-lg border border-border/50 bg-card px-4 py-2 text-sm outline-none focus:border-primary"
                 data-testid="pool-search-input"
@@ -323,15 +332,31 @@ function PoolsContent() {
             </button>
           </div>
         ) : isLoading ? (
-          <p className="text-sm text-muted-foreground" role="status" data-testid="pools-loading">
-            Loading pools…
-          </p>
+          <div
+            role="status"
+            aria-busy="true"
+            data-testid="pools-loading"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+          >
+            <span className="sr-only">Loading pools…</span>
+            {Array.from({ length: 6 }).map((_, index) => (
+              <MarketCardSkeleton key={index} />
+            ))}
+          </div>
         ) : visiblePools.length === 0 ? (
-          <p className="text-sm text-muted-foreground" data-testid="pools-empty">
-            {filtersActive
-              ? 'No pools match your filters.'
-              : 'No pools yet. Create one to get started.'}
-          </p>
+          <div data-testid="pools-empty">
+            <EmptyState
+              message={filtersActive ? 'No pools match your filters.' : 'No pools yet.'}
+              description={
+                filtersActive
+                  ? 'Try widening your search or clearing the active filters.'
+                  : 'Pools are created from the markets page — create one to get started.'
+              }
+              {...(filtersActive
+                ? { actionLabel: 'Clear filters', onAction: clearFilters }
+                : { actionLabel: 'Create pool', actionHref: '/pools/new' })}
+            />
+          </div>
         ) : (
           <div
             className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
@@ -350,7 +375,15 @@ function PoolsContent() {
 export default function PoolsIndexPage() {
   return (
     <RouteErrorBoundary routeName="PoolsIndex">
-      <Suspense fallback={<main className="min-h-screen bg-background text-foreground" />}>
+      {/* #1537 — an empty fallback painted a blank screen on first paint;
+          keep the shell (navbar + background) visible while the page hydrates. */}
+      <Suspense
+        fallback={
+          <main className="min-h-screen bg-background text-foreground">
+            <Navbar />
+          </main>
+        }
+      >
         <PoolsContent />
       </Suspense>
     </RouteErrorBoundary>

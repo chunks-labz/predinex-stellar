@@ -15,14 +15,15 @@ import type { BotConfig } from "./config.js";
 
 const mocks = vi.hoisted(() => ({
   findExpiredUnsettledPools: vi.fn(),
-  getPoolCount: vi.fn(),
+  getLastScanCount: vi.fn(),
   settleAll: vi.fn(),
+  notify: vi.fn(async () => {}),
 }));
 
 vi.mock("./contract-client.js", () => ({
   ContractClient: class {
     findExpiredUnsettledPools = mocks.findExpiredUnsettledPools;
-    getPoolCount = mocks.getPoolCount;
+    getLastScanCount = mocks.getLastScanCount;
   },
 }));
 
@@ -33,7 +34,7 @@ vi.mock("./executor.js", () => ({
   },
 }));
 
-vi.mock("./webhook.js", () => ({ notify: vi.fn(async () => {}) }));
+vi.mock("./webhook.js", () => ({ notify: mocks.notify }));
 
 vi.mock("./logger.js", () => ({
   logger: {
@@ -90,6 +91,14 @@ function makeConfig(overrides: Partial<BotConfig> = {}): BotConfig {
     defaultWinningOutcome: 0,
     oracleUrl: null,
     oracleSecret: null,
+    oracleRequestsPerSecond: 5,
+    oracleRateLimitBurst: 5,
+    oracleMaxConcurrency: 2,
+    oracleRateLimitMode: "wait",
+    oracleRetryMaxAttempts: 3,
+    oracleRetryBaseDelayMs: 500,
+    oracleRetryMaxDelayMs: 10_000,
+    oracleRequestTimeoutMs: 10_000,
     // Resolve outcomes locally so no cycle touches the network.
     oracleFallbackToDefault: true,
     txPollIntervalMs: 3_000,
@@ -109,7 +118,7 @@ function scanReturns(poolIds: number[]): void {
   mocks.findExpiredUnsettledPools.mockResolvedValue(
     poolIds.map((poolId) => ({ poolId, pool: makePool() })),
   );
-  mocks.getPoolCount.mockResolvedValue(Math.max(poolIds.length, 1));
+  mocks.getLastScanCount.mockReturnValue(poolIds.length);
 }
 
 /** Make the mocked executor fail (or succeed) for every candidate it is given. */
@@ -275,5 +284,21 @@ describe("persistent failure tracking", () => {
     await poller.runCycle();
 
     expect(tracked(poller)).toBe(0);
+  });
+
+  it("notifies with failed attempts when every settlement fails", async () => {
+    scanReturns([1, 2]);
+    settlementsResolve(false);
+    const poller = new Poller(makeConfig());
+
+    await poller.runCycle();
+
+    expect(mocks.notify).toHaveBeenCalledOnce();
+    expect(mocks.notify.mock.calls[0][1]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ poolId: 1, success: false }),
+        expect.objectContaining({ poolId: 2, success: false }),
+      ]),
+    );
   });
 });

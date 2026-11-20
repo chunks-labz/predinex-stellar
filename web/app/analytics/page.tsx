@@ -1,5 +1,6 @@
 'use client';
 
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import { useState, useMemo } from 'react';
 import Navbar from '@/components/Navbar';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
@@ -129,7 +130,7 @@ function VolumeBarChart({ data }: { data: { label: string; value: number }[] }) 
             borderRadius: '8px',
             color: 'hsl(var(--foreground))',
           }}
-          formatter={(value: number) => [`${value.toLocaleString()} STX`, 'Volume']}
+          formatter={(value: number) => [`${value.toLocaleString()} ${TOKEN_SYMBOL}`, 'Volume']}
         />
         <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
       </BarChart>
@@ -190,7 +191,7 @@ function ProfitLineChart({ data }: { data: { label: string; value: number }[] })
             borderRadius: '8px',
             color: 'hsl(var(--foreground))',
           }}
-          formatter={(value: number) => [`${value.toLocaleString()} STX`, 'Profit/Loss']}
+          formatter={(value: number) => [`${value.toLocaleString()} ${TOKEN_SYMBOL}`, 'Profit/Loss']}
         />
         <Area
           type="monotone"
@@ -307,13 +308,13 @@ function AnalyticsContent() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             <StatCard
               label="Total Volume"
-              value={`${metrics.totalVolume.toLocaleString()} STX`}
+              value={`${metrics.totalVolume.toLocaleString()} ${TOKEN_SYMBOL}`}
               icon={DollarSign}
               color="text-primary"
             />
             <StatCard
               label="Daily Volume"
-              value={`${metrics.dailyVolume.toLocaleString()} STX`}
+              value={`${metrics.dailyVolume.toLocaleString()} ${TOKEN_SYMBOL}`}
               icon={TrendingUp}
               color="text-accent"
               trend={{ value: 12, isPositive: true }}
@@ -344,13 +345,13 @@ function AnalyticsContent() {
             />
             <StatCard
               label="Avg Pool Size"
-              value={`${Math.round(metrics.averagePoolSize).toLocaleString()} STX`}
+              value={`${Math.round(metrics.averagePoolSize).toLocaleString()} ${TOKEN_SYMBOL}`}
               icon={Target}
               color="text-pink-400"
             />
             <StatCard
               label="Platform Fees"
-              value={`${Math.round(metrics.platformFees).toLocaleString()} STX`}
+              value={`${Math.round(metrics.platformFees).toLocaleString()} ${TOKEN_SYMBOL}`}
               icon={Activity}
               color="text-orange-400"
             />
@@ -440,11 +441,11 @@ function AnalyticsContent() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center py-2 border-b border-border/30">
                   <span className="text-muted-foreground text-sm">Weekly Volume</span>
-                  <span className="font-bold">{metrics.weeklyVolume.toLocaleString()} STX</span>
+                  <span className="font-bold">{metrics.weeklyVolume.toLocaleString()} {TOKEN_SYMBOL}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-border/30">
                   <span className="text-muted-foreground text-sm">Monthly Volume</span>
-                  <span className="font-bold">{metrics.monthlyVolume.toLocaleString()} STX</span>
+                  <span className="font-bold">{metrics.monthlyVolume.toLocaleString()} {TOKEN_SYMBOL}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-border/30">
                   <span className="text-muted-foreground text-sm">Avg Settlement Time</span>

@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId, useRef } from 'react';
 import { CheckCircle, XCircle, Clock, ExternalLink, Copy, Check } from 'lucide-react';
-import { formatCurrency } from '../lib/dashboard-utils';
+import { formatCurrency } from '@/app/lib/dashboard-utils';
+import { useFocusTrap } from '@/app/lib/hooks/useFocusTrap';
+import { useEscapeDismiss } from '@/app/lib/hooks/useEscapeDismiss';
 
 export interface TransactionReceiptData {
   txId: string;
@@ -35,6 +37,12 @@ const NETWORK_EXPLORERS: Record<string, string> = {
 
 export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen }: TransactionReceiptProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const headingId = useId();
+
+  useFocusTrap({ active: isOpen, containerRef });
+  useEscapeDismiss({ active: isOpen && !!onClose, onDismiss: () => onClose?.() });
 
   useEffect(() => {
     if (copied) {
@@ -52,8 +60,15 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
     : undefined;
 
   const copyTxId = async () => {
-    await navigator.clipboard.writeText(receipt.txId);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(receipt.txId);
+      setCopyFailed(false);
+      setCopied(true);
+    } catch {
+      // Clipboard can be unavailable (insecure context, denied permission);
+      // the full hash stays selectable in the receipt.
+      setCopyFailed(true);
+    }
   };
 
   const typeLabels: Record<TransactionReceiptData['type'], string> = {
@@ -67,7 +82,14 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="glass max-w-md w-full rounded-xl overflow-hidden">
+      <div
+        ref={containerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        tabIndex={-1}
+        className="glass max-w-md w-full rounded-xl overflow-hidden outline-none"
+      >
         {/* Header */}
         <div className={`p-6 ${
           receipt.status === 'success' ? 'bg-green-500/10' :
@@ -75,10 +97,15 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
           'bg-blue-500/10'
         }`}>
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Transaction Receipt</h3>
+            <h3 id={headingId} className="text-lg font-semibold">Transaction Receipt</h3>
             {onClose && (
-              <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
-                <XCircle className="w-5 h-5" />
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close transaction receipt"
+              >
+                <XCircle className="w-5 h-5" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -109,6 +136,16 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
               {receipt.status === 'failed' && 'Transaction failed'}
               {receipt.status === 'pending' && 'Transaction pending...'}
             </div>
+            {receipt.status === 'pending' && (
+              <div className="text-xs text-muted-foreground mt-1">
+                Waiting for network confirmation. This usually takes a few seconds.
+              </div>
+            )}
+            {receipt.status === 'failed' && (
+              <div className="text-xs text-muted-foreground mt-1">
+                The transaction did not go through. Check your balance and try again.
+              </div>
+            )}
           </div>
         </div>
 
@@ -118,15 +155,21 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
           <div>
             <div className="text-xs text-muted-foreground mb-1">Transaction ID</div>
             <div className="flex items-center gap-2">
-              <code className="text-xs bg-muted/50 px-2 py-1 rounded flex-1 truncate">
+              <code
+                className={`text-xs bg-muted/50 px-2 py-1 rounded flex-1 ${
+                  copyFailed ? 'break-all select-all' : 'truncate'
+                }`}
+              >
                 {receipt.txId}
               </code>
               <button
+                type="button"
                 onClick={copyTxId}
                 className="p-1 hover:bg-muted/50 rounded transition-colors"
-                title="Copy transaction ID"
+                title={copied ? 'Copied!' : 'Copy transaction ID'}
+                aria-label={copied ? 'Transaction ID copied to clipboard' : 'Copy transaction ID'}
               >
-                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                {copied ? <Check className="w-4 h-4 text-green-500" aria-hidden="true" /> : <Copy className="w-4 h-4" aria-hidden="true" />}
               </button>
               <a
                 href={txUrl}
@@ -134,10 +177,16 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
                 rel="noopener noreferrer"
                 className="p-1 hover:bg-muted/50 rounded transition-colors"
                 title="View on explorer"
+                aria-label="View transaction on Stellar explorer (opens in new tab)"
               >
-                <ExternalLink className="w-4 h-4" />
+                <ExternalLink className="w-4 h-4" aria-hidden="true" />
               </a>
             </div>
+            {copyFailed && (
+              <p role="alert" className="mt-1 text-xs text-red-500">
+                Couldn&apos;t copy automatically — select the ID above to copy it.
+              </p>
+            )}
           </div>
 
           {/* Network */}
@@ -172,7 +221,8 @@ export default function TransactionReceipt({ receipt, onClose, onRefresh, isOpen
           )}
 
           {/* Market Details */}
-          {receipt.marketId && (
+          {/* Pool ids start at 0; `&&` on 0 rendered a stray "0". */}
+          {receipt.marketId !== undefined && (
             <div className="pt-3 border-t border-muted/30">
               <div className="text-xs text-muted-foreground mb-2">Market Details</div>
               <div className="flex justify-between">

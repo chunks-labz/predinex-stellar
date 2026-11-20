@@ -156,6 +156,81 @@ stellar contract build
 
 ---
 
+
+## Local Operation
+
+This section covers how to operate the stack locally for development and testing.
+
+### 1. Running the Settlement Bot
+
+The settlement bot (`bot/`) requires the following environment variables to run against testnet:
+
+```bash
+cd bot
+cp .env.example .env
+```
+
+Edit `.env` with:
+
+```env
+STELLAR_RPC_URL=https://soroban-testnet.stellar.org
+STELLAR_NETWORK=testnet
+CONTRACT_ID=<testnet-contract-id>
+BOT_SECRET_KEY=<your-secret-key> # Must be contract admin
+AUTO_SETTLE_ENABLED=true
+```
+
+Then run the bot:
+
+```bash
+npm install
+npm start
+```
+
+### 2. Pointing Web App to Local/Testnet RPC
+
+To configure the web frontend (`web/`) to use a local or testnet RPC, update your `web/.env.local` file:
+
+```env
+# For Testnet
+NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
+NEXT_PUBLIC_NETWORK=testnet
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=<testnet-contract-id>
+
+# For Local RPC (e.g. stellar quickstart)
+NEXT_PUBLIC_SOROBAN_RPC_URL=http://localhost:8000/soroban/rpc
+NEXT_PUBLIC_NETWORK=standalone
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=<local-contract-id>
+```
+
+### 3. Regenerating Contract Snapshots
+
+When you modify the contract API or events, the stored JSON snapshots in `contracts/predinex/test_snapshots/` will cause noise and test failures. To deliberately regenerate them:
+
+```bash
+cd contracts/predinex
+# Remove the outdated snapshots
+rm -rf test_snapshots/
+# Run tests to generate new snapshots (tests will write fresh .json files)
+UPDATE_EXPECT=1 cargo test
+```
+*Review the `git diff` of the new snapshots carefully before committing.*
+
+### 4. Pre-PR Checks (WASM & Benchmarks)
+
+Before opening a pull request with contract changes, always run the WASM size measurement and concurrency scripts to ensure you haven't introduced size or performance regressions:
+
+```bash
+# Measure WASM size (ensure it stays under limits)
+./scripts/measure-contract-wasm-size.sh
+
+# Run concurrency and benchmark tests
+./scripts/concurrency-test.sh
+cd contracts/predinex && cargo bench
+```
+
+---
+
 ## Common Setup Issues & Solutions
 
 ### Issue: WASM Target Missing
@@ -298,6 +373,31 @@ grep -r "timeout" tests/
 # Run with verbose output
 npm test -- --run --reporter=verbose
 ```
+
+---
+
+## Bot Secret Rotation (Operator & Webhooks)
+
+When operating the Predinex Settlement Bot (`bot/` directory) in production, you may occasionally need to rotate secrets for security compliance or in response to a suspected compromise. 
+
+### Webhook Secrets (`WEBHOOK_SECRET`)
+
+The webhook secret is used to sign outgoing JSON payloads (via HMAC-SHA256). To rotate this secret without dropping events:
+
+1. **Generate a new secret**: (must be at least 16 characters) `openssl rand -hex 32`
+2. **Update receiving servers**: Configure your webhook ingestion endpoints to accept payloads signed by EITHER the old secret or the new secret during the transition window.
+3. **Update bot configuration**: Change `WEBHOOK_SECRET` in your bot's environment variables and restart the bot.
+4. **Remove old secret**: Once the bot is successfully running with the new secret, drop support for the old secret from your receiving servers.
+
+### Operator Keys (`BOT_SECRET_KEY`)
+
+The `BOT_SECRET_KEY` is a Stellar secret key (starting with `S`) used to sign settlement transactions on behalf of the bot. 
+
+1. **Generate a new keypair**: You can use Stellar Lab or the Stellar CLI to generate a new keypair.
+2. **Fund the new account**: Transfer sufficient XLM from the old bot account (or another funding source) to the new public key so it can cover transaction fees.
+3. **Update bot configuration**: Change `BOT_SECRET_KEY` in the bot's environment variables to the new secret key.
+4. **Restart the bot**: The bot will immediately begin using the new key to sign transactions. 
+5. **Drain old account**: (Optional) Transfer any remaining XLM dust from the compromised/old bot wallet to your cold storage or the new bot wallet.
 
 ---
 

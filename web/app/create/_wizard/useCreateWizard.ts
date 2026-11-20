@@ -18,6 +18,7 @@ import {
   type SettlementType,
 } from '@/lib/validators';
 import {
+  defaultDepositDeadline,
   draftFromSavedTemplate,
   loadSavedTemplates,
   type SavedPoolTemplate,
@@ -27,6 +28,12 @@ import type { OnChainPoolTemplate } from '@/app/lib/soroban-template-api';
 export const CREATE_MARKET_DRAFT_KEY = 'predinex_create_market_draft_v2';
 /** @deprecated Use CREATE_MARKET_DRAFT_KEY */
 export const CREATE_POOL_DRAFT_KEY = CREATE_MARKET_DRAFT_KEY;
+
+/** Persisted wizard step so a refresh or navigation returns the creator to
+ *  the step they left off on instead of restarting from step 1.
+ *
+ *  #1059 — draft persistence / "continue where you left off". */
+export const CREATE_WIZARD_STEP_KEY = 'predinex_create_wizard_step_v2';
 
 export type TemplateSource = 'blank' | 'public' | 'saved';
 export type WizardStep = 1 | 2 | 3 | 4 | 5;
@@ -50,6 +57,8 @@ export interface CreatePoolDraft {
   externalLinks: string;
   /** #721 — URL of a cover image shown on pool cards/detail page. */
   coverImage: string;
+  /** Save this configuration as a local template once the pool is created. */
+  saveAsTemplate: boolean;
 }
 
 /** @deprecated Use CreatePoolDraft */
@@ -71,6 +80,7 @@ export const EMPTY_DRAFT: CreatePoolDraft = {
   resolutionCriteria: '',
   externalLinks: '',
   coverImage: '',
+  saveAsTemplate: false,
 };
 
 export type FormErrors = Partial<Record<string, string>>;
@@ -112,6 +122,9 @@ export interface UseCreateWizard {
   isFinalStep: boolean;
   resetDraft: () => void;
   validateAll: () => { valid: boolean; errors: FormErrors };
+  /** #1059 — true when a previously saved draft was restored, so the UI can
+   *  surface a "continue where you left off" affordance. */
+  hasSavedDraft: boolean;
 }
 
 function migrateLegacyDraft(raw: unknown): CreatePoolDraft {
@@ -140,7 +153,10 @@ export function useCreateWizard(): UseCreateWizard {
     EMPTY_DRAFT,
     migrateLegacyDraft
   );
-  const [step, setStep] = useState<WizardStep>(1);
+  const [step, setStep, removeStoredStep] = useLocalStorage<WizardStep>(
+    CREATE_WIZARD_STEP_KEY,
+    1,
+  );
   const [errors, setErrors] = useState<FormErrors>({});
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
@@ -231,7 +247,7 @@ export function useCreateWizard(): UseCreateWizard {
           description: template.description,
           outcomes: [...template.outcomes],
           duration: String(template.duration),
-          depositDeadline: String(Math.min(template.duration - 60, template.duration / 2)),
+          depositDeadline: String(defaultDepositDeadline(template.duration)),
         });
         return true;
       }
@@ -365,10 +381,11 @@ export function useCreateWizard(): UseCreateWizard {
 
   const resetDraft = useCallback(() => {
     clearDraft();
+    removeStoredStep();
     setErrors({});
     setTouched({});
     setStep(1);
-  }, [clearDraft]);
+  }, [clearDraft, removeStoredStep, setStep]);
 
   const validateAll = useCallback(() => {
     const duration = Number.parseInt(draft.duration, 10);
@@ -396,6 +413,15 @@ export function useCreateWizard(): UseCreateWizard {
     return { valid: result.valid, errors: result.errors };
   }, [draft]);
 
+  const hasSavedDraft = useMemo(() => {
+    return (
+      draft.title.trim() !== '' ||
+      draft.description.trim() !== '' ||
+      draft.outcomes.some((outcome) => outcome.trim() !== '') ||
+      draft.duration.trim() !== ''
+    );
+  }, [draft]);
+
   return {
     step,
     draft,
@@ -416,6 +442,7 @@ export function useCreateWizard(): UseCreateWizard {
     isFinalStep: step === 5,
     resetDraft,
     validateAll,
+    hasSavedDraft,
   };
 }
 

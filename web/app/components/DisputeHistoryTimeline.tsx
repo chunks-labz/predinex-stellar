@@ -94,7 +94,15 @@ export default function DisputeHistoryTimeline({
                   <div className="flex flex-wrap items-center gap-3 text-xs">
                     {event.actor && (
                       <span className="text-muted-foreground">
-                        By{' '}
+                        {/*
+                          #1309 — a pool can thaw because its cooling period
+                          elapsed, in which case the actor is the bettor whose bet
+                          reopened it, not an administrator. Labelling that
+                          "By <bettor>" reads as an administrative action.
+                        */}
+                        {event.type === 'unfrozen' && event.trigger === 'autoThaw'
+                          ? 'Auto-thawed by a bet from '
+                          : 'By '}
                         <TruncatedAddress address={event.actor} className="font-mono text-foreground/80" />
                       </span>
                     )}

@@ -22,9 +22,9 @@ export function truncateAddress(address: string, startChars = 6, endChars = 4): 
 /**
  * Formats a number as a currency string.
  * @param amount The number to format
- * @param currency The currency symbol (default: 'STX')
- * @returns Formatted string (e.g., "1,250 STX")
+ * @param currency The currency symbol (default: 'XLM')
+ * @returns Formatted string (e.g., "1,250 XLM")
  */
-export function formatAmount(amount: number, currency = 'STX'): string {
+export function formatAmount(amount: number, currency = 'XLM'): string {
   return `${amount.toLocaleString()} ${currency}`;
 }

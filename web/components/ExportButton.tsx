@@ -37,7 +37,13 @@ export default function ExportButton({ address }: ExportButtonProps) {
           : presetDates(preset);
 
       const params = new URLSearchParams({ address, from, to });
-      const res = await fetch(`/api/export/transactions?${params.toString()}`);
+      const res = await fetch(`/api/export/transactions?${params.toString()}`, {
+        headers: {
+          // #1177 — the export route requires the caller to identify itself and
+          // only serves history for its own address.
+          'x-predinex-wallet-address': address,
+        },
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? 'Export failed');

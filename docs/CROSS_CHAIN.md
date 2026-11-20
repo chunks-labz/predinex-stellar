@@ -36,7 +36,7 @@ The bridge contract address is stored per-mirror and is responsible for:
 - **Source Verification**: Mirrored pools can only be settled after verifying the source chain settlement
 - **Bridge Timeout**: Configurable timeout (`set_bridge_timeout`) prevents stale settlements (default: 24 hours)
 - **Dispute Window**: Configurable dispute period (`set_cross_chain_dispute_window`) for cross-chain settlements (default: 7 days)
-- **Admin-Only Operations**: Only the treasury recipient can create mirrors and trigger cross-chain settlements
+- **Admin-Only Operations**: Only the treasury recipient can create or cancel mirrors and trigger cross-chain settlements
 
 ## Contract Functions
 
@@ -45,6 +45,7 @@ The bridge contract address is stored per-mirror and is responsible for:
 | Function | Description |
 |----------|-------------|
 | `create_pool_mirror(source_pool_id, source_chain, target_chain, bridge_contract)` | Create a mirror for an existing pool |
+| `cancel_pool_mirror(source_pool_id)` | Cancel a pending mirror and free the pool to be mirrored again |
 | `settle_mirror_from_source(source_pool_id, winning_outcome)` | Settle a mirror based on source chain result |
 | `set_bridge_timeout(timeout_secs)` | Set bridge timeout (default: 86400s) |
 | `set_cross_chain_dispute_window(window_secs)` | Set dispute window (default: 7 days) |
@@ -63,9 +64,27 @@ The bridge contract address is stored per-mirror and is responsible for:
 | Event | Description |
 |-------|-------------|
 | `mirror_created` | Emitted when a new pool mirror is created |
+| `mirror_cancelled` | Emitted when a pending pool mirror is cancelled |
 | `cross_chain_settled` | Emitted when a mirror is settled from source |
 | `bridge_timeout_set` | Emitted when bridge timeout is updated |
 | `cross_chain_dispute_window_set` | Emitted when dispute window is updated |
+
+## Cancelling a mirror
+
+A mirror can be cancelled only while it is pending. `cancel_pool_mirror`
+requires the treasury recipient, removes the mirror record and its
+`unified_pool_id` reverse index, and emits `mirror_cancelled`. A settled mirror
+is rejected with `PoolAlreadySettled`: the outcome it carries has already been
+paid out against on the target chain.
+
+The `unified_pool_id` counter is **not** rewound by a cancel. Unified ids stay
+monotonic, so an id retired by a cancellation is never handed to a different
+pool later, and an indexer that has already recorded the id can rely on it
+never reappearing.
+
+Because the contract keys a mirror by source pool, a pool holds at most one
+mirror at a time. Cancelling is what allows the same pool to be mirrored to a
+different target chain afterwards.
 
 ## Adding a New Supported Chain
 

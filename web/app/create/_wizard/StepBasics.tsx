@@ -3,6 +3,7 @@
 import type { ChangeEvent, FocusEvent } from 'react';
 import type { CreatePoolDraft, FormErrors } from './useCreateWizard';
 import { getHelpText, MAX_DESCRIPTION_LENGTH, MAX_TITLE_LENGTH } from '@/lib/validators';
+import { useI18n } from '@/app/lib/i18n';
 
 interface StepBasicsProps {
   draft: CreatePoolDraft;
@@ -33,6 +34,8 @@ export function StepBasics({
   setField,
   blurField,
 }: StepBasicsProps) {
+  const { t } = useI18n();
+
   const onChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setField(e.target.name as keyof CreatePoolDraft, e.target.value);
   };
@@ -44,7 +47,7 @@ export function StepBasics({
     <div className="space-y-5">
       <div>
         <label htmlFor="title" className="block text-sm font-medium mb-1">
-          Pool title
+          {t('create.basics.titleLabel')}
         </label>
         <input
           id="title"
@@ -53,7 +56,7 @@ export function StepBasics({
           value={draft.title}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="e.g. Will Bitcoin be above $100k by end of 2025?"
+          placeholder={t('create.basics.titlePlaceholder')}
           autoComplete="off"
           aria-describedby={errors.title ? 'title-error' : 'title-help'}
           aria-invalid={!!errors.title}
@@ -77,7 +80,7 @@ export function StepBasics({
 
       <div>
         <label htmlFor="description" className="block text-sm font-medium mb-1">
-          Description
+          {t('create.basics.descriptionLabel')}
         </label>
         <textarea
           id="description"
@@ -86,7 +89,7 @@ export function StepBasics({
           value={draft.description}
           onChange={onChange}
           onBlur={onBlur}
-          placeholder="Provide context, resolution criteria, and data sources."
+          placeholder={t('create.basics.descriptionPlaceholder')}
           aria-describedby={errors.description ? 'description-error' : 'description-help'}
           aria-invalid={!!errors.description}
           className={`w-full px-4 py-2 rounded-lg bg-background border focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none ${
@@ -110,7 +113,7 @@ export function StepBasics({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label htmlFor="category" className="block text-sm font-medium mb-1">
-            Category
+            {t('create.basics.categoryLabel')}
           </label>
           <select
             id="category"
@@ -119,19 +122,19 @@ export function StepBasics({
             onChange={onChange}
             className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
           >
-            <option value="crypto">Cryptocurrency</option>
-            <option value="sports">Sports</option>
-            <option value="politics">Politics</option>
-            <option value="tech">Technology</option>
-            <option value="weather">Weather</option>
-            <option value="finance">Finance</option>
-            <option value="other">Other</option>
+            <option value="crypto">{t('create.basics.categoryCrypto')}</option>
+            <option value="sports">{t('create.basics.categorySports')}</option>
+            <option value="politics">{t('create.basics.categoryPolitics')}</option>
+            <option value="tech">{t('create.basics.categoryTech')}</option>
+            <option value="weather">{t('create.basics.categoryWeather')}</option>
+            <option value="finance">{t('create.basics.categoryFinance')}</option>
+            <option value="other">{t('create.basics.categoryOther')}</option>
           </select>
         </div>
 
         <div>
           <label htmlFor="tags" className="block text-sm font-medium mb-1">
-            Tags
+            {t('create.basics.tagsLabel')}
           </label>
           <input
             id="tags"
@@ -139,17 +142,18 @@ export function StepBasics({
             type="text"
             value={draft.tags}
             onChange={onChange}
-            placeholder="weekly, btc, price"
+            placeholder={t('create.basics.tagsPlaceholder')}
             className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
           />
-          <p className="mt-1 text-xs text-muted-foreground">Comma-separated labels for discovery.</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t('create.basics.tagsHint')}</p>
         </div>
       </div>
 
       {/* Resolution Criteria */}
       <div>
         <label htmlFor="resolutionCriteria" className="block text-sm font-medium mb-1">
-          Resolution criteria <span className="text-muted-foreground font-normal">(optional)</span>
+          {t('create.basics.resolutionLabel')}{' '}
+          <span className="text-muted-foreground font-normal">{t('create.basics.resolutionOptional')}</span>
         </label>
         <textarea
           id="resolutionCriteria"
@@ -157,18 +161,19 @@ export function StepBasics({
           rows={3}
           value={draft.resolutionCriteria}
           onChange={onChange}
-          placeholder="Describe exactly what determines each outcome. Markdown supported."
+          placeholder={t('create.basics.resolutionPlaceholder')}
           className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          Immutable once the first bet is placed.
+          {t('create.basics.resolutionHint')}
         </p>
       </div>
 
       {/* Cover Image */}
       <div>
         <label htmlFor="coverImage" className="block text-sm font-medium mb-1">
-          Cover image URL <span className="text-muted-foreground font-normal">(optional)</span>
+          {t('create.basics.coverLabel')}{' '}
+          <span className="text-muted-foreground font-normal">{t('create.basics.resolutionOptional')}</span>
         </label>
         <input
           id="coverImage"
@@ -176,7 +181,7 @@ export function StepBasics({
           type="url"
           value={draft.coverImage}
           onChange={onChange}
-          placeholder="https://example.com/image.png"
+          placeholder={t('create.basics.coverPlaceholder')}
           className="w-full px-4 py-2 rounded-lg bg-background border border-input focus:outline-none focus:ring-2 focus:ring-primary/50"
         />
       </div>

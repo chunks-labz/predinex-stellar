@@ -30,6 +30,8 @@ import type { BotConfig } from "./config.js";
 import type { SettlementAttempt } from "./types.js";
 import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
+import { withWorkerSpan } from "./tracing.js";
+import { withUpstreamTimeout } from "./upstream.js";
 
 /** Base transaction fee in stroops */
 const BASE_FEE = "1000";
@@ -43,7 +45,7 @@ export interface SettleCandidate {
 
 /** Binary pools only support outcome index 0 or 1. */
 function isValidSettlementOutcome(outcome: number): boolean {
-  return outcome >= 0;
+  return Number.isInteger(outcome) && (outcome === 0 || outcome === 1);
 }
 
 /**
@@ -64,6 +66,19 @@ export function validateSettlementOutcomesForTest(
   candidates: SettleCandidate[],
 ): void {
   validateSettlementOutcomes(candidates);
+}
+
+/** Errors after submission must never create a second transaction. */
+export function shouldRetrySettlement(error: unknown): boolean {
+  const message = String(error);
+  return !message.includes("Simulation failed") &&
+    !message.includes("Simulation succeeded but settlement results") &&
+    !message.includes("Simulation returned") &&
+    !message.includes("InvalidOutcome") &&
+    !message.includes("PoolNotExpired") &&
+    !message.includes("PoolAlreadySettled") &&
+    !message.includes("did not confirm within polling window") &&
+    !message.includes("Transaction polling aborted");
 }
 
 /**
@@ -107,7 +122,7 @@ async function submitTransaction(
   signal?: AbortSignal,
 ): Promise<{ hash: string; returnValue: unknown }> {
   assembledTx.sign(keypair);
-  const submission = await server.sendTransaction(assembledTx);
+  const submission = await withUpstreamTimeout(server.sendTransaction(assembledTx), "stellar-rpc", config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000);
 
   if (submission.status === "ERROR") {
     throw new Error(
@@ -126,7 +141,7 @@ async function submitTransaction(
     if (signal?.aborted) {
       throw new Error("Transaction polling aborted");
     }
-    const txResult = await server.getTransaction(hash, { signal });
+    const txResult = await withUpstreamTimeout(server.getTransaction(hash), "stellar-rpc", config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000);
 
     if (txResult.status === rpc.Api.GetTransactionStatus.SUCCESS) {
       return { hash, returnValue: txResult.returnValue };
@@ -158,7 +173,7 @@ async function submitSettleBatch(
   validateSettlementOutcomes(candidates);
 
   const callerAddress = keypair.publicKey();
-  const sourceAccount = await server.getAccount(callerAddress);
+  const sourceAccount = await withUpstreamTimeout(server.getAccount(callerAddress), "stellar-rpc", config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000);
   const contract = new Contract(contractId);
 
   // Build the pools Vec<PoolSettleRequest> as ScVal
@@ -185,7 +200,7 @@ async function submitSettleBatch(
     .build();
 
   // Simulate to get resource estimate and check for errors
-  const simulation = await server.simulateTransaction(tx);
+  const simulation = await withUpstreamTimeout(server.simulateTransaction(tx), "stellar-rpc", config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000);
   if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(`Simulation failed: ${simulation.error}`);
   }
@@ -297,21 +312,26 @@ export class Executor {
   private async settleBatch(
     batch: SettleCandidate[],
   ): Promise<SettlementAttempt[]> {
-    const startMs = Date.now();
+    return withWorkerSpan(
+      "contract.settle_pools",
+      async () => {
+        const startMs = Date.now();
 
-    if (this.config.dryRun) {
-      logger.info("[DRY-RUN] Would settle pools (no transaction submitted)", {
-        poolIds: batch.map((c) => c.poolId),
-      });
-      return batch.map((c) => ({
-        poolId: c.poolId,
-        winningOutcome: c.winningOutcome,
-        dryRun: true,
-        success: true,
-        attemptCount: 0,
-        durationMs: Date.now() - startMs,
-      }));
-    }
+        if (this.config.dryRun) {
+          // Dry runs must apply exactly the same input validation as live submits.
+          validateSettlementOutcomes(batch);
+          logger.info("[DRY-RUN] Would settle pools (no transaction submitted)", {
+            poolIds: batch.map((c) => c.poolId),
+          });
+          return batch.map((c) => ({
+            poolId: c.poolId,
+            winningOutcome: c.winningOutcome,
+            dryRun: true,
+            success: true,
+            attemptCount: 0,
+            durationMs: Date.now() - startMs,
+          }));
+        }
 
     let txHash: string | undefined;
     let attemptCount = 0;
@@ -340,13 +360,9 @@ export class Executor {
           label: `settle_pools batch [${batch.map((c) => c.poolId).join(",")}]`,
           // Don't retry simulation errors — they indicate invalid arguments
           // Don't retry PoolAlreadySettled — another instance settled it first
-          shouldRetry: (err) =>
-            !String(err).includes("Simulation failed") &&
-            !String(err).includes("Simulation succeeded but settlement results") &&
-            !String(err).includes("Simulation returned") &&
-            !String(err).includes("InvalidOutcome") &&
-            !String(err).includes("PoolNotExpired") &&
-            !String(err).includes("PoolAlreadySettled"),
+          // Don't retry after submission when confirmation is ambiguous, or
+          // after an explicit shutdown abort.
+          shouldRetry: shouldRetrySettlement,
         },
       );
 
@@ -399,5 +415,8 @@ export class Executor {
         durationMs: Date.now() - startMs,
       }));
     }
+      },
+      { attributes: { "batch.size": batch.length } },
+    );
   }
 }

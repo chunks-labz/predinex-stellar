@@ -11,7 +11,7 @@ import { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
-import AuthGuard from '@/components/AuthGuard';
+import WalletConnectGate from '@/components/WalletConnectGate';
 import RouteErrorBoundary from '@/components/RouteErrorBoundary';
 import { CreatePoolForm } from '@/components/pools/CreatePoolForm';
 import { predinexReadApi } from '@/lib/contract';
@@ -54,9 +54,15 @@ export default function NewPoolPage() {
   const [redirecting, setRedirecting] = useState(false);
 
   const handleSuccess = useCallback(
-    async ({ txHash }: { txHash: string; poolId: number | null }) => {
-      log.info('Pool created, locating new pool id', { txHash });
+    async ({ txHash, poolId }: { txHash: string; poolId: number | null }) => {
       setRedirecting(true);
+      // Prefer the id decoded from the transaction result. Guessing from the
+      // pool count can land on another creator's pool created concurrently.
+      if (poolId !== null && poolId >= 0) {
+        router.push(`/pools/${poolId}`);
+        return;
+      }
+      log.info('Pool created, locating new pool id', { txHash });
       const newPoolId = await findLatestPoolId();
       if (newPoolId !== null && newPoolId >= 0) {
         router.push(`/pools/${newPoolId}`);
@@ -72,7 +78,7 @@ export default function NewPoolPage() {
     <main className="min-h-screen bg-background text-foreground">
       <Navbar />
       <RouteErrorBoundary routeName="CreatePool">
-        <AuthGuard>
+        <WalletConnectGate>
           <div className="container mx-auto px-4 py-12 max-w-2xl">
             <div className="mb-6">
               <Link
@@ -106,7 +112,7 @@ export default function NewPoolPage() {
               )}
             </section>
           </div>
-        </AuthGuard>
+        </WalletConnectGate>
       </RouteErrorBoundary>
     </main>
   );

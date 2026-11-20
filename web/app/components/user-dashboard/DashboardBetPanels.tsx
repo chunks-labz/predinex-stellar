@@ -1,3 +1,4 @@
+import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import type { UserBet } from '@/app/lib/user-dashboard/types';
 import { formatStxAmount, getBetStatusClasses } from '@/app/lib/user-dashboard/model';
 
@@ -48,7 +49,7 @@ export function DashboardOverviewPanel({ bets, isLoading }: DashboardBetPanelsPr
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
+                <p className="font-bold">{formatStxAmount(bet.amount)} {TOKEN_SYMBOL}</p>
                 <span
                   className={`text-xs px-2 py-1 rounded-full border ${getBetStatusClasses(bet.status)}`}
                 >
@@ -83,7 +84,7 @@ export function DashboardActiveBetsPanel({ bets, isLoading }: DashboardBetPanels
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
+                <p className="font-bold">{formatStxAmount(bet.amount)} {TOKEN_SYMBOL}</p>
                 <p className="text-xs text-muted-foreground">Active</p>
               </div>
             </div>
@@ -115,11 +116,11 @@ export function DashboardHistoryPanel({ bets, isLoading }: DashboardBetPanelsPro
                 <p className="text-sm text-muted-foreground">Bet on: {bet.outcome}</p>
               </div>
               <div className="text-right shrink-0">
-                <p className="font-bold">{formatStxAmount(bet.amount)} STX</p>
+                <p className="font-bold">{formatStxAmount(bet.amount)} {TOKEN_SYMBOL}</p>
                 {bet.winnings !== undefined && (
                   <p className="text-sm font-bold">
                     {bet.status === 'won' ? '+' : '-'}
-                    {formatStxAmount(bet.winnings)} STX
+                    {formatStxAmount(bet.winnings)} {TOKEN_SYMBOL}
                   </p>
                 )}
               </div>

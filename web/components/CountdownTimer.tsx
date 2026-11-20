@@ -17,6 +17,12 @@ interface CountdownTimerProps {
   showIcon?: boolean;
   /** Extra classes applied to the wrapping element. */
   className?: string;
+  /**
+   * Announce the remaining time through a polite live region. Off by default:
+   * a grid of cards would otherwise queue one announcement per card every
+   * minute. Enable it only where a single timer is the focus of the page.
+   */
+  announce?: boolean;
 }
 
 /**
@@ -24,15 +30,16 @@ interface CountdownTimerProps {
  *
  * The visible text decrements every second and tightens its precision as
  * expiry nears ("2d 4h 30m" → "30m 15s"), switching to an amber urgency style
- * under one hour and an "Expired" state at zero. A separate `aria-live` region
- * announces the remaining time at minute granularity so screen readers stay
- * informed without being flooded by per-second updates.
+ * under one hour and an "Expired" state at zero. Screen readers get the
+ * remaining time at minute granularity; with `announce` it is also pushed
+ * through a polite live region, without being flooded by per-second updates.
  */
 export default function CountdownTimer({
   secondsRemaining,
   settled = false,
   showIcon = false,
   className = '',
+  announce = false,
 }: CountdownTimerProps) {
   // Anchor an absolute target time rather than decrementing a counter, so the
   // countdown stays accurate across re-renders and tab backgrounding.
@@ -48,10 +55,12 @@ export default function CountdownTimer({
     const tick = () => {
       const next = Math.round((target - Date.now()) / 1000);
       setRemaining(next > 0 ? next : 0);
+      // Nothing left to count down — stop re-rendering every second.
+      if (next <= 0) window.clearInterval(intervalId);
     };
 
-    tick();
     const intervalId = window.setInterval(tick, 1000);
+    tick();
     return () => window.clearInterval(intervalId);
   }, [secondsRemaining, settled]);
 
@@ -82,7 +91,7 @@ export default function CountdownTimer({
     >
       {showIcon && <Icon className="w-4 h-4 shrink-0" aria-hidden="true" />}
       <span aria-hidden="true">{formatCountdown(remaining)}</span>
-      <span className="sr-only" aria-live="polite">
+      <span className="sr-only" aria-live={announce ? 'polite' : undefined}>
         {expired ? 'Expired' : formatCountdownAccessible(remaining)}
       </span>
     </span>

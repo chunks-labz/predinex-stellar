@@ -1,8 +1,10 @@
 // web/app/embed/pool/[poolId]/page.tsx
 // Embeddable pool widget route – renders a standalone pool card
 // that can be placed inside an <iframe> on any external site.
+import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { PoolEmbedWidget } from '@/components/PoolEmbedWidget';
+import { buildEmbedMetadata } from '@/app/lib/metadata';
 
 interface EmbedPageProps {
   params: Promise<{ poolId: string }>;
@@ -14,6 +16,15 @@ interface EmbedPageProps {
 function pick(value: string | string[] | undefined, fallback: string): string {
   if (Array.isArray(value)) return value[0] ?? fallback;
   return value ?? fallback;
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ poolId: string }>;
+}): Promise<Metadata> {
+  const { poolId } = await params;
+  return buildEmbedMetadata(poolId);
 }
 
 export default async function EmbedPoolPage({ params, searchParams }: EmbedPageProps) {

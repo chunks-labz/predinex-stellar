@@ -20,6 +20,8 @@ import type { BotConfig } from "./config.js";
 import type { Pool, PoolStatus } from "./types.js";
 import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
+import { withWorkerSpan } from "./tracing.js";
+import { withUpstreamTimeout } from "./upstream.js";
 
 /** Maximum ledger sequence validity window for simulation txns (5 min at ~5s/ledger) */
 const SIMULATE_TIMEOUT_SECS = 60;
@@ -38,47 +40,53 @@ async function simulateContractCall(
   args: xdr.ScVal[],
   config: BotConfig,
 ): Promise<unknown> {
-  return withRetry(
-    async () => {
-      const sourceAccount = await server.getAccount(sourcePublicKey);
+  const rpcTimeoutMs = config.rpcTimeoutMs ?? config.upstreamTimeoutMs ?? 15_000;
+  return withWorkerSpan(
+    `contract.call.${functionName}`,
+    () =>
+      withRetry(
+        async () => {
+          const sourceAccount = await withUpstreamTimeout(server.getAccount(sourcePublicKey), "stellar-rpc", rpcTimeoutMs);
 
-      const contract = new Contract(contractId);
-      const tx = new TransactionBuilder(sourceAccount, {
-        fee: "100",
-        networkPassphrase,
-      })
-        .addOperation(contract.call(functionName, ...args))
-        .setTimeout(SIMULATE_TIMEOUT_SECS)
-        .build();
+          const contract = new Contract(contractId);
+          const tx = new TransactionBuilder(sourceAccount, {
+            fee: "100",
+            networkPassphrase,
+          })
+            .addOperation(contract.call(functionName, ...args))
+            .setTimeout(SIMULATE_TIMEOUT_SECS)
+            .build();
 
-      const result = await server.simulateTransaction(tx);
+          const result = await withUpstreamTimeout(server.simulateTransaction(tx), "stellar-rpc", rpcTimeoutMs);
 
-      if (rpc.Api.isSimulationError(result)) {
-        throw new Error(
-          `Simulation error for ${functionName}: ${result.error}`,
-        );
-      }
+          if (rpc.Api.isSimulationError(result)) {
+            throw new Error(
+              `Simulation error for ${functionName}: ${result.error}`,
+            );
+          }
 
-      if (!rpc.Api.isSimulationSuccess(result) || !result.result) {
-        throw new Error(
-          `Simulation returned no result for ${functionName}`,
-        );
-      }
+          if (!rpc.Api.isSimulationSuccess(result) || !result.result) {
+            throw new Error(
+              `Simulation returned no result for ${functionName}`,
+            );
+          }
 
-      return scValToNative(result.result.retval);
-    },
-    {
-      maxRetries: config.maxRetries,
-      baseDelayMs: config.retryBaseDelayMs,
-      label: `simulateContractCall [${functionName}]`,
-      shouldRetry: (err) => {
-        const msg = String(err);
-        return (
-          !msg.includes("Simulation error for") &&
-          !msg.includes("Simulation returned no result")
-        );
-      },
-    },
+          return scValToNative(result.result.retval);
+        },
+        {
+          maxRetries: config.maxRetries,
+          baseDelayMs: config.retryBaseDelayMs,
+          label: `simulateContractCall [${functionName}]`,
+          shouldRetry: (err) => {
+            const msg = String(err);
+            return (
+              !msg.includes("Simulation error for") &&
+              !msg.includes("Simulation returned no result")
+            );
+          },
+        },
+      ),
+    { attributes: { "contract.function": functionName, "contract.id": contractId } },
   );
 }
 
@@ -87,6 +95,9 @@ async function simulateContractCall(
  * Reads pool data without requiring any private key.
  */
 export class ContractClient {
+  /** Next pool id to scan; wraps to 1 after reaching the current pool count. */
+  private scanCursor = 1;
+  private lastScanCount = 0;
   private readonly server: rpc.Server;
   private readonly networkPassphrase: string;
   private readonly contractId: string;
@@ -188,7 +199,7 @@ export class ContractClient {
   }
 
   /**
-   * Scans all pools in batches and returns those that are:
+   * Scans one cursor-based pool window and returns entries that are:
    *   - expired (expiry <= nowSecs)
    *   - status === "Open" (not settled, voided, frozen, etc.)
    *
@@ -200,48 +211,64 @@ export class ContractClient {
     const nowSecs = BigInt(Math.floor(Date.now() / 1000));
     const totalPools = await this.getPoolCount();
 
-    logger.info("Scanning pools", { totalPools, batchSize });
+    logger.info("Scanning pool window", {
+      totalPools,
+      batchSize,
+      scanCursor: this.scanCursor,
+    });
 
     if (totalPools === 0) {
       logger.info("No pools found, nothing to settle");
+      this.scanCursor = 1;
+      this.lastScanCount = 0;
       return [];
     }
 
     const expired: Array<{ poolId: number; pool: Pool }> = [];
-    // Pool IDs start at 1
-    let startId = 1;
+    // Scan one bounded window per cycle. Repeated cycles eventually cover all
+    // pools without work growing with the lifetime pool count.
+    const startId = this.scanCursor > totalPools ? 1 : this.scanCursor;
+    const count = Math.min(batchSize, totalPools - startId + 1);
+    logger.debug("Fetching pool batch", { startId, count });
+    const batch = await this.getPoolsBatch(startId, count);
+    this.lastScanCount = batch.length;
 
-    while (startId <= totalPools) {
-      const count = Math.min(batchSize, totalPools - startId + 1);
+    for (let i = 0; i < batch.length; i++) {
+      const pool = batch[i];
+      const poolId = startId + i;
 
-      logger.debug("Fetching pool batch", { startId, count });
+      if (!pool) continue;
 
-      const batch = await this.getPoolsBatch(startId, count);
+      const isOpen = pool.status.tag === "Open";
+      const isExpired = pool.expiry <= nowSecs;
 
-      for (let i = 0; i < batch.length; i++) {
-        const pool = batch[i];
-        const poolId = startId + i;
-
-        if (!pool) continue;
-
-        const isOpen = pool.status.tag === "Open";
-        const isExpired = pool.expiry <= nowSecs;
-
-        if (isOpen && isExpired) {
-          logger.debug("Found expired unsettled pool", {
-            poolId,
-            expiry: pool.expiry.toString(),
-            nowSecs: nowSecs.toString(),
-            participant_count: pool.participant_count,
-          });
-          expired.push({ poolId, pool });
-        }
+      if (isOpen && isExpired) {
+        logger.debug("Found expired unsettled pool", {
+          poolId,
+          expiry: pool.expiry.toString(),
+          nowSecs: nowSecs.toString(),
+          participant_count: pool.participant_count,
+        });
+        expired.push({ poolId, pool });
       }
-
-      startId += count;
     }
 
+    const nextId = startId + count;
+    this.scanCursor = nextId > totalPools ? 1 : nextId;
+
+    logger.debug("Pool scan cursor advanced", {
+      scannedFrom: startId,
+      scannedCount: this.lastScanCount,
+      nextPoolId: this.scanCursor,
+      totalPools,
+    });
+
     return expired;
+  }
+
+  /** Number of pool records inspected by the most recent bounded scan. */
+  getLastScanCount(): number {
+    return this.lastScanCount;
   }
 
   /**
@@ -255,7 +282,7 @@ export class ContractClient {
     { healthy: true; latestLedger: number } | { healthy: false; error: string }
   > {
     try {
-      const health = await this.server.getHealth();
+      const health = await withUpstreamTimeout(this.server.getHealth(), "stellar-rpc", this.config.rpcTimeoutMs ?? this.config.upstreamTimeoutMs ?? 15_000);
       return { healthy: true, latestLedger: health.latestLedger };
     } catch (err) {
       return { healthy: false, error: String(err) };

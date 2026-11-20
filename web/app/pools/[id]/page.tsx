@@ -10,8 +10,8 @@ import type { Pool } from "../../lib/adapters/types";
 import type { PoolExtendedMetadata } from "../../lib/soroban-read-api";
 import Navbar from '@/components/Navbar';
 import CountdownTimer from '@/components/CountdownTimer';
-import { fetchCurrentBlockHeightLive } from "../../lib/market-utils";
-import { blocksToSeconds } from "../../lib/countdown-utils";
+import { secondsUntil } from "../../lib/countdown-utils";
+import { formatOdds, formatPayout, formatTokenUnits, stroopsToUnits } from "../../lib/formatting";
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import PoolExportButton from "../../../components/PoolExportButton";
 import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
@@ -46,8 +46,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const { address: stxAddress } = useWallet();
 
     const [pool, setPool] = useState<Pool | null>(null);
-    const [currentBlockHeight, setCurrentBlockHeight] = useState<number | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+        const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [userBet, setUserBet] = useState<{ amountA: number; amountB: number } | null>(null);
     const [extMetadata, setExtMetadata] = useState<PoolExtendedMetadata | null>(null);
@@ -117,22 +116,34 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
         fetchUserBet();
     }, [fetchUserBet]);
 
-    useEffect(() => {
-        let cancelled = false;
-        fetchCurrentBlockHeightLive()
-            .then(({ height }) => {
-                if (!cancelled && height > 0) setCurrentBlockHeight(height);
-            })
-            .catch(() => {});
-        return () => { cancelled = true; };
-    }, []);
+    // #1538 — manual retry for the failed-to-load state below, so a transient
+    // RPC hiccup does not leave the user stuck on an error screen.
+    const handleRetry = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            await fetchPool();
+        } catch (e) {
+            if (mountedRef.current) {
+                setError(e instanceof Error ? e.message : 'Failed to load pool');
+            }
+        } finally {
+            if (mountedRef.current) setIsLoading(false);
+        }
+    }, [fetchPool]);
 
-    // Auto-refresh every 10 seconds.
+
+    // Auto-refresh every 10 seconds and announce updates to screen readers.
     useEffect(() => {
         const interval = setInterval(async () => {
             try {
                 await fetchPool();
                 await fetchUserBet();
+                // Announce the update to screen readers
+                const liveRegion = document.getElementById('live-pool-update');
+                if (liveRegion) {
+                    liveRegion.textContent = 'Pool updated';
+                }
             } catch (e) {
                 log.error('Auto-refresh failed:', e);
             }
@@ -144,20 +155,35 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     if (isLoading) return <LoadingSkeleton />;
 
     // Error state (no pool data).
+    // #1538 — a fetch failure is not proof that the pool does not exist, so it
+    // must not claim "Pool Not Found"; that drives users away from a market
+    // that is still live. The true not-found branch (below) keeps that copy.
     if (error && !pool) {
         return (
             <main className="min-h-screen bg-background text-foreground">
                 <Navbar />
                 <div className="pt-32 flex flex-col items-center justify-center min-h-[50vh] px-4">
                     <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-                    <h2 className="text-xl font-semibold text-red-500 mb-2">Pool Not Found</h2>
+                    <h2 className="text-xl font-semibold text-red-500 mb-2">Couldn&apos;t load this pool</h2>
                     <p className="text-muted-foreground text-center max-w-md mb-6">{error}</p>
-                    <Link
-                        href="/markets"
-                        className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
-                    >
-                        Back to Markets
-                    </Link>
+                    <div className="flex flex-wrap items-center justify-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                void handleRetry();
+                            }}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+                            Retry
+                        </button>
+                        <Link
+                            href="/markets"
+                            className="px-4 py-2 border border-border rounded-lg hover:bg-muted/50 transition-colors"
+                        >
+                            Back to Markets
+                        </Link>
+                    </div>
                 </div>
             </main>
         );
@@ -186,8 +212,10 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     }
 
     const totalVolume = pool.totalA + pool.totalB;
-    const oddsA = totalVolume > 0 ? ((pool.totalA / totalVolume) * 100).toFixed(1) : '50.0';
-    const oddsB = totalVolume > 0 ? ((pool.totalB / totalVolume) * 100).toFixed(1) : '50.0';
+    const oddsAValue = totalVolume > 0 ? (pool.totalA / totalVolume) * 100 : 50;
+    const oddsBValue = totalVolume > 0 ? (pool.totalB / totalVolume) * 100 : 50;
+    const oddsA = formatOdds(oddsAValue);
+    const oddsB = formatOdds(oddsBValue);
 
     const userHasPosition = userBet && (userBet.amountA > 0 || userBet.amountB > 0);
     const userWonBet = pool.settled && userBet &&
@@ -204,6 +232,14 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground mb-4">
                         <RefreshCw className="w-3 h-3" />
                         Updates every 10s &middot; Pool #{poolId}
+                    </div>
+
+                    {/* Live region for price/volume updates - announces on query, not every tick.
+                        #1538 — `hidden` (display:none) removes an element from the accessibility
+                        tree, so the announcement never reached screen readers. */}
+                    <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+                        <span>Live pool update</span>
+                        <span id="live-pool-update" />
                     </div>
 
                     {/* Header */}
@@ -241,7 +277,7 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <TrendingUp className="w-5 h-5 mx-auto mb-2 text-primary" />
                             <p className="text-sm text-muted-foreground">Total Volume</p>
-                            <p className="font-bold">{(totalVolume / 1_000_000).toLocaleString()} STX</p>
+                            <p className="font-bold">{formatTokenUnits(stroopsToUnits(totalVolume))}</p>
                         </div>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Users className="w-5 h-5 mx-auto mb-2 text-accent" />
@@ -253,15 +289,12 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         <div className="bg-muted/50 p-4 rounded-lg text-center">
                             <Clock className="w-5 h-5 mx-auto mb-2 text-yellow-500" />
                             <p className="text-sm text-muted-foreground">Expires</p>
-                            {currentBlockHeight !== null ? (
-                                <CountdownTimer
-                                    className="font-bold justify-center"
-                                    secondsRemaining={blocksToSeconds(pool.expiry - currentBlockHeight)}
-                                    settled={pool.settled}
-                                />
-                            ) : (
-                                <p className="font-bold">Block {pool.expiry}</p>
-                            )}
+                            <CountdownTimer
+                                className="font-bold justify-center"
+                                secondsRemaining={secondsUntil(pool.expiry)}
+                                settled={pool.settled}
+                                announce
+                            />
                         </div>
                     </div>
 
@@ -272,16 +305,16 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                         <div className="flex h-4 rounded-full overflow-hidden">
                             <div
                                 className="bg-green-500 transition-all"
-                                style={{ width: `${oddsA}%` }}
+                                style={{ width: `${oddsAValue}%` }}
                             />
                             <div
                                 className="bg-red-500 transition-all"
-                                style={{ width: `${oddsB}%` }}
+                                style={{ width: `${oddsBValue}%` }}
                             />
                         </div>
                         <div className="flex justify-between mt-2 text-sm">
-                            <span className="text-green-400">{pool.outcomeA}: {oddsA}%</span>
-                            <span className="text-red-400">{pool.outcomeB}: {oddsB}%</span>
+                            <span className="text-green-400">{pool.outcomeA}: {oddsA}</span>
+                            <span className="text-red-400">{pool.outcomeB}: {oddsB}</span>
                         </div>
                     </div>
                     )}
@@ -303,11 +336,11 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Total A Bets</span>
-                                <p className="font-medium">{(pool.totalA / 1_000_000).toLocaleString()} STX</p>
+                                <p className="font-medium">{formatTokenUnits(stroopsToUnits(pool.totalA))}</p>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Total B Bets</span>
-                                <p className="font-medium">{(pool.totalB / 1_000_000).toLocaleString()} STX</p>
+                                <p className="font-medium">{formatTokenUnits(stroopsToUnits(pool.totalB))}</p>
                             </div>
                             <div>
                                 <span className="text-muted-foreground">Participants</span>
@@ -379,16 +412,16 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className={`p-3 rounded-lg ${userBet!.amountA > 0 ? 'bg-green-500/10 border border-green-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeA}</p>
-                                    <p className="text-xl font-bold">{(userBet!.amountA / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{formatPayout(stroopsToUnits(userBet!.amountA))}</p>
                                 </div>
                                 <div className={`p-3 rounded-lg ${userBet!.amountB > 0 ? 'bg-red-500/10 border border-red-500/20' : 'bg-muted/50'}`}>
                                     <p className="text-sm text-muted-foreground">{pool.outcomeB}</p>
-                                    <p className="text-xl font-bold">{(userBet!.amountB / 1_000_000).toFixed(2)} STX</p>
+                                    <p className="text-xl font-bold">{formatPayout(stroopsToUnits(userBet!.amountB))}</p>
                                 </div>
                             </div>
                             <div className="mt-3 pt-3 border-t border-primary/20 flex justify-between items-center">
                                 <span className="text-sm text-muted-foreground">Total Staked</span>
-                                <span className="font-bold">{((userBet!.amountA + userBet!.amountB) / 1_000_000).toFixed(2)} STX</span>
+                                <span className="font-bold">{formatPayout(stroopsToUnits(userBet!.amountA + userBet!.amountB))}</span>
                             </div>
                             {pool.settled && userWonBet && (
                                 <div className="mt-2 text-sm text-green-400">

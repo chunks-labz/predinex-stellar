@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { predinexReadApi } from '@/app/lib/adapters/predinex-read-api';
-import { BarChart3, Users, Layers, Activity, AlertCircle } from 'lucide-react';
+import { BarChart3, CheckCircle, Layers, Activity, AlertCircle } from 'lucide-react';
 import { createScopedLogger } from '@/app/lib/logger';
+import { formatTokenAmountCompact } from '@/app/lib/formatting';
 import Card from './ui/Card';
 
 const log = createScopedLogger('PlatformStats');
@@ -13,6 +14,7 @@ export default function PlatformStats() {
         totalVolume: 0,
         activeMarkets: 0,
         totalPools: 0,
+        settledMarkets: 0,
         isLoaded: false
     });
     const [error, setError] = useState<string | null>(null);
@@ -26,6 +28,7 @@ export default function PlatformStats() {
                     totalVolume: volume,
                     activeMarkets: markets.filter(m => !m.settled).length,
                     totalPools: markets.length,
+                    settledMarkets: markets.filter(m => m.settled).length,
                     isLoaded: true
                 });
             } catch (err) {
@@ -56,11 +59,20 @@ export default function PlatformStats() {
         );
     }
 
+    // #1540 — "Community 2.4k+" was a hardcoded fabrication with no data source,
+    // and Total Volume printed raw stroops (10^7 per token) with a hardcoded
+    // "XLM". Both cards now report values derived from the same read API call,
+    // with the volume converted and suffixed by the configured token symbol.
     const items = [
-        { label: 'Total Volume', value: `${stats.totalVolume.toLocaleString()} XLM`, icon: Activity, color: 'text-primary' },
+        {
+            label: 'Total Volume',
+            value: formatTokenAmountCompact(BigInt(Math.round(stats.totalVolume))),
+            icon: Activity,
+            color: 'text-primary',
+        },
         { label: 'Active Markets', value: stats.activeMarkets, icon: Layers, color: 'text-accent' },
+        { label: 'Settled Markets', value: stats.settledMarkets, icon: CheckCircle, color: 'text-green-400' },
         { label: 'Total Pools', value: stats.totalPools, icon: BarChart3, color: 'text-purple-400' },
-        { label: 'Community', value: '2.4k+', icon: Users, color: 'text-green-400' },
     ];
 
     return (

@@ -5,7 +5,7 @@ import { STACKS_MAINNET, STACKS_TESTNET, type StacksNetwork } from "@stacks/netw
 import { UserBet, BetHistory, DashboardData } from "./market-types";
 import { PoolData } from "./market-types";
 import { fetchAllPools, getEnhancedPool } from "./enhanced-stacks-api";
-import { getCurrentBlockHeight } from './market-utils';
+import { currentTimestampSeconds } from './market-utils';
 import {
   calculatePortfolio, 
   calculatePotentialWinnings, 
@@ -16,6 +16,7 @@ import {
   calculateBetProfitLoss
 } from "./dashboard-utils";
 import { getRuntimeConfig } from "./runtime-config";
+import { stroopsToUnits } from "./formatting";
 import { createScopedLogger } from "./logger";
 
 const log = createScopedLogger('dashboard-api');
@@ -26,48 +27,66 @@ function getStacksNetwork(): StacksNetwork {
 }
 
 /**
- * Get all user bets for a specific address
+ * Get all user bets for a specific address using batched reads.
+ * 
+ * This function now uses the batched read API to fetch user bets across
+ * multiple pools concurrently, reducing RPC fan-out from O(n) sequential
+ * calls to O(1) batch with parallel execution.
  */
 export async function getUserBets(userAddress: string): Promise<UserBet[]> {
   try {
-    const cfg = getRuntimeConfig();
-    const network = getStacksNetwork();
     // Get all pools to check for user bets
     const pools = await fetchAllPools();
+    const poolIds = pools.map(p => p.poolId);
+    
+    if (poolIds.length === 0) {
+      return [];
+    }
+
+    log.debug(`[getUserBets] Fetching bets for ${poolIds.length} pools using batched API`);
+    
+    // Use batched read API to fetch all user bets concurrently
+    const { fetchUserBetsBatched, fetchPoolsBatched } = await import('./adapters/batched-read-api');
+    const [poolResults, betResults] = await Promise.all([
+      fetchPoolsBatched(poolIds),
+      fetchUserBetsBatched(poolIds, userAddress),
+    ]);
+
+    // Create a map of poolId -> pool for easy lookup
+    const poolMap = new Map(
+      poolResults
+        .filter(r => r.pool !== null)
+        .map(r => [r.poolId, r.pool!])
+    );
+
     const userBets: UserBet[] = [];
     
-    for (const pool of pools) {
-      try {
-        const result = await fetchCallReadOnlyFunction({
-          contractAddress: cfg.contract.address,
-          contractName: cfg.contract.name,
-          functionName: 'get_user_bet',
-          functionArgs: [uintCV(pool.poolId), principalCV(userAddress)],
-          senderAddress: cfg.contract.address,
-          network,
-        });
+    // Process bet results
+    for (const betResult of betResults) {
+      if (!betResult.bet) continue;
+      
+      const pool = poolMap.get(betResult.poolId);
+      if (!pool) {
+        log.warn(`[getUserBets] Pool ${betResult.poolId} not found for user bet`);
+        continue;
+      }
 
-        const betData = cvToValue(result, true);
-        if (betData && (betData['amount-a'] > 0 || betData['amount-b'] > 0)) {
-          // User has bets in this pool
-          const amountA = BigInt(betData['amount-a'] || 0);
-          const amountB = BigInt(betData['amount-b'] || 0);
-          
-          if (amountA > 0) {
-            const bet = await createUserBet(pool, userAddress, 'A', amountA);
-            if (bet) userBets.push(bet);
-          }
-          
-          if (amountB > 0) {
-            const bet = await createUserBet(pool, userAddress, 'B', amountB);
-            if (bet) userBets.push(bet);
-          }
-        }
-      } catch (error) {
-        log.error(`Failed to get user bet for pool ${pool.poolId}`, error);
+      const betData = betResult.bet as any;
+      const amountA = BigInt(betData['amount-a'] || betData.amountA || 0);
+      const amountB = BigInt(betData['amount-b'] || betData.amountB || 0);
+      
+      if (amountA > 0) {
+        const bet = await createUserBetFromPool(pool, userAddress, 'A', amountA);
+        if (bet) userBets.push(bet);
+      }
+      
+      if (amountB > 0) {
+        const bet = await createUserBetFromPool(pool, userAddress, 'B', amountB);
+        if (bet) userBets.push(bet);
       }
     }
     
+    log.debug(`[getUserBets] Found ${userBets.length} user bets across ${poolIds.length} pools`);
     return userBets;
   } catch (error) {
     log.error('Failed to get user bets', error);
@@ -76,16 +95,17 @@ export async function getUserBets(userAddress: string): Promise<UserBet[]> {
 }
 
 /**
- * Create a UserBet object from pool data and bet information
+ * Create a UserBet object from pool data and bet information.
+ * Renamed from createUserBet to createUserBetFromPool for clarity.
  */
-async function createUserBet(
-  pool: PoolData,
+async function createUserBetFromPool(
+  pool: any,
   userAddress: string,
   outcome: 'A' | 'B',
   betAmount: bigint
 ): Promise<UserBet | null> {
   try {
-    const currentBlockHeight = getCurrentBlockHeight();
+    const nowSeconds = currentTimestampSeconds();
     
     // Determine market status
     let status: 'active' | 'won' | 'lost' | 'expired' = 'active';
@@ -109,7 +129,7 @@ async function createUserBet(
         const alreadyClaimed = await checkIfClaimed(pool.poolId, userAddress);
         claimStatus = alreadyClaimed ? 'claimed' : 'unclaimed';
       }
-    } else if (currentBlockHeight > pool.expiry) {
+    } else if (nowSeconds >= pool.expiry) {
       status = 'expired';
     }
     
@@ -128,18 +148,25 @@ async function createUserBet(
       outcome
     );
     
+    // #1539 — on-chain values are stroops (10^7 per token) but this DTO is
+    // rendered directly by formatCurrency(), which never scales. Leaving the raw
+    // integers here showed "1,000,000 XLM" for a 1 XLM bet. Convert once, at the
+    // boundary, so every downstream consumer (ActiveBetsCard, ClaimWinnings,
+    // BetHistoryTable, calculatePortfolio) shares one consistent unit.
     return {
       poolId: pool.poolId,
       marketTitle: pool.title,
       outcomeChosen: outcome,
       outcomeName: outcome === 'A' ? pool.outcomeAName : pool.outcomeBName,
-      amountBet: Number(betAmount),
+      amountBet: Number(stroopsToUnits(betAmount)),
       betTimestamp: pool.createdAt, // Mock: use pool creation time
       currentOdds,
-      potentialWinnings,
+      potentialWinnings:
+        potentialWinnings > 0 ? stroopsToUnits(BigInt(Math.round(potentialWinnings))) : 0,
       status,
       claimStatus,
-      claimableAmount: claimableAmount > 0 ? claimableAmount : undefined
+      claimableAmount:
+        claimableAmount > 0 ? stroopsToUnits(BigInt(Math.round(claimableAmount))) : undefined
     };
   } catch (error) {
     log.error('Failed to create user bet', error);

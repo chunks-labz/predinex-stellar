@@ -19,6 +19,7 @@ import { logger } from "./logger.js";
 // Mock external dependencies for Poller unit testing
 const mocks = vi.hoisted(() => ({
   findExpiredUnsettledPools: vi.fn().mockResolvedValue([]),
+  getLastScanCount: vi.fn().mockReturnValue(0),
   getPoolCount: vi.fn().mockResolvedValue(0),
   settleAll: vi.fn().mockResolvedValue([]),
 }));
@@ -26,6 +27,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("./contract-client.js", () => ({
   ContractClient: class {
     findExpiredUnsettledPools = mocks.findExpiredUnsettledPools;
+    getLastScanCount = mocks.getLastScanCount;
     getPoolCount = mocks.getPoolCount;
   },
 }));
@@ -68,6 +70,14 @@ function makeValidConfig(): { config: BotConfig; secretKey: string; publicKey: s
     oracleUrl: null,
     oracleSecret: null,
     oracleFallbackToDefault: false,
+    oracleRequestsPerSecond: 5,
+    oracleRateLimitBurst: 5,
+    oracleMaxConcurrency: 2,
+    oracleRateLimitMode: "wait",
+    oracleRetryMaxAttempts: 3,
+    oracleRetryBaseDelayMs: 500,
+    oracleRetryMaxDelayMs: 10_000,
+    oracleRequestTimeoutMs: 10_000,
     txPollIntervalMs: 3_000,
     txPollMaxAttempts: 30,
     maxRetries: 3,

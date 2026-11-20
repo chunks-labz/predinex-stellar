@@ -30,10 +30,13 @@ interface MarketFilterBarProps {
 
 const statusOptions: Array<{ value: MarketStatusFilter; label: string }> = [
   { value: 'all', label: 'All statuses' },
-  { value: 'open', label: 'Open' },
+  // MarketCard badges the live state "Active" — keep the filter label in step
+  // with it so users are not choosing between two names for the same state.
+  { value: 'open', label: 'Active' },
   { value: 'settled', label: 'Settled' },
   { value: 'disputed', label: 'Disputed' },
   { value: 'frozen', label: 'Frozen' },
+  { value: 'expired', label: 'Expired' },
 ];
 
 const timeRangeOptions: Array<{ value: TimeRangeFilter; label: string }> = [
@@ -94,6 +97,11 @@ export default function MarketFilterBar({
         <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
           <SlidersHorizontal className="h-4 w-4 text-primary" />
           Filters
+          {hasActiveFilters && (
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
+              Active
+            </span>
+          )}
         </div>
         <button
           type="button"

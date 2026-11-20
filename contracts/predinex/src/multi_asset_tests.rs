@@ -54,6 +54,7 @@ fn setup_ma() -> MaEnv<'static> {
 
 /// Helper: create a basic two-outcome multi-asset pool with base + alt tokens.
 fn make_ma_pool(t: &MaEnv, creator: &Address) -> u32 {
+    t.base_admin.mint(creator, &(MIN_CREATOR_DEPOSIT * 10));
     let mut allowed = Vec::new(&t.env);
     allowed.push_back(t.base_token.clone());
     allowed.push_back(t.alt_token.clone());
@@ -71,6 +72,7 @@ fn make_ma_pool(t: &MaEnv, creator: &Address) -> u32 {
         &3_600u64,
         &allowed,
         &None,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     )
 }
@@ -220,6 +222,7 @@ fn ma_4_place_bet_without_exchange_rate_fails() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
     assert_eq!(create_result, Err(Ok(ContractError::ExchangeRateNotSet)));
@@ -517,22 +520,10 @@ fn ma_867_1_leaderboard_populated_after_multi_asset_bets() {
     t.base_admin.mint(&user_a, &2_000i128);
     t.base_admin.mint(&user_b, &3_000i128);
 
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &1_000i128,
-        &t.base_token,
-        &None,
-    );
-    t.client.place_multi_asset_bet(
-        &user_b,
-        &pool_id,
-        &1u32,
-        &2_000i128,
-        &t.base_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &1_000i128, &t.base_token, &None);
+    t.client
+        .place_multi_asset_bet(&user_b, &pool_id, &1u32, &2_000i128, &t.base_token, &None);
 
     let leaderboard = t.client.get_leaderboard(&pool_id, &50u32, &None::<Address>);
     assert_eq!(
@@ -564,43 +555,21 @@ fn ma_867_2_participant_count_matches_pool_bettors() {
     t.alt_admin.mint(&user_a, &100i128);
     t.alt_admin.mint(&user_b, &200i128);
 
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &50i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &50i128, &t.alt_token, &None);
 
     let count_after_first = t.client.get_participant_count(&pool_id);
     assert_eq!(count_after_first, 1, "one unique bettor after first bet");
 
-    t.client.place_multi_asset_bet(
-        &user_b,
-        &pool_id,
-        &1u32,
-        &100i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_b, &pool_id, &1u32, &100i128, &t.alt_token, &None);
 
     let count_after_second = t.client.get_participant_count(&pool_id);
-    assert_eq!(
-        count_after_second,
-        2,
-        "two unique bettors after second bet"
-    );
+    assert_eq!(count_after_second, 2, "two unique bettors after second bet");
 
     // A second bet from user_a should NOT increase the count.
-    t.client.place_multi_asset_bet(
-        &user_a,
-        &pool_id,
-        &0u32,
-        &30i128,
-        &t.alt_token,
-        &None,
-    );
+    t.client
+        .place_multi_asset_bet(&user_a, &pool_id, &0u32, &30i128, &t.alt_token, &None);
 
     let count_after_repeat = t.client.get_participant_count(&pool_id);
     assert_eq!(
@@ -623,6 +592,9 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
         .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
     t.client
         .set_token_exchange_rate(&t.treasury, &t.alt_token, &10_000i128);
+
+    // Fund the creator for two pool deposits.
+    t.base_admin.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     // Single-asset pool.
     let single_id = t.client.create_pool(
@@ -652,6 +624,7 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
 
@@ -696,10 +669,7 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
         "parity: single and multi normalized payouts must match"
     );
     assert_eq!(multi_res.per_asset.len(), 1);
-    assert_eq!(
-        multi_res.per_asset.get(0).unwrap().amount,
-        single_winnings
-    );
+    assert_eq!(multi_res.per_asset.get(0).unwrap().amount, single_winnings);
 
     // Direct helper parity: compute_winnings vs per-token calc must agree.
     let fee_bps = 200i128; // default protocol fee
@@ -712,7 +682,8 @@ fn parity_single_vs_multi_asset_same_normalized_payout() {
     .unwrap();
     assert_eq!(w1, w2);
     // Multi per-token helper should also match.
-    let w_multi = PredinexContract::compute_payout_for_outcome(3_000, 9_000, 3_000, fee_bps).unwrap();
+    let w_multi =
+        PredinexContract::compute_payout_for_outcome(3_000, 9_000, 3_000, fee_bps).unwrap();
     assert_eq!(w1, w_multi);
 }
 
@@ -731,6 +702,9 @@ fn parity_single_vs_multi_mixed_token_normalized_parity() {
         .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
     t.client
         .set_token_exchange_rate(&t.treasury, &t.alt_token, &5_000i128);
+
+    // Fund the creator for two pool deposits.
+    t.base_admin.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
 
     // Single-asset pool: 100 on 0, 100 on 1 => total 200, net 196, winner gets 196.
     let single_id = t.client.create_pool(
@@ -761,6 +735,7 @@ fn parity_single_vs_multi_mixed_token_normalized_parity() {
         &3_600u64,
         &allowed,
         &None::<String>,
+        &MIN_CREATOR_DEPOSIT,
         &None::<u64>,
     );
 
@@ -807,7 +782,10 @@ fn parity_single_vs_multi_mixed_token_normalized_parity() {
     let mut normalized_sum: i128 = 0;
     for i in 0..multi_res.per_asset.len() {
         let entry = multi_res.per_asset.get(i).unwrap();
-        let rate = t.client.get_token_exchange_rate(&entry.token).unwrap_or(10_000);
+        let rate = t
+            .client
+            .get_token_exchange_rate(&entry.token)
+            .unwrap_or(10_000);
         normalized_sum += entry.amount * rate / 10_000;
     }
     assert_eq!(
@@ -824,4 +802,98 @@ fn parity_single_vs_multi_mixed_token_normalized_parity() {
     // Verify that raw amounts are correctly computed via shared helpers: each is net * share.
     // base: net 98 *1, alt: net 196 *1 => as above.
     assert_eq!(sum_raw, 294);
+}
+
+// ── #1251 — Minimums are checked in base-token units ─────────────────────────
+
+/// A raw amount that clears MIN_BET_AMOUNT but normalises to zero base units
+/// is dust and must be rejected by the contract-wide guard.
+#[test]
+fn ma_1251_dust_guard_uses_normalised_amount() {
+    let t = setup_ma();
+    let creator = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
+    // 1 alt unit = 0.1 base units (e.g. a token with one more decimal).
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.alt_token, &1_000i128);
+    let pool_id = make_ma_pool(&t, &creator);
+    t.alt_admin.mint(&user, &1_000i128);
+
+    // 9 raw units clear the raw MIN_BET_AMOUNT but normalise to 0 base units.
+    let dust = t.client.try_place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0u32,
+        &9i128,
+        &t.alt_token,
+        &None::<Address>,
+    );
+    assert_eq!(dust, Err(Ok(ContractError::BetBelowMinBet)));
+
+    // 10 raw units normalise to exactly MIN_BET_AMOUNT and are accepted.
+    t.client.place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0u32,
+        &10i128,
+        &t.alt_token,
+        &None::<Address>,
+    );
+}
+
+/// Per-token limits are denominated in base units, so the same configured
+/// limit represents the same value regardless of the token's exchange rate.
+#[test]
+fn ma_1251_per_token_limits_use_normalised_amount() {
+    let t = setup_ma();
+    let creator = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
+    // 1 alt unit = 0.5 base units.
+    t.client
+        .set_token_exchange_rate(&t.treasury, &t.alt_token, &5_000i128);
+    let pool_id = make_ma_pool(&t, &creator);
+
+    // Limits in base units: min 100, max 500 → raw alt range 200..=1000.
+    t.client
+        .set_pool_token_bet_limits(&t.treasury, &pool_id, &t.alt_token, &100i128, &500i128);
+    t.alt_admin.mint(&user, &5_000i128);
+
+    // 150 raw alt clears the raw minimum but is only 75 base units.
+    let low = t.client.try_place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0u32,
+        &150i128,
+        &t.alt_token,
+        &None::<Address>,
+    );
+    assert_eq!(low, Err(Ok(ContractError::BetBelowMinBet)));
+
+    // 1_002 raw alt = 501 base units, above the base-denominated maximum.
+    let high = t.client.try_place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0u32,
+        &1_002i128,
+        &t.alt_token,
+        &None::<Address>,
+    );
+    assert_eq!(high, Err(Ok(ContractError::BetAboveMaxBet)));
+
+    // 800 raw alt = 400 base units: above the old raw max (500) but within
+    // the base-denominated range, so it is accepted.
+    t.client.place_multi_asset_bet(
+        &user,
+        &pool_id,
+        &0u32,
+        &800i128,
+        &t.alt_token,
+        &None::<Address>,
+    );
 }

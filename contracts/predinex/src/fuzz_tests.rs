@@ -84,6 +84,7 @@ fn mint_fuzz(env: &Env, token: &Address, user: &Address, amount: i128) {
 
 fn make_pool_fuzz(t: &FuzzEnv) -> (u32, Address) {
     let creator = Address::generate(&t.env);
+    mint_fuzz(&t.env, &t.token, &creator, MIN_CREATOR_DEPOSIT * 10);
     let pool_id = t.client.create_pool(
         &creator,
         &String::from_str(&t.env, "Fuzz Pool"),
