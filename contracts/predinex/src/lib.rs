@@ -37,6 +37,7 @@ mod lp_tests;
 mod multi_asset_tests;
 mod multi_outcome_tests;
 mod multi_user_tests;
+mod pause_guard_tests;
 mod pause_tests;
 mod pool_categories_tests;
 mod protocol_fee_tests;
