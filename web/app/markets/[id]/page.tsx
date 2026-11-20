@@ -18,7 +18,7 @@ import CountdownTimer from '@/components/CountdownTimer';
 import DisputeHistoryTimeline from "../../components/DisputeHistoryTimeline";
 import { useDisputeHistory } from "../../lib/hooks/useDisputeHistory";
 import PoolActivityTimeline from "../../components/PoolActivityTimeline";
-import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff, Info, ArrowLeft } from "lucide-react";
+import { TrendingUp, Users, Clock, RefreshCw, AlertCircle, Star, StarOff, Info, ArrowLeft, Trophy } from "lucide-react";
 import { use } from "react";
 import ShareButton from "../../../components/ShareButton";
 import { TruncatedAddress } from "../../../components/TruncatedAddress";
@@ -434,6 +434,23 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
                                 ? 'Resolution is under dispute and not final yet.'
                                 : `Resolves to ${pool.outcomeA} or ${pool.outcomeB} after the market closes (${formatMarketDeadline(pool.expiry)}).`}
                     </p>
+
+                    {/* Resolution outcome banner — issue 1629 */}
+                    {pool.settled && pool.winningOutcome !== undefined && pool.winningOutcome !== null && (
+                        <div
+                            className="flex items-center gap-3 px-4 py-3 mb-6 bg-green-500/10 border border-green-500/20 rounded-xl"
+                            role="status"
+                            aria-label="Market resolution result"
+                        >
+                            <Trophy className="w-5 h-5 text-green-400 shrink-0" aria-hidden="true" />
+                            <div>
+                                <p className="text-xs uppercase tracking-wider text-green-400 font-medium">Resolved</p>
+                                <p className="text-lg font-bold text-green-300">
+                                    {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Stats */}
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-8">
