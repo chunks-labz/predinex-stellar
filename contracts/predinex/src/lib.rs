@@ -30,6 +30,7 @@ mod fee_config_tests;
 mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
+mod issue_1621_1624_tests;
 mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
@@ -1062,6 +1063,35 @@ fn event_version(env: &Env) -> Symbol {
     Symbol::new(env, EVENT_SCHEMA_VERSION)
 }
 
+/// #1621 — Emit one normalized, indexable event for every persisted market
+/// lifecycle transition. The four topics are event name, schema version,
+/// pool id, and action; the payload carries the before/after states.
+fn emit_market_lifecycle(
+    env: &Env,
+    pool_id: u32,
+    action: &str,
+    previous_status: Option<PoolStatus>,
+    current_status: PoolStatus,
+    actor: Option<Address>,
+) {
+    let action_symbol = Symbol::new(env, action);
+    env.events().publish(
+        (
+            Symbol::new(env, "market_lifecycle"),
+            event_version(env),
+            pool_id,
+            action_symbol.clone(),
+        ),
+        MarketLifecycleEvent {
+            action: action_symbol,
+            previous_status,
+            current_status,
+            actor,
+            timestamp: env.ledger().timestamp(),
+        },
+    );
+}
+
 // Recommended dispute-window duration (7 days). Used as the default for the
 // cross-chain dispute window. For regular pools the dispute window defaults to
 // 0 (immediately final); the freeze admin enables it via `set_dispute_window`.
@@ -1382,6 +1412,10 @@ const CANCEL_REFUND_BATCH_SIZE: u32 = 50;
 
 /// Maximum number of volume-based fee tiers accepted by `set_volume_fee_tiers`.
 const MAX_FEE_TIERS: u32 = 5;
+/// #1622 — Maximum number of operations processed by a batch call.
+const MAX_BATCH_OPERATIONS: u32 = 20;
+/// #1622 — Maximum distinct token addresses accepted by a multi-asset pool.
+const MAX_ALLOWED_TOKENS: u32 = 10;
 
 /// Default minimum participant count required to settle a pool. A value of 1
 /// preserves the historical behaviour of allowing any pool with at least one
@@ -1392,6 +1426,8 @@ const DEFAULT_MIN_SETTLEMENT_PARTICIPANTS: u32 = 1;
 const MAX_WEBHOOKS: u32 = 10;
 /// #396 — Maximum byte length for a webhook URL.
 const MAX_WEBHOOK_URL_LENGTH: u32 = 512;
+/// #1622 — Maximum number of event filters accepted by one webhook.
+const MAX_WEBHOOK_EVENT_TYPES: u32 = 5;
 
 /// #151 — Minimum pool lifetime in seconds (matches `web/docs/POOL_DURATION.md`).
 const MIN_POOL_DURATION_SECS: u64 = 300;
@@ -1616,6 +1652,18 @@ pub enum ContractError {
     /// #1416 — `finalize_resolution` was called on a pool that is not in the
     /// `ResolutionPending` status (already settled, disputed, or still open).
     ResolutionNotPending = 95,
+    /// Shared registry: requested expiry does not strictly increase.
+    ExpiryMustIncrease = 96,
+    /// Shared registry: requested expiry is not after the current ledger time.
+    ExpiryMustBeFuture = 97,
+    /// Shared registry: pool is frozen or disputed and cannot be modified.
+    PoolLocked = 98,
+    /// #1622 — Multi-asset pool exceeds MAX_ALLOWED_TOKENS.
+    TooManyAllowedTokens = 99,
+    /// #1622 — Webhook filter list exceeds MAX_WEBHOOK_EVENT_TYPES.
+    TooManyWebhookEventTypes = 100,
+    /// #1622 — Webhook filter list repeats an event type.
+    DuplicateWebhookEventType = 101,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -1766,6 +1814,22 @@ pub enum PoolStatus {
     /// automatic check during a claim) transitions the pool to
     /// [`Settled`](Self::Settled), after which winner claims proceed normally.
     ResolutionPending(u32),
+}
+
+/// #1621 — Canonical state-change payload for indexers.
+#[derive(Clone)]
+#[contracttype]
+pub struct MarketLifecycleEvent {
+    /// Stable action identifier, e.g. created, settled, frozen, or cancelled.
+    pub action: Symbol,
+    /// Prior state; None for initial creation.
+    pub previous_status: Option<PoolStatus>,
+    /// State persisted by the transaction.
+    pub current_status: PoolStatus,
+    /// Authenticated actor when attributable; None for permissionless/internal changes.
+    pub actor: Option<Address>,
+    /// Ledger timestamp when the transition was persisted.
+    pub timestamp: u64,
 }
 
 /// #718 — Category for grouping prediction pools by topic for discovery.
@@ -3163,8 +3227,19 @@ impl PredinexContract {
     }
 
     /// Shared helper for protocol fee calculation: floor(amount * fee_bps / 10_000).
+    ///
+    /// Split the amount into quotient and remainder before multiplying. This
+    /// preserves floor rounding while avoiding an overflowing intermediate
+    /// product for large valid token amounts.
     fn calc_protocol_fee(amount: i128, fee_bps: i128) -> Option<i128> {
-        amount.checked_mul(fee_bps)?.checked_div(10_000)
+        if amount < 0 || !(0..=10_000).contains(&fee_bps) {
+            return None;
+        }
+        let whole = amount.checked_div(10_000)?;
+        let remainder = amount.checked_rem(10_000)?;
+        whole
+            .checked_mul(fee_bps)?
+            .checked_add(remainder.checked_mul(fee_bps)?.checked_div(10_000)?)
     }
 
     /// Shared helper for proportional payout: floor(user_stake * net_pool / total_winning).
@@ -4581,12 +4656,20 @@ impl PredinexContract {
             env,
             pool_id,
             CreatePoolEvent {
-                creator,
+                creator: creator.clone(),
                 expiry,
                 title,
                 outcome_a_name: outcome_a,
                 outcome_b_name: outcome_b,
             },
+        );
+        emit_market_lifecycle(
+            env,
+            pool_id,
+            "created",
+            None,
+            pool.status.clone(),
+            Some(creator),
         );
 
         Ok(pool_id)
@@ -4903,6 +4986,7 @@ impl PredinexContract {
             .persistent()
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
+        let previous_status = pool.status.clone();
         let open_at = match pool.status {
             PoolStatus::Scheduled(open_at) => open_at,
             _ => return Err(ContractError::PoolNotOpen),
@@ -4934,6 +5018,14 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
         emit_scheduled_pool_activated(&env, pool_id, open_at);
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "scheduled_activated",
+            Some(previous_status),
+            pool.status.clone(),
+            None,
+        );
         Ok(())
     }
 
@@ -4971,6 +5063,7 @@ impl PredinexContract {
         if !matches!(pool.status, PoolStatus::Scheduled(_)) {
             return Err(ContractError::PoolNotOpen);
         }
+        let previous_status = pool.status.clone();
         pool.status = PoolStatus::Cancelled;
         env.storage()
             .persistent()
@@ -4983,7 +5076,15 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        emit_scheduled_pool_cancelled(&env, pool_id, creator);
+        emit_scheduled_pool_cancelled(&env, pool_id, creator.clone());
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "scheduled_cancelled",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(creator),
+        );
         Ok(())
     }
 
@@ -5099,6 +5200,7 @@ impl PredinexContract {
                 .get::<_, u64>(&DataKey::PoolCoolingUntil(pool_id))
             {
                 if env.ledger().timestamp() >= cooling_until {
+                    let previous_status = pool.status.clone();
                     pool.status = PoolStatus::Open;
                     env.storage()
                         .persistent()
@@ -5117,6 +5219,14 @@ impl PredinexContract {
                         user.clone(),
                         UnfreezeTrigger::AutoThaw,
                         true,
+                    );
+                    emit_market_lifecycle(
+                        &env,
+                        pool_id,
+                        "auto_thawed",
+                        Some(previous_status),
+                        pool.status.clone(),
+                        Some(user.clone()),
                     );
                 } else {
                     return Err(ContractError::PoolIsFrozen);
@@ -5552,6 +5662,7 @@ impl PredinexContract {
                 .timestamp()
                 .checked_add(cooling_period_secs)
                 .ok_or(ContractError::ExpiryOverflow)?;
+            let previous_status = pool.status.clone();
             pool.status = PoolStatus::Frozen;
             env.storage()
                 .persistent()
@@ -5570,6 +5681,14 @@ impl PredinexContract {
                 POOL_BUMP_TARGET,
             );
             emit_pool_cooling_started(&env, pool_id, cooling_until, new_total);
+            emit_market_lifecycle(
+                &env,
+                pool_id,
+                "cooling_frozen",
+                Some(previous_status),
+                pool.status.clone(),
+                None,
+            );
         }
         Ok(())
     }
@@ -6005,6 +6124,7 @@ impl PredinexContract {
             .persistent()
             .get::<_, Pool>(&DataKey::Pool(pool_id))
             .ok_or(ContractError::PoolNotFound)?;
+        let original_status = pool.status.clone();
 
         // #1228 — Reject terminal and protected states unconditionally,
         // regardless of caller role. Disputed pools must not be cancellable
@@ -6121,12 +6241,22 @@ impl PredinexContract {
             &env,
             pool_id,
             PoolCancelledEvent {
-                cancelled_by: caller,
+                cancelled_by: caller.clone(),
                 reason,
                 total_refunded,
                 participant_count,
             },
         );
+        if original_status != pool.status {
+            emit_market_lifecycle(
+                &env,
+                pool_id,
+                "cancelled",
+                Some(original_status),
+                pool.status.clone(),
+                Some(caller),
+            );
+        }
 
         Ok(())
     }
@@ -6395,6 +6525,7 @@ impl PredinexContract {
         // final (Open → Settled). A positive window opens a time-bounded
         // dispute window (Open → ResolutionPending) during which challenges may
         // be submitted and payouts are paused until finalization.
+        let previous_status = pool.status.clone();
         let dispute_window = env
             .storage()
             .persistent()
@@ -6429,10 +6560,8 @@ impl PredinexContract {
         if winning_side_total <= 0 {
             return Err(ContractError::NoWinningBets);
         }
-        let fee_amount = total_pool_volume
-            .checked_mul(fee_bps as i128)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / 10000;
+        let fee_amount = Self::calc_protocol_fee(total_pool_volume, fee_bps as i128)
+            .ok_or(ContractError::PoolTotalOverflow)?;
         env.storage()
             .persistent()
             .set(&DataKey::PoolFeeBps(pool_id), &fee_bps);
@@ -6512,8 +6641,16 @@ impl PredinexContract {
                 winning_side_total,
                 total_pool_volume,
                 fee_amount,
-                source,
+                source: source.clone(),
             },
+        );
+        emit_market_lifecycle(
+            env,
+            pool_id,
+            "settled",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(caller.clone()),
         );
         Ok(())
     }
@@ -6591,8 +6728,8 @@ impl PredinexContract {
         }
         let mut results = Vec::new(&env);
         let total = pools.len();
-        let truncated = total > 20;
-        let cap = if total > 20 { 20 } else { total };
+        let truncated = total > MAX_BATCH_OPERATIONS;
+        let cap = core::cmp::min(total, MAX_BATCH_OPERATIONS);
         for req in pools.iter().take(cap as usize) {
             match Self::settle_single_pool(&env, &caller, req.pool_id, req.winning_outcome) {
                 Ok(()) => results.push_back(SettleResult {
@@ -6669,6 +6806,7 @@ impl PredinexContract {
             return Err(ContractError::ResolutionNotFinal);
         }
 
+        let previous_status = pool.status.clone();
         pool.status = PoolStatus::Settled(winning_outcome);
         env.storage()
             .persistent()
@@ -6679,7 +6817,15 @@ impl PredinexContract {
             POOL_BUMP_TARGET,
         );
 
-        emit_resolution_finalized(env, pool_id, winning_outcome, finalizer, auto);
+        emit_resolution_finalized(env, pool_id, winning_outcome, finalizer.clone(), auto);
+        emit_market_lifecycle(
+            env,
+            pool_id,
+            "resolution_finalized",
+            Some(previous_status),
+            pool.status.clone(),
+            finalizer,
+        );
         Ok(())
     }
 
@@ -6738,6 +6884,7 @@ impl PredinexContract {
             _ => return Err(ContractError::PoolCannotBeVoided),
         }
 
+        let previous_status = pool.status.clone();
         pool.status = PoolStatus::Voided;
         env.storage()
             .persistent()
@@ -6750,6 +6897,14 @@ impl PredinexContract {
         );
 
         emit_void_pool(&env, pool_id, caller.clone());
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "voided",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(caller.clone()),
+        );
         audit_log::append(
             &env,
             caller,
@@ -6792,6 +6947,7 @@ impl PredinexContract {
             .get::<_, UserBet>(&DataKey::UserBet(pool_id, user.clone()))
             .ok_or(ContractError::NoBetFound)?;
 
+        let previous_status = pool.status.clone();
         let refund = user_bet.total_bet;
         if refund == 0 {
             return Err(ContractError::NothingToRefund);
@@ -7026,6 +7182,16 @@ impl PredinexContract {
             },
         );
 
+        if matches!(previous_status, PoolStatus::Open) {
+            emit_market_lifecycle(
+                &env,
+                pool_id,
+                "expired_refund_started",
+                Some(previous_status),
+                pool.status.clone(),
+                Some(user.clone()),
+            );
+        }
         emit_claim_expired(&env, pool_id, user, refund);
 
         Ok(refund)
@@ -7074,6 +7240,7 @@ impl PredinexContract {
                 if env.ledger().timestamp() < pool.expiry + GRACE_PERIOD_SECS {
                     return Err(ContractError::PoolNotExpiredGracePeriod);
                 }
+                let previous_status = pool.status.clone();
                 pool.status = PoolStatus::Cancelled;
                 env.storage()
                     .persistent()
@@ -7082,6 +7249,14 @@ impl PredinexContract {
                     &DataKey::Pool(pool_id),
                     POOL_BUMP_THRESHOLD,
                     POOL_BUMP_TARGET,
+                );
+                emit_market_lifecycle(
+                    &env,
+                    pool_id,
+                    "expired_refund_sweep_started",
+                    Some(previous_status),
+                    pool.status.clone(),
+                    None,
                 );
             }
             PoolStatus::Cancelled => {
@@ -7833,8 +8008,8 @@ impl PredinexContract {
 
         let mut results = Vec::new(&env);
         let total = pool_ids.len();
-        let truncated = total > 20;
-        let cap = if total > 20 { 20 } else { total };
+        let truncated = total > MAX_BATCH_OPERATIONS;
+        let cap = core::cmp::min(total, MAX_BATCH_OPERATIONS);
 
         for i in 0..cap {
             let pool_id = match pool_ids.get(i) {
@@ -8508,6 +8683,7 @@ impl PredinexContract {
             return Err(ContractError::PoolIsDisputed);
         }
 
+        let previous_status = pool.status.clone();
         pool.status = PoolStatus::Frozen;
         env.storage()
             .persistent()
@@ -8520,6 +8696,14 @@ impl PredinexContract {
 
         emit_pool_frozen(&env, pool_id, caller.clone());
         emit_market_paused(&env, pool_id, caller.clone(), env.ledger().timestamp());
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "frozen",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(caller.clone()),
+        );
         audit_log::append(
             &env,
             caller,
@@ -8632,6 +8816,7 @@ impl PredinexContract {
             return Err(ContractError::PoolIsDisputed);
         }
 
+        let previous_status = pool.status.clone();
         let settlement_time = env
             .storage()
             .persistent()
@@ -8707,6 +8892,14 @@ impl PredinexContract {
         );
 
         emit_pool_disputed(&env, pool_id, caller.clone(), disputed_outcome);
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "disputed",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(caller.clone()),
+        );
         audit_log::append(
             &env,
             caller,
@@ -8731,6 +8924,7 @@ impl PredinexContract {
         if pool.status != PoolStatus::Frozen && pool.status != PoolStatus::Disputed {
             return Err(ContractError::PoolNotFrozenOrDisputed);
         }
+        let previous_status = pool.status.clone();
 
         if pool.status == PoolStatus::Disputed {
             let pre_status = env
@@ -8775,7 +8969,14 @@ impl PredinexContract {
             UnfreezeTrigger::Admin,
             had_cooling_deadline,
         );
-        emit_pool_unfrozen(&env, pool_id, caller.clone(), UnfreezeTrigger::Admin, had_cooling_deadline);
+        emit_market_lifecycle(
+            &env,
+            pool_id,
+            "unfrozen",
+            Some(previous_status),
+            pool.status.clone(),
+            Some(caller.clone()),
+        );
         // #1449 — emit MarketUnpaused domain event for market resumption
         emit_market_unpaused(&env, pool_id, caller.clone(), env.ledger().timestamp());
         audit_log::append(
@@ -8832,6 +9033,7 @@ impl PredinexContract {
         }
 
         if pool.status == PoolStatus::Frozen {
+            let previous_status = pool.status.clone();
             pool.status = PoolStatus::Open;
             env.storage()
                 .persistent()
@@ -8840,6 +9042,14 @@ impl PredinexContract {
                 &DataKey::Pool(pool_id),
                 POOL_BUMP_THRESHOLD,
                 POOL_BUMP_TARGET,
+            );
+            emit_market_lifecycle(
+                &env,
+                pool_id,
+                "cooling_overridden",
+                Some(previous_status),
+                pool.status.clone(),
+                Some(caller.clone()),
             );
         }
         env.storage()
@@ -10439,6 +10649,20 @@ impl PredinexContract {
         caller.require_auth();
         Self::require_treasury_recipient(&env, &caller)?;
 
+        if event_types.len() > MAX_WEBHOOK_EVENT_TYPES {
+            return Err(ContractError::TooManyWebhookEventTypes);
+        }
+        for i in 0..event_types.len() {
+            let event_type = event_types
+                .get(i)
+                .ok_or(ContractError::DuplicateWebhookEventType)?;
+            for j in 0..i {
+                if event_types.get(j) == Some(event_type.clone()) {
+                    return Err(ContractError::DuplicateWebhookEventType);
+                }
+            }
+        }
+
         // URL must be HTTPS and within the length cap.
         if url.len() > MAX_WEBHOOK_URL_LENGTH || !Self::string_starts_with(&url, b"https://") {
             return Err(ContractError::InvalidWebhookUrl);
@@ -10649,6 +10873,9 @@ impl PredinexContract {
 
         if allowed_tokens.is_empty() {
             return Err(ContractError::NotInitialized);
+        }
+        if allowed_tokens.len() > MAX_ALLOWED_TOKENS {
+            return Err(ContractError::TooManyAllowedTokens);
         }
 
         // Dedup check and exchange-rate presence check.
@@ -10920,10 +11147,26 @@ impl PredinexContract {
                 .get::<_, u64>(&DataKey::PoolCoolingUntil(pool_id))
             {
                 if env.ledger().timestamp() >= cooling_until {
+                    let previous_status = pool.status.clone();
                     pool.status = PoolStatus::Open;
                     env.storage()
                         .persistent()
                         .remove(&DataKey::PoolCoolingUntil(pool_id));
+                    emit_pool_unfrozen(
+                        &env,
+                        pool_id,
+                        user.clone(),
+                        UnfreezeTrigger::AutoThaw,
+                        true,
+                    );
+                    emit_market_lifecycle(
+                        &env,
+                        pool_id,
+                        "auto_thawed",
+                        Some(previous_status),
+                        pool.status.clone(),
+                        Some(user.clone()),
+                    );
                 } else {
                     return Err(ContractError::PoolIsFrozen);
                 }
@@ -11261,6 +11504,7 @@ impl PredinexContract {
                 .timestamp()
                 .checked_add(cooling_period_secs)
                 .ok_or(ContractError::ExpiryOverflow)?;
+            let previous_status = pool.status.clone();
             pool.status = PoolStatus::Frozen;
             env.storage()
                 .persistent()
@@ -11279,6 +11523,14 @@ impl PredinexContract {
                 POOL_BUMP_TARGET,
             );
             emit_pool_cooling_started(&env, pool_id, cooling_until, new_total);
+            emit_market_lifecycle(
+                &env,
+                pool_id,
+                "cooling_frozen",
+                Some(previous_status),
+                pool.status.clone(),
+                None,
+            );
         }
 
         // #1404 — Update the pool-wide user exposure tracker and persist

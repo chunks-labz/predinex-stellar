@@ -206,6 +206,28 @@ Emitted when a scheduled claim is executed.
 
 ## Pool State Management Events
 
+### market_lifecycle
+
+Emitted whenever a market's persisted lifecycle status changes, including
+creation, scheduled activation/cancellation, settlement/finalization, freeze,
+dispute, unfreeze, void, cancellation, expiry-refund transitions, and cooling
+state changes. This supplements the existing action-specific events; legacy
+events remain available for existing consumers.
+
+- **Topics:** (Symbol("market_lifecycle"), Symbol("v1"), pool_id: u32, action: Symbol)
+- **Data:** MarketLifecycleEvent
+  - action: Symbol — Stable transition identifier such as created, settled,
+    disputed, frozen, or unfrozen
+  - previous_status: Option<PoolStatus> — Prior status; None for creation
+  - current_status: PoolStatus — State persisted by the transaction
+  - actor: Option<Address> — Authenticated actor when attributable; None for
+    permissionless/internal transitions
+  - timestamp: u64 — Ledger timestamp when the transition was persisted
+- **Indexer Use:** Reconstruct state from one event family and index by pool and action.
+
+The event uses the existing v1 schema marker and changes none of the existing
+event topics or payloads. Integrators may migrate incrementally.
+
 ### void_pool
 Emitted when a pool is marked as voided (allowing full refunds).
 
