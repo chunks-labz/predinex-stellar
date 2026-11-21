@@ -243,7 +243,8 @@ npm run test:coverage
 
 ## Documentation
 
-See `/docs/BUDGET_PLANNER.md` for complete documentation.
+- [API Integration Examples](../docs/API_INTEGRATION_EXAMPLES.md) — copyable `curl` requests and example responses for headers, auth, versioning, rate limits, errors, health, pagination, and core endpoints.
+- See `/docs/BUDGET_PLANNER.md` for complete budget planner documentation.
 
 ## Issue
 

@@ -1,5 +1,6 @@
 # Operations and documentation index
 
+- [API Integration Examples](./API_INTEGRATION_EXAMPLES.md) — copyable requests and responses for headers, auth, versioning, health, pagination, and core endpoints.
 - [Production Incident Runbook](./INCIDENT_RUNBOOK.md) — severity, escalation, and response playbooks.
 - [Paused-Contract Runbook](./PAUSED_CONTRACT_RUNBOOK.md) — detection, caller impact, unpause authorization, and post-incident checks for a globally paused contract.
 - [Oracle Key Rotation](./ORACLE_ROTATION.md) — rotating the settlement signer and resolution-oracle credential, with rollback and verification.
