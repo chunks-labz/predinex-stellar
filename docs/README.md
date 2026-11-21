@@ -1,6 +1,6 @@
 # Operations and documentation index
 
-- [Production Incident Runbook](./INCIDENT_RUNBOOK.md) — severity, escalation, and response playbooks.
+- [Production Incident Runbook](./INCIDENT_RUNBOOK.md) — severity, escalation, and copyable playbooks for common production incidents.
 - [Paused-Contract Runbook](./PAUSED_CONTRACT_RUNBOOK.md) — detection, caller impact, unpause authorization, and post-incident checks for a globally paused contract.
 - [Oracle Key Rotation](./ORACLE_ROTATION.md) — rotating the settlement signer and resolution-oracle credential, with rollback and verification.
 - [Fee Schedule and Caps](./FEE_SCHEDULE.md) — every protocol fee, who pays it, and the constant and error code that cap it.
