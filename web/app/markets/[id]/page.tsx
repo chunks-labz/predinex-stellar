@@ -26,10 +26,10 @@ import { usePoolFavorites } from "../../lib/hooks/usePoolFavorites";
 import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import { parsePoolId } from '@/app/lib/market-types';
 import DepthChart from '@/components/DepthChart';
+import OddsChart from '@/components/OddsChart';
 import SettlementStatusBadge from '@/components/SettlementStatusBadge';
 import { formatMarketDeadline } from '@/app/lib/formatting';
 import {
-  formatOdds,
   formatPayout,
   formatTokenUnits,
   stroopsToUnits,
@@ -354,8 +354,6 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
     const totalVolume = pool.totalA + pool.totalB;
     const oddsAValue = totalVolume > 0 ? (pool.totalA / totalVolume) * 100 : 50;
     const oddsBValue = totalVolume > 0 ? (pool.totalB / totalVolume) * 100 : 50;
-    const oddsA = formatOdds(oddsAValue);
-    const oddsB = formatOdds(oddsBValue);
 
     return (
         <main className="min-h-screen bg-background text-foreground">
@@ -501,42 +499,26 @@ export default function PoolDetails({ params }: { params: Promise<{ id: string }
 
                     {/* Odds Display */}
                     <div className="mb-8">
-                        <div className="flex items-center justify-between gap-2 mb-2">
-                            <p className="text-sm text-muted-foreground" id="odds-bar-label">{t('betting.currentOdds')}</p>
-                            <Tooltip content={t('betting.sharesPayoutInfo')}>
-                                <button
-                                    type="button"
-                                    aria-label={t('betting.sharesPayoutInfoLabel')}
-                                    className="inline-flex items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
-                                >
-                                    <Info className="w-4 h-4" aria-hidden="true" />
-                                </button>
-                            </Tooltip>
-                        </div>
-                        <div
-                            className="flex h-4 rounded-full overflow-hidden"
-                            role="progressbar"
-                            aria-labelledby="odds-bar-label"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={oddsAValue}
-                            aria-valuetext={`${pool.outcomeA}: ${oddsA}, ${pool.outcomeB}: ${oddsB}`}
-                        >
-                            <div
-                                className="bg-green-500 transition-all"
-                                style={{ width: `${oddsAValue}%` }}
-                                aria-hidden="true"
-                            />
-                            <div
-                                className="bg-red-500 transition-all"
-                                style={{ width: `${oddsBValue}%` }}
-                                aria-hidden="true"
-                            />
-                        </div>
-                        <div className="flex justify-between gap-3 mt-2 text-sm">
-                            <span className="text-green-400 min-w-0 break-words">{pool.outcomeA}: {oddsA}</span>
-                            <span className="text-red-400 min-w-0 break-words text-right">{pool.outcomeB}: {oddsB}</span>
-                        </div>
+                        <OddsChart
+                            className=""
+                            title={t('betting.currentOdds')}
+                            titleId="odds-bar-label"
+                            outcomeA={pool.outcomeA}
+                            outcomeB={pool.outcomeB}
+                            oddsA={oddsAValue}
+                            oddsB={oddsBValue}
+                            headingAccessory={
+                                <Tooltip content={t('betting.sharesPayoutInfo')}>
+                                    <button
+                                        type="button"
+                                        aria-label={t('betting.sharesPayoutInfoLabel')}
+                                        className="inline-flex items-center justify-center h-6 w-6 rounded-full text-muted-foreground hover:text-primary hover:bg-primary/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary transition-colors"
+                                    >
+                                        <Info className="w-4 h-4" aria-hidden="true" />
+                                    </button>
+                                </Tooltip>
+                            }
+                        />
                         <p className="text-xs text-muted-foreground mt-2">{t('betting.sharesPayoutHint')}</p>
                     </div>
 

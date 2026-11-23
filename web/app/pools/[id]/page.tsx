@@ -11,7 +11,8 @@ import type { PoolExtendedMetadata } from "../../lib/soroban-read-api";
 import Navbar from '@/components/Navbar';
 import CountdownTimer from '@/components/CountdownTimer';
 import { secondsUntil } from "../../lib/countdown-utils";
-import { formatOdds, formatPayout, formatTokenUnits, stroopsToUnits } from "../../lib/formatting";
+import { formatPayout, formatTokenUnits, stroopsToUnits } from "../../lib/formatting";
+import OddsChart from '@/components/OddsChart';
 import ClaimWinningsButton from "../../../components/ClaimWinningsButton";
 import PoolExportButton from "../../../components/PoolExportButton";
 import { AlertCircle, RefreshCw, Users, TrendingUp, Clock, Wallet, ExternalLink, Printer } from "lucide-react";
@@ -214,8 +215,6 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
     const totalVolume = pool.totalA + pool.totalB;
     const oddsAValue = totalVolume > 0 ? (pool.totalA / totalVolume) * 100 : 50;
     const oddsBValue = totalVolume > 0 ? (pool.totalB / totalVolume) * 100 : 50;
-    const oddsA = formatOdds(oddsAValue);
-    const oddsB = formatOdds(oddsBValue);
 
     const userHasPosition = userBet && (userBet.amountA > 0 || userBet.amountB > 0);
     const userWonBet = pool.settled && userBet &&
@@ -300,23 +299,13 @@ export default function PoolDetail({ params }: { params: Promise<{ id: string }>
 
                     {/* Odds display — only meaningful while the pool is active */}
                     {pool.status === 'active' && !pool.settled && (
-                    <div className="mb-8">
-                        <p className="text-sm text-muted-foreground mb-2">Current Odds</p>
-                        <div className="flex h-4 rounded-full overflow-hidden">
-                            <div
-                                className="bg-green-500 transition-all"
-                                style={{ width: `${oddsAValue}%` }}
-                            />
-                            <div
-                                className="bg-red-500 transition-all"
-                                style={{ width: `${oddsBValue}%` }}
-                            />
-                        </div>
-                        <div className="flex justify-between mt-2 text-sm">
-                            <span className="text-green-400">{pool.outcomeA}: {oddsA}</span>
-                            <span className="text-red-400">{pool.outcomeB}: {oddsB}</span>
-                        </div>
-                    </div>
+                    <OddsChart
+                        title="Current Odds"
+                        outcomeA={pool.outcomeA}
+                        outcomeB={pool.outcomeB}
+                        oddsA={oddsAValue}
+                        oddsB={oddsBValue}
+                    />
                     )}
 
                     {/* Pool Details */}
