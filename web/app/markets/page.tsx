@@ -43,6 +43,7 @@ function MarketsContent() {
     paginatedMarkets,
     isLoading,
     error,
+    refreshError,
     blockHeightWarning,
     filters,
     assetOptions,
@@ -145,6 +146,24 @@ function MarketsContent() {
             aria-live="polite"
           >
             {blockHeightWarning}
+          </div>
+        )}
+
+        {refreshError && (
+          <div
+            className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-yellow-500/20 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200"
+            role="status"
+            aria-live="polite"
+          >
+            <span>{refreshError}</span>
+            <button
+              type="button"
+              onClick={retry}
+              disabled={isLoading}
+              className="rounded-lg border border-yellow-300/30 px-3 py-1.5 font-semibold hover:bg-yellow-500/10 disabled:opacity-60"
+            >
+              {isLoading ? 'Retrying…' : 'Retry'}
+            </button>
           </div>
         )}
 

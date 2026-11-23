@@ -89,6 +89,7 @@ export function processMarketData(pool: PoolData, nowSeconds?: number): Processe
     oddsA: odds.oddsA,
     oddsB: odds.oddsB,
     status,
+    winningOutcome: pool.winningOutcome ?? null,
     timeRemaining,
     expiry: pool.expiry,
     createdAt: pool.createdAt,

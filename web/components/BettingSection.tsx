@@ -2,7 +2,7 @@
 import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Loader2, Wallet, AlertCircle, Lock, Clock } from 'lucide-react';
 import { Loader2, Wallet, AlertCircle, Info } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
@@ -44,6 +44,7 @@ export default function BettingSection({
   const [betAmount, setBetAmount] = useState("");
   const [amountTouched, setAmountTouched] = useState(false);
   const [isBetting, setIsBetting] = useState(false);
+  const betSubmissionInFlightRef = useRef(false);
   const [feePrompt, setFeePrompt] = useState<{
     feeStroops: string;
     resolve: (v: boolean) => void;
@@ -224,6 +225,9 @@ export default function BettingSection({
   };
 
   const placeBet = async (outcome: number) => {
+    // State updates do not disable the button until React renders again. Lock
+    // synchronously so rapid confirm clicks cannot submit the same bet twice.
+    if (betSubmissionInFlightRef.current) return;
     if (!isConnected) {
       connect();
       return;
@@ -256,6 +260,7 @@ export default function BettingSection({
       return;
     }
 
+    betSubmissionInFlightRef.current = true;
     setIsBetting(true);
     setBetError(null);
 
@@ -309,15 +314,8 @@ export default function BettingSection({
       // Keep the raw error behind a details toggle
       setRawError(errorMessage);
       setPendingOutcome(null);
-      onBetSuccess?.(outcome, amountStroops);
-    } catch (error) {
-      log.error("[BettingSection] Bet transaction failed:", error);
-      showError(error);
-      setBetError({ outcome, message: parseContractError(error) });
-      setPendingOutcome(null);
-      setStage("idle");
-      setFeePrompt(null);
     } finally {
+      betSubmissionInFlightRef.current = false;
       setIsBetting(false);
     }
   };
@@ -452,26 +450,43 @@ export default function BettingSection({
       {/* Current odds */}
       <div className="p-4 bg-muted/30 rounded-lg border border-border/50">
         <p className="text-sm text-muted-foreground mb-2">{t('betting.currentOdds')}</p>
-        <div className="flex h-3 rounded-full overflow-hidden mb-2" aria-hidden="true">
+        {totalPool === 0 ? (
           <div
-            className="bg-green-500 transition-all duration-500"
-            style={{ width: `${oddsA}%` }}
-          />
-          <div
-            className="bg-red-500 transition-all duration-500"
-            style={{ width: `${oddsB}%` }}
-          />
-        </div>
-        <div className="flex justify-between gap-3 text-sm">
-          <div className="text-green-400 min-w-0 break-words">
-            <span className="font-medium">{pool.outcomeA}</span>
-            <span className="ml-1 text-muted-foreground">{oddsA}%</span>
+            className="flex flex-col items-center justify-center py-4 text-muted-foreground"
+            role="status"
+            aria-label="No bets placed yet — odds chart unavailable"
+          >
+            <div className="w-full h-3 rounded-full bg-muted/50 mb-2" aria-hidden="true" />
+            <p className="text-xs">No bets placed yet. Be the first!</p>
           </div>
-          <div className="text-red-400 min-w-0 break-words text-right">
-            <span className="mr-1 text-muted-foreground">{oddsB}%</span>
-            <span className="font-medium">{pool.outcomeB}</span>
-          </div>
-        </div>
+        ) : (
+          <>
+            <div
+              className="flex h-3 rounded-full overflow-hidden mb-2"
+              role="img"
+              aria-label={`Odds: ${pool.outcomeA} ${oddsA}%, ${pool.outcomeB} ${oddsB}%`}
+            >
+              <div
+                className="bg-green-500 transition-all duration-500"
+                style={{ width: `${oddsA}%` }}
+              />
+              <div
+                className="bg-red-500 transition-all duration-500"
+                style={{ width: `${oddsB}%` }}
+              />
+            </div>
+            <div className="flex justify-between gap-3 text-sm">
+              <div className="text-green-400 min-w-0 break-words">
+                <span className="font-medium">{pool.outcomeA}</span>
+                <span className="ml-1 text-muted-foreground">{oddsA}%</span>
+              </div>
+              <div className="text-red-400 min-w-0 break-words text-right">
+                <span className="mr-1 text-muted-foreground">{oddsB}%</span>
+                <span className="font-medium">{pool.outcomeB}</span>
+              </div>
+            </div>
+          </>
+        )}
         <p className="text-xs text-muted-foreground mt-1 text-center">
           {t('betting.totalPool')} {formatPrice(totalPool / STROOPS_PER_XLM)}
         </p>
@@ -568,6 +583,7 @@ export default function BettingSection({
           }
           aria-label={t('betting.amountAriaLabel')}
           aria-describedby={describedBy}
+          aria-required="true"
           aria-invalid={showAmountError}
           className="w-full pl-4 pr-14 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
           onWheel={(e) => e.currentTarget.blur()}
@@ -636,6 +652,19 @@ export default function BettingSection({
             {amountError}
           </p>
         )}
+      </div>
+
+      {/* Transaction status — announced to screen readers — issue 1632 */}
+      <div
+        id="bet-tx-status"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {stage === 'signing' && 'Waiting for wallet signature…'}
+        {stage === 'submitting' && 'Submitting transaction to the network…'}
+        {stage === 'polling' && 'Confirming transaction on-chain…'}
       </div>
 
       {/* Bet buttons */}

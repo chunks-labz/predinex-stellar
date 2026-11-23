@@ -33,6 +33,19 @@ Deployment workflow automation
 ./verify-deployment.sh [COMMAND]
 ```
 
+### check-deployment-health.py
+Post-deployment HTTP readiness probe used by the deployment workflows
+
+**Features:**
+- Retries transient HTTP/connection failures with configurable attempts and delay
+- Fails immediately on non-retryable client errors or invalid URLs
+- Distinct exit codes for unhealthy deployments (`1`) and bad input (`2`)
+
+**Usage:**
+```bash
+./check-deployment-health.py --url "$DEPLOYMENT_URL" --attempts 10
+```
+
 ### seed-demo-markets.sh
 Seed demo markets (and wagers) into a locally deployed Predinex contract.
 

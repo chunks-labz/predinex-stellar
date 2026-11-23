@@ -40,21 +40,21 @@ const POOL_DURATION_EXTENDED: Symbol = symbol_short!("dur_ext");
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum PoolError {
     /// The pool does not exist.
-    PoolNotFound = 1,
-    /// Only the pool creator can perform this action.
-    Unauthorized = 2,
-    /// The pool is not in Open state.
-    PoolNotOpen = 3,
-    /// The pool has already expired.
-    PoolExpired = 4,
-    /// The new expiry must be greater than the current expiry.
-    ExpiryMustIncrease = 5,
-    /// The new expiry exceeds the maximum allowed duration.
-    MaxDurationExceeded = 6,
-    /// The new expiry must be in the future (after current ledger time).
-    ExpiryMustBeFuture = 7,
-    /// The pool is frozen or disputed and cannot be modified.
-    PoolLocked = 8,
+    PoolNotFound = 9,
+    /// Only the pool creator can perform this action (shared code 3).
+    Unauthorized = 3,
+    /// The pool is not in Open state (shared code 10).
+    PoolNotOpen = 10,
+    /// The pool has already expired (shared code 7).
+    PoolExpired = 7,
+    /// The new expiry must be greater than the current expiry (shared code 96).
+    ExpiryMustIncrease = 96,
+    /// The new expiry exceeds the maximum allowed duration (shared code 37).
+    MaxDurationExceeded = 37,
+    /// The new expiry must be in the future (shared code 97).
+    ExpiryMustBeFuture = 97,
+    /// The pool is frozen or disputed and cannot be modified (shared code 98).
+    PoolLocked = 98,
 }
 
 /// Possible states of a pool.
@@ -580,6 +580,18 @@ mod test {
         let max_allowed = 1_000 + MAX_POOL_DURATION_SECS;
         let result = extend(&env, &contract_id, &pool_id, max_allowed);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_shared_error_codes_match_predinex_registry() {
+        assert_eq!(PoolError::Unauthorized as u32, 3);
+        assert_eq!(PoolError::PoolExpired as u32, 7);
+        assert_eq!(PoolError::PoolNotFound as u32, 9);
+        assert_eq!(PoolError::PoolNotOpen as u32, 10);
+        assert_eq!(PoolError::MaxDurationExceeded as u32, 37);
+        assert_eq!(PoolError::ExpiryMustIncrease as u32, 96);
+        assert_eq!(PoolError::ExpiryMustBeFuture as u32, 97);
+        assert_eq!(PoolError::PoolLocked as u32, 98);
     }
 
     #[test]

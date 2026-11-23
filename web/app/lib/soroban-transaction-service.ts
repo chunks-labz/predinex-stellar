@@ -15,11 +15,21 @@ import {
   Networks,
   rpc,
   scValToNative,
+  StrKey,
   Transaction,
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
 import { FreighterWalletClient } from "./freighter-adapter";
+
+function assertWalletAddress(address: unknown): asserts address is string {
+  if (typeof address !== "string" || address.length === 0) {
+    throw new Error("Wallet not connected");
+  }
+  if (!StrKey.isValidEd25519PublicKey(address)) {
+    throw new Error("Invalid Stellar wallet address");
+  }
+}
 
 /**
  * Result of a Soroban transaction execution.
@@ -193,7 +203,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -239,7 +249,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -313,7 +323,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -409,7 +419,10 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
+    if (params.referrer && !StrKey.isValidEd25519PublicKey(params.referrer)) {
+      throw new Error("Invalid Stellar referrer address");
+    }
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -455,7 +468,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -501,7 +514,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -545,7 +558,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     // The contract caps a batch at 20 pools; never submit more than that.
     const poolIds = params.poolIds.slice(0, 20);
@@ -612,7 +625,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -652,7 +665,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -691,7 +704,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -730,7 +743,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -759,7 +772,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -789,7 +802,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -819,7 +832,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -850,7 +863,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -884,7 +897,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);
@@ -916,7 +929,7 @@ export class SorobanTransactionService {
     onStageChange?: (stage: TxStage) => void,
     onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
   ): Promise<SorobanTxResult> {
-    if (!wallet.address) throw new Error("Wallet not connected");
+    assertWalletAddress(wallet.address);
 
     const contract = new Contract(contractId);
     const sourceAccount = await this.server.getAccount(wallet.address);

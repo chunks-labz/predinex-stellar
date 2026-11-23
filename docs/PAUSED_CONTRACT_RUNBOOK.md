@@ -68,10 +68,11 @@ The flag is checked by `require_not_paused` at the start of each guarded entrypo
 | Area | Entrypoints |
 |---|---|
 | Betting | `place_bet`, `place_bet_with_referral`, `place_multi_asset_bet`, `cancel_bet` |
-| Pool management | `cancel_pool`, `extend_pool_duration`, `void_pool` |
+| Pool management | `cancel_pool`, `extend_pool_duration`, `void_pool`, `assign_settler`, `override_pool_cooling` (#1620) |
 | Settlement | `settle_pool`, `settle_pools` (the whole batch panics), `settle_mirror_from_source` |
+| Cross-chain mirrors | `create_pool_mirror`, `cancel_pool_mirror` (#1620) |
 | Claims and refunds | `claim_winnings`, `claim_all_winnings` (each entry returns code 50), `claim_multi_asset_winnings`, `claim_refund`, `claim_expired`, `refund_expired_pool`, `execute_scheduled_claims` (due entries are skipped and stay `Pending`) |
-| Liquidity | `deposit_liquidity`, `withdraw_liquidity`, `claim_lp_rewards`, `stake_lp` |
+| Liquidity | `deposit_liquidity`, `withdraw_liquidity`, `claim_lp_rewards`, `stake_lp`, `distribute_lp_rewards` (#1620) |
 | Lending planner | `budget_plan`, `lender_portfolio_metrics` |
 
 ### 2.2 Still works while paused
@@ -82,7 +83,7 @@ The flag is checked by `require_not_paused` at the start of each guarded entrypo
 | Finalization | `finalize_resolution` | `ResolutionPending` pools can still move to `Settled`, but nobody can claim them. |
 | Disputes and freezes | `dispute_pool`, `freeze_pool`, `unfreeze_pool`, `set_dispute_window` | The freeze admin can keep working per pool during the pause. |
 | Treasury and config | `withdraw_treasury`, `rescue_tokens`, every fee/limit setter, `set_admin` / `propose_admin` / `accept_admin`, `set_freeze_admin`, `rotate_treasury_recipient` | Key rotation and recovery can happen **during** the pause. |
-| Other | `claim_referral_rewards`, `assign_settler`, `update_twap`, all read-only getters | |
+| Other | `claim_referral_rewards`, `update_twap`, all read-only getters | |
 
 ### 2.3 Clocks keep running
 

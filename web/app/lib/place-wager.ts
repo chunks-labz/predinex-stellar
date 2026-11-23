@@ -29,6 +29,7 @@
  * ```
  */
 
+import { StrKey } from '@stellar/stellar-sdk';
 import { predinexContract } from './adapters/predinex-contract';
 import type { FreighterWalletClient } from './freighter-adapter';
 import type { TxStage } from './soroban-transaction-service';
@@ -40,7 +41,6 @@ export const MIN_WAGER_STROOPS = 1n;
 export const MAX_WAGER_STROOPS = (1n << 127n) - 1n;
 
 /** Stellar ed25519 account id (`G...`). */
-const STELLAR_ACCOUNT_ID = /^G[A-Z2-7]{55}$/;
 
 /** Outcome as accepted from integrators; encoded to `0 | 1` before submission. */
 export type WagerOutcomeInput = 0 | 1 | 'A' | 'B' | 'a' | 'b';
@@ -161,7 +161,7 @@ export function validateReferrer(
   wagerAddress?: string
 ): string | null {
   if (referrer === undefined || referrer === null || referrer === '') return null;
-  if (typeof referrer !== 'string' || !STELLAR_ACCOUNT_ID.test(referrer)) {
+  if (typeof referrer !== 'string' || !StrKey.isValidEd25519PublicKey(referrer)) {
     throw new WagerValidationError(
       'referrer',
       `referrer must be a Stellar account id starting with "G" (got ${describe(referrer)})`
@@ -184,6 +184,9 @@ function validateWallet(
       'wallet',
       'wallet must be a connected wallet with a Stellar address'
     );
+  }
+  if (!StrKey.isValidEd25519PublicKey(wallet.address)) {
+    throw new WagerValidationError('wallet', 'wallet address must be a valid Stellar account address');
   }
   return wallet;
 }

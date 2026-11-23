@@ -31,6 +31,8 @@ export interface ProcessedMarket {
   oddsA: number;
   oddsB: number;
   status: 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
+  /** Winning outcome index (0 = outcomeA, 1 = outcomeB). Null when not yet settled. */
+  winningOutcome: number | null;
   timeRemaining: number | null;
   createdAt: number;
   settledAt: number | null;

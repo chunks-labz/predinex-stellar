@@ -251,3 +251,33 @@ fn place_bet_with_zero_fee_takes_nothing() {
         "contract keeps the full stake when there is no fee"
     );
 }
+
+
+/// #1624 — Fee rounding is floor division, including zero and odd amounts.
+#[test]
+fn protocol_fee_rounding_handles_zero_and_odd_amounts() {
+    assert_eq!(PredinexContract::calc_protocol_fee(0, 250), Some(0));
+    assert_eq!(PredinexContract::calc_protocol_fee(1, 250), Some(0));
+    assert_eq!(PredinexContract::calc_protocol_fee(10_001, 250), Some(250));
+    assert_eq!(PredinexContract::calc_protocol_fee(4_000_001, 250), Some(100_000));
+}
+
+/// #1624 — Very large amounts must not overflow an intermediate multiply.
+#[test]
+fn protocol_fee_rounding_handles_max_i128_amounts() {
+    let amount = i128::MAX;
+    let expected_250 = (amount / 10_000) * 250 + ((amount % 10_000) * 250) / 10_000;
+    let expected_1_000 = (amount / 10_000) * 1_000 + ((amount % 10_000) * 1_000) / 10_000;
+
+    assert_eq!(PredinexContract::calc_protocol_fee(amount, 250), Some(expected_250));
+    assert_eq!(PredinexContract::calc_protocol_fee(amount, 1_000), Some(expected_1_000));
+    assert_eq!(PredinexContract::calc_protocol_fee(amount, 10_000), Some(amount));
+}
+
+/// Invalid signs and rates above 100% are rejected deterministically.
+#[test]
+fn protocol_fee_rounding_rejects_invalid_inputs() {
+    assert_eq!(PredinexContract::calc_protocol_fee(-1, 250), None);
+    assert_eq!(PredinexContract::calc_protocol_fee(1, -1), None);
+    assert_eq!(PredinexContract::calc_protocol_fee(1, 10_001), None);
+}
