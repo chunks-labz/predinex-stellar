@@ -1,0 +1,12 @@
+{
+  "name": "Predinex Stellar",
+  "build": { "dockerfile": "../Dockerfile.dev", "context": ".." },
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [3000],
+  "postCreateCommand": "cd web && npm ci",
+  "customizations": {
+    "vscode": {
+      "extensions": ["rust-lang.rust-analyzer", "dbaeumer.vscode-eslint"]
+    }
+  }
+}
