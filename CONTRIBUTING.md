@@ -276,6 +276,7 @@ The CI workflow (`.github/workflows/ci.yml`) runs on every push and pull request
 | **Web Checks** | `npm ci` → `npm run lint` → `npm test -- --run` → `npm run build` |
 | **Bundle size budget** | Checked on PRs; fails if JS exceeds 350 KB, CSS exceeds 80 KB, or total static exceeds 500 KB |
 | **Contract Checks** | `cargo fmt --check` → `cargo clippy -- -D warnings` → `cargo test` |
+| **Migration Rollback Gate** | Applies and rolls back each `db/migrations` pair against an empty Postgres and fails on missing, empty or irreversible rollbacks. See [docs/MIGRATIONS.md](./docs/MIGRATIONS.md) to run it locally. |
 | **Dependency Audit** | `npm audit` and `cargo audit`; runs on PRs that touch a manifest or lockfile, and weekly. See [§10](#10-dependency-vulnerability-auditing) |
 
 Run all of these locally before pushing to avoid CI failures blocking your PR.

@@ -9,3 +9,4 @@
 - [Local Runbook](./local-runbook.md) — local end-to-end setup.
 - [Structured Logging and Correlation IDs](./LOGGING.md) — JSON log schema and request/job correlation.
 - [Environment Variables and Secrets](./ENVIRONMENT_VARIABLES.md) — required web/API/bot variables and GitHub Actions secrets.
+- [Database Migrations and the Rollback Dry Run](./MIGRATIONS.md) — the migration rollback gate and how to run it locally.

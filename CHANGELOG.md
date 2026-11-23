@@ -47,6 +47,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### ⚙️ Ops & CI
 <!-- GitHub Actions workflows, scripts/, tooling, dependency updates -->
+- The migration rollback gate (`scripts/verify-migrations.sh`) now applies, rolls back and re-applies each migration on its own and names the one that fails. It fails on a missing, empty or orphaned `.down.sql` and on files marked `-- irreversible`, ignores the random `\restrict` key newer `pg_dump` releases add, and has its own tests in the CI job. `docs/MIGRATIONS.md` covers running it locally (#1663)
 - Added automated preview deployment workflow for pull requests (`.github/workflows/preview-deploy.yml`)
 - Preview deployments automatically post URLs to PR comments
 - Added PR template with preview deployment checklist

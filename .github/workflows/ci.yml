@@ -29,7 +29,13 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 20
     steps:
       - uses: actions/checkout@v4
-      - name: Apply migrations up and down, then verify schema identity
+      # Exercises the gate itself against throwaway databases: missing or
+      # empty rollbacks, irreversible markers, incomplete rollbacks (#1663).
+      - name: Test the rollback dry-run script
+        env:
+          PREDINEX_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: python3 -m unittest discover -s scripts/tests -p 'test_verify_migrations.py' -v
+      - name: Apply and roll back each migration, then verify schema identity
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_ci
         run: bash scripts/verify-migrations.sh
