@@ -2,6 +2,7 @@
 
 import importlib.util
 import io
+import json
 import unittest
 import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
@@ -18,11 +19,16 @@ health = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(health)
 check_health = health.check_health
 main = health.main
+check_version = health.check_version
 
 
 class FakeResponse:
-    def __init__(self, status):
+    def __init__(self, status, body=b''):
         self.status = status
+        self.body = body
+
+    def read(self):
+        return self.body
 
     def close(self):
         pass
@@ -93,6 +99,69 @@ class HealthCheckTests(unittest.TestCase):
                                opener=opener, sleep=Mock())
         self.assertTrue(healthy)
         self.assertEqual(opener.call_count, 3)
+
+    def test_version_with_matching_commit_passes(self):
+        body = json.dumps({'build': {'commit': 'abc1234def5678'},
+                           'contract': {'id': 'CABC', 'network': 'testnet',
+                                        'crateVersion': '0.1.0'}}).encode()
+        opener = Mock(return_value=FakeResponse(200, body))
+        out = io.StringIO()
+        with redirect_stdout(out):
+            ok = check_version('https://preview.example/', '/api/version',
+                               'abc1234', 5, opener=opener)
+        self.assertTrue(ok)
+        opener.assert_called_once_with('https://preview.example/api/version', timeout=5)
+        self.assertIn('commit abc1234def5678, contract CABC on testnet (crate 0.1.0)',
+                      out.getvalue())
+
+    def test_version_with_other_commit_fails(self):
+        body = json.dumps({'build': {'commit': '1111111aaaa'}}).encode()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            ok = check_version('https://preview.example', '/api/version', 'abc1234def',
+                               5, opener=Mock(return_value=FakeResponse(200, body)))
+        self.assertFalse(ok)
+        self.assertIn('reports commit 1111111aaaa, expected abc1234def', err.getvalue())
+
+    def test_version_without_commit_fails(self):
+        body = json.dumps({'build': {'commit': None}}).encode()
+        with redirect_stderr(io.StringIO()):
+            ok = check_version('https://preview.example', '/api/version', 'abc1234',
+                               5, opener=Mock(return_value=FakeResponse(200, body)))
+        self.assertFalse(ok)
+
+    def test_version_endpoint_unreachable_or_not_json_fails(self):
+        for opener in (Mock(side_effect=http_error(404)),
+                       Mock(return_value=FakeResponse(200, b'<html>'))):
+            with self.subTest(opener=opener), redirect_stderr(io.StringIO()):
+                self.assertFalse(check_version('https://preview.example', '/api/version',
+                                               'abc1234', 5, opener=opener))
+
+    def test_short_commit_prefixes_do_not_match(self):
+        body = json.dumps({'build': {'commit': 'abc'}}).encode()
+        with redirect_stderr(io.StringIO()):
+            self.assertFalse(check_version('https://preview.example', '/api/version', 'abc',
+                                           5, opener=Mock(return_value=FakeResponse(200, body))))
+
+    def test_main_runs_the_version_check_only_when_asked(self):
+        calls = []
+        original_health, original_version = health.check_health, health.check_version
+        health.check_health = lambda *a, **k: True
+        health.check_version = lambda *a, **k: calls.append(a) or False
+        try:
+            code, _, _ = self.run_main(['--url', 'https://preview.example'])
+            self.assertEqual((code, calls), (0, []))
+            code, _, _ = self.run_main(['--url', 'https://preview.example',
+                                        '--expect-commit', 'abc1234'])
+            self.assertEqual(code, 1)
+            self.assertEqual(calls[0][:3], ('https://preview.example', '/api/version', 'abc1234'))
+        finally:
+            health.check_health, health.check_version = original_health, original_version
+
+    def test_preview_deploy_verifies_the_built_commit(self):
+        content = (WORKFLOWS / 'preview-deploy.yml').read_text(encoding='utf-8')
+        self.assertIn('--expect-commit "$BUILD_COMMIT_SHA"', content)
+        self.assertIn('BUILD_COMMIT_SHA: ${{ github.sha }}', content)
 
     def test_deploy_workflows_have_a_post_deploy_health_step(self):
         guards = {

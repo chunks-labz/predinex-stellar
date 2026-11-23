@@ -16,8 +16,9 @@ Preview deployments automatically create a live, temporary deployment of the web
 1. **Trigger**: When a PR is opened or updated with changes to the `web/` directory
 2. **Build**: The workflow builds the Next.js application
 3. **Deploy**: Deploys to Vercel as a preview environment
-4. **Comment**: Posts the preview URL as a comment on the PR
-5. **Update**: Subsequent pushes update the same preview deployment
+4. **Smoke test**: `scripts/check-deployment-health.py` waits for the preview to answer, then checks that `GET /api/version` reports the commit that was just built (see [Version endpoint](#version-endpoint))
+5. **Comment**: Posts the preview URL as a comment on the PR
+6. **Update**: Subsequent pushes update the same preview deployment
 
 ## Setup Instructions
 
@@ -120,7 +121,54 @@ Preview deployments are automatically deleted when:
 - The PR is closed
 - After 30 days of inactivity (Vercel default)
 
+## Version endpoint
+
+`GET /api/version` (#1665) tells operators which build and contract a
+deployment runs. It needs no authentication and returns only public metadata:
+
+```json
+{
+  "service": "predinex-web",
+  "appVersion": "0.1.0",
+  "build": { "commit": "3f9a1c7…", "builtAt": "2026-11-23T10:00:00.000Z" },
+  "contract": {
+    "id": "CA…",
+    "network": "testnet",
+    "crateVersion": "0.1.0",
+    "eventSchemaVersion": "v1",
+    "stateVersion": "v1"
+  }
+}
+```
+
+- `build.commit` comes from `BUILD_COMMIT_SHA`, which the preview workflow sets
+  to `github.sha` during `vercel build`, falling back to Vercel's
+  `VERCEL_GIT_COMMIT_SHA` or GitHub's `GITHUB_SHA`. `build.builtAt` comes from
+  `BUILD_TIME`.
+- `contract.id` and `contract.network` are the deployment's
+  `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` and `NEXT_PUBLIC_NETWORK`, which already
+  ship in the browser bundle.
+- `crateVersion`, `eventSchemaVersion` and `stateVersion` are the contract
+  source versions this build targets. A test keeps them equal to
+  `contracts/predinex/Cargo.toml` and the constants in `contracts/predinex/src/lib.rs`.
+- The route is rendered at build time, so it describes the build that is
+  serving it. A value that doesn't match its expected format is reported as
+  `null` rather than echoed.
+
+To check a deployment by hand:
+
+```bash
+python3 scripts/check-deployment-health.py --url https://<deployment> --expect-commit <sha>
+```
+
 ## Troubleshooting
+
+### Smoke Test Reports a Different Commit
+
+The preview is serving an older build, usually because Vercel promoted a
+cached build or the deploy step pointed at another deployment. Re-run the
+workflow; if it persists, compare the deployment ID in the job log with the
+Vercel dashboard.
 
 ### Deployment Fails with "Vercel Token Invalid"
 

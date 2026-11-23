@@ -4,9 +4,14 @@
 The probe succeeds only when the deployment URL answers with a success status
 within the configured retry budget. Empty/malformed URLs and exhausted retries
 are hard failures so a broken deployment cannot be reported as healthy.
+
+With --expect-commit, the deployment must also report that commit from its
+version endpoint (--version-path, default /api/version, #1665), so a deploy
+that is serving an older build fails the smoke test.
 """
 
 import argparse
+import json
 import sys
 import time
 import urllib.error
@@ -27,6 +32,10 @@ def parse_args(argv=None):
                         help='Delay between attempts (default: 3)')
     parser.add_argument('--timeout-seconds', type=float, default=10,
                         help='Timeout for each probe (default: 10)')
+    parser.add_argument('--expect-commit', default='',
+                        help='Require the version endpoint to report this git commit')
+    parser.add_argument('--version-path', default='/api/version',
+                        help='Path of the version endpoint (default: /api/version)')
     return parser.parse_args(argv)
 
 
@@ -83,6 +92,51 @@ def check_health(url, attempts, delay_seconds, timeout_seconds,
     return False
 
 
+def check_version(url, version_path, expected_commit, timeout_seconds, opener=None):
+    """Return True when the version endpoint reports ``expected_commit``.
+
+    A commit prefix of at least 7 characters matches either way round, since
+    deploy tooling and the build may record short and full SHAs differently.
+    """
+    opener = opener or urllib.request.urlopen
+    version_url = url.rstrip('/') + '/' + version_path.lstrip('/')
+    try:
+        response = opener(version_url, timeout=timeout_seconds)
+        try:
+            body = json.loads(response.read().decode('utf-8'))
+        finally:
+            close = getattr(response, 'close', None)
+            if close:
+                close()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
+        print(f'::error::Could not read {version_url}: {exc or exc.__class__.__name__}',
+              file=sys.stderr)
+        return False
+
+    build = body.get('build') if isinstance(body, dict) else None
+    reported = build.get('commit') if isinstance(build, dict) else None
+    contract = body.get('contract') if isinstance(body, dict) else None
+    expected = expected_commit.strip().lower()
+    if not isinstance(reported, str) or not reported:
+        print(f'::error::{version_url} reports no build commit (expected {expected}).',
+              file=sys.stderr)
+        return False
+    reported = reported.lower()
+    shortest = min(len(reported), len(expected))
+    if shortest < 7 or reported[:shortest] != expected[:shortest]:
+        print(f'::error::{version_url} reports commit {reported}, expected {expected}.',
+              file=sys.stderr)
+        return False
+
+    summary = f'commit {reported}'
+    if isinstance(contract, dict):
+        summary += (f", contract {contract.get('id') or 'unset'}"
+                    f" on {contract.get('network') or 'unknown network'}"
+                    f" (crate {contract.get('crateVersion')})")
+    print(f'Deployment version verified: {summary}')
+    return True
+
+
 def main(argv=None):
     args = parse_args(argv)
     url = args.url.strip()
@@ -101,13 +155,16 @@ def main(argv=None):
 
     print(f'Checking deployment health at {url} '
           f'({args.attempts} attempt(s), {args.timeout_seconds}s timeout)')
-    if check_health(url, args.attempts, args.delay_seconds,
-                    args.timeout_seconds):
-        return 0
+    if not check_health(url, args.attempts, args.delay_seconds,
+                        args.timeout_seconds):
+        print(f'::error::Deployment at {url} did not become healthy.',
+              file=sys.stderr)
+        return 1
 
-    print(f'::error::Deployment at {url} did not become healthy.',
-          file=sys.stderr)
-    return 1
+    if args.expect_commit.strip() and not check_version(
+            url, args.version_path, args.expect_commit, args.timeout_seconds):
+        return 1
+    return 0
 
 
 if __name__ == '__main__':

@@ -25,6 +25,7 @@ Variables that are optional overall but required for a specific feature:
 | `NEXT_PUBLIC_SOROBAN_RPC_URL` | Custom RPC endpoint | Network default | Overrides the RPC URL selected for `NEXT_PUBLIC_NETWORK`. |
 | `WEBHOOK_SECRET` | Signed outbound webhooks | — | Server-only HMAC-SHA256 signing key. Never use a `NEXT_PUBLIC_` prefix. |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` with `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web Push delivery | — | VAPID keypair and subject; the private key must stay server-side. |
+| `BUILD_COMMIT_SHA`, `BUILD_TIME` | `GET /api/version` build metadata | `VERCEL_GIT_COMMIT_SHA` / `GITHUB_SHA`, unset | Commit (7–40 hex) and ISO-8601 time of the build, captured at build time and checked by the preview smoke test (#1665). |
 
 The fixture switches (`NEXT_PUBLIC_ACTIVITY_FIXTURES`, `NEXT_PUBLIC_ENABLE_DISPUTE_MOCK_DATA`, `NEXT_PUBLIC_ENABLE_ORACLE_MANAGEMENT_PLACEHOLDER`) must remain `false` in production: they serve synthetic data and a healthy-looking but fake UI.
 

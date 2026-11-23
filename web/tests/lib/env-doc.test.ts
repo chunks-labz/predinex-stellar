@@ -21,7 +21,15 @@ const SOURCE_FILE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx']);
 // Supplied by the build/runtime platform, not by the operator, so they are
 // deliberately absent from .env.example. Documenting them would be misleading:
 // setting NODE_ENV by hand does not work.
-const PLATFORM_PROVIDED_KEYS = new Set(['NODE_ENV', 'CI', 'VERCEL_URL', 'VERCEL_ENV']);
+const PLATFORM_PROVIDED_KEYS = new Set([
+  'NODE_ENV',
+  'CI',
+  'VERCEL_URL',
+  'VERCEL_ENV',
+  // Commit fallbacks for /api/version (#1665), set by Vercel and GitHub Actions.
+  'VERCEL_GIT_COMMIT_SHA',
+  'GITHUB_SHA',
+]);
 
 // Matches `process.env.FOO`, `process.env?.FOO` and `process.env['FOO']`.
 const ENV_ACCESS_PATTERN =

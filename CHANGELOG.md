@@ -35,6 +35,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Fixed a syntax error in `checkRpcHealth`'s return type that broke `tsc` and prevented `poller.test.ts` from loading
 
 ### 🌐 Web
+- Added `GET /api/version`: unauthenticated, secret-free build and contract metadata (commit, build time, contract ID and network, contract crate, event-schema and state versions). The preview deployment smoke test now fails if the deployment reports a different commit than the one just built (#1665)
 - The odds chart on the market and pool pages has a text alternative naming both outcomes and their current odds, and a polite live region that announces only changes of at least 1 percentage point, after the odds have been still for 1.5 s, so polling doesn't chatter (#1662)
 - Updated `getMarkets` and `fetchAllPools` to use the corrected pool count from `get_pool_count`
 - `/api/export/transactions` now requires the caller's wallet identity (`x-predinex-wallet-address`) and rejects exports for any other address, and it rate limits on the client IP (30/hour) in addition to the per-wallet bucket (10/hour) so walking a list of target addresses can no longer reset the counter (closes #1177)

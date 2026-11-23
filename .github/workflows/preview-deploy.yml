@@ -60,10 +60,15 @@ jobs:
 
       - name: Build Project Artifacts
         working-directory: ./web
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        # BUILD_COMMIT_SHA / BUILD_TIME are captured by the static
+        # /api/version route at build time (#1665).
+        run: |
+          export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          BUILD_COMMIT_SHA: ${{ github.sha }}
 
       - name: Deploy Preview to Vercel
         id: deploy
@@ -81,14 +86,18 @@ jobs:
       # failure commit status below instead of advertising a broken preview.
       - name: Health check preview deployment
         id: health_check
+        env:
+          BUILD_COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           DEPLOYMENT_URL="${{ steps.deploy.outputs.url }}"
+          # Also confirms /api/version reports the commit that was just built.
           python3 scripts/check-deployment-health.py \
             --url "$DEPLOYMENT_URL" \
             --attempts 10 \
             --delay-seconds 3 \
-            --timeout-seconds 15
+            --timeout-seconds 15 \
+            --expect-commit "$BUILD_COMMIT_SHA"
 
       # Post (or update) a comment on the PR with the live preview link.
       - name: Comment PR with Preview URL
