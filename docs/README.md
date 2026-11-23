@@ -3,6 +3,10 @@
 - [Production Incident Runbook](./INCIDENT_RUNBOOK.md) — severity, escalation, and copyable playbooks for common production incidents.
 - [Paused-Contract Runbook](./PAUSED_CONTRACT_RUNBOOK.md) — detection, caller impact, unpause authorization, and post-incident checks for a globally paused contract.
 - [Oracle Key Rotation](./ORACLE_ROTATION.md) — rotating the settlement signer and resolution-oracle credential, with rollback and verification.
+- [Oracle Message Format](./ORACLE_MESSAGE_FORMAT.md) — canonical signed payload, verification, expiry, and replay rules.
+- [Market Lifecycle State Machine](./MARKET_LIFECYCLE.md) — states, transitions, triggers, and permissioned roles.
+- [Indexer Cursor Backup](./INDEXER_CURSOR_BACKUP.md) — checkpoint backup, restore, replay, and retention procedure.
+- [Reproducible Local Development Container](./LOCAL_DEV_CONTAINER.md) — pinned toolchain container and VS Code configuration.
 - [Fee Schedule and Caps](./FEE_SCHEDULE.md) — every protocol fee, who pays it, and the constant and error code that cap it.
 - [Claim Lifecycle](./CLAIM_LIFECYCLE.md) — resolved vs. finalized vs. claimed, and which views report each.
 - [Deployment Runbook](./DEPLOYMENT_RUNBOOK.md) — deployment, monitoring, and emergency procedures.
