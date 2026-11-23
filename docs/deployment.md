@@ -153,6 +153,31 @@ stellar contract invoke \
   -- get_treasury_recipient
 ```
 
+### Automated health checks
+
+Deployments are not reported as ready until a post-deploy health check passes:
+
+- **Testnet contracts:** the deploy workflow invokes `get_pool_count` on the
+  deployed contract. A missing contract id or an empty response fails the job.
+- **Vercel previews:** the preview workflow probes the generated URL with
+  `scripts/check-deployment-health.py`. Transient HTTP/connection failures are
+  retried; a preview that never answers with a success status fails the job and
+  does not post a "ready" comment.
+
+Run the HTTP probe manually with:
+
+```bash
+python3 scripts/check-deployment-health.py \
+  --url "$DEPLOYMENT_URL" \
+  --attempts 10 \
+  --delay-seconds 3 \
+  --timeout-seconds 15
+```
+
+The probe exits `0` for an HTTP 2xx/3xx response, `1` when all attempts are
+exhausted, and `2` for invalid input (for example, a missing or non-HTTP URL).
+Non-retryable 4xx responses fail immediately instead of waiting for retries.
+
 ---
 
 ## 6. Wire Contract ID into the Web App
@@ -160,18 +185,20 @@ stellar contract invoke \
 ### `web/.env.local`
 
 ```env
-NEXT_PUBLIC_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-NEXT_PUBLIC_TOKEN_ID=CYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+NEXT_PUBLIC_NETWORK=testnet
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
-NEXT_PUBLIC_NETWORK_PASSPHRASE=Test SDF Network ; September 2015
 ```
 
 For **pubnet**:
 
 ```env
+NEXT_PUBLIC_NETWORK=mainnet
+NEXT_PUBLIC_SOROBAN_CONTRACT_ID=CYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
 NEXT_PUBLIC_SOROBAN_RPC_URL=https://soroban-mainnet.stellar.org
-NEXT_PUBLIC_NETWORK_PASSPHRASE=Public Global Stellar Network ; September 2015
 ```
+
+`NEXT_PUBLIC_NETWORK` and `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` are required; see the [environment variable reference](ENVIRONMENT_VARIABLES.md) and `web/.env.example` for the full list.
 
 Start the dev server:
 

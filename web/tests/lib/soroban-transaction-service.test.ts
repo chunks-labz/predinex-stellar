@@ -134,6 +134,26 @@ describe('SorobanTransactionService.createPoolFromTemplate (#1303)', () => {
   });
 });
 
+describe('SorobanTransactionService wallet address validation', () => {
+  it('rejects a malformed account address before making an RPC call', async () => {
+    const service = new SorobanTransactionService('https://soroban-testnet.stellar.org', 'testnet');
+    const internals = service as unknown as {
+      server: { getAccount: (address: string) => Promise<Account> };
+    };
+    const getAccount = vi.spyOn(internals.server, 'getAccount');
+    const badChecksum = `${WALLET_ADDRESS.slice(0, -1)}${WALLET_ADDRESS.endsWith('A') ? 'B' : 'A'}`;
+
+    await expect(
+      service.placeBet(
+        { address: badChecksum } as unknown as FreighterWalletClient,
+        CONTRACT_ID,
+        { poolId: 1, outcome: 0, amountStroops: 1 },
+      ),
+    ).rejects.toThrow(/invalid stellar wallet address/i);
+    expect(getAccount).not.toHaveBeenCalled();
+  });
+});
+
 describe('predinexContract.createPoolFromTemplateSoroban (#1303)', () => {
   afterEach(() => {
     vi.restoreAllMocks();

@@ -26,6 +26,7 @@ interface UseMarketDiscoveryState {
   paginatedMarkets: ProcessedMarket[];
   isLoading: boolean;
   error: string | null;
+  refreshError: string | null;
   blockHeightWarning: string | null;
   filters: MarketFilters;
   assetOptions: string[];
@@ -71,6 +72,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
   const [allMarkets, setAllMarkets] = useState<ProcessedMarket[]>(cacheSnapshot.markets);
   const [isLoading, setIsLoading] = useState<boolean>(() => !cacheSnapshot.isFresh);
   const [error, setError] = useState<string | null>(null);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [filters, setFiltersState] = useState<MarketFilters>(() =>
     normalizeMarketFilters(initialFilters ?? DEFAULT_MARKET_FILTERS)
   );
@@ -126,6 +128,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
       setAllMarkets(processedMarkets);
       hasAnyMarketsRef.current = processedMarkets.length > 0;
       setBlockHeightWarning(readBlockHeightWarning());
+      setRefreshError(null);
     } catch (err) {
       if (!isCurrentRequest()) return;
 
@@ -134,8 +137,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
       const message = getConnectivityMessage(issue, 'Loading markets');
 
       if (hasAnyMarketsRef.current) {
-        setError(null);
-        setBlockHeightWarning(message);
+        setRefreshError(message);
       } else {
         setError(message);
       }
@@ -236,6 +238,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     paginatedMarkets,
     isLoading,
     error,
+    refreshError,
     blockHeightWarning,
     filters,
     assetOptions,

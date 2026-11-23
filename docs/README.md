@@ -8,3 +8,4 @@
 - [Deployment Runbook](./DEPLOYMENT_RUNBOOK.md) — deployment, monitoring, and emergency procedures.
 - [Local Runbook](./local-runbook.md) — local end-to-end setup.
 - [Structured Logging and Correlation IDs](./LOGGING.md) — JSON log schema and request/job correlation.
+- [Environment Variables and Secrets](./ENVIRONMENT_VARIABLES.md) — required web/API/bot variables and GitHub Actions secrets.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useToast } from "@/providers/ToastProvider";
 import { useTransactionToast } from "@/lib/hooks/useTransactionToast";
 import { predinexContract } from "../adapters/predinex-contract";
@@ -29,6 +29,7 @@ export function useClaimWinnings(userAddress?: string | null) {
   const [claimTransactions, setClaimTransactions] = useState<
     Map<number, ClaimTxState>
   >(new Map());
+  const claimsInFlightRef = useRef(new Set<number>());
 
   const [feePrompt, setFeePrompt] = useState<{
     feeStroops: string;
@@ -38,6 +39,8 @@ export function useClaimWinnings(userAddress?: string | null) {
 
   const claim = useCallback(
     async (poolId: number, onSuccess?: () => void) => {
+      if (claimsInFlightRef.current.has(poolId)) return;
+      claimsInFlightRef.current.add(poolId);
       setClaimTransactions((prev) =>
         new Map(prev).set(poolId, { status: "pending" }),
       );
@@ -84,6 +87,7 @@ export function useClaimWinnings(userAddress?: string | null) {
           showToast("Claim transaction cancelled", "info");
         }
       } finally {
+        claimsInFlightRef.current.delete(poolId);
         setStage("idle");
         setFeePrompt(null);
       }

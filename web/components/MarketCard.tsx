@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, Snowflake, AlertTriangle } from 'lucide-react';
+import { Clock, TrendingUp, Users, CheckCircle, XCircle, Star, Snowflake, AlertTriangle, Trophy } from 'lucide-react';
 import { ProcessedMarket } from '@/app/lib/market-types';
 import { formatOdds, formatTokenAmount } from '@/app/lib/formatting';
 import { formatDisplayAddress } from '@/app/lib/address-display';
@@ -186,6 +186,16 @@ export default function MarketCard({ market }: MarketCardProps) {
 
         {/* Market Info */}
         <div className="space-y-4 shrink-0">
+          {/* Resolution outcome banner — issue 1629 */}
+          {market.status === 'settled' && market.winningOutcome !== undefined && market.winningOutcome !== null && (
+            <div className="flex items-center gap-2 px-3 py-2 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <Trophy className="w-4 h-4 text-green-400 shrink-0" aria-hidden="true" />
+              <span className="text-xs font-medium text-green-400">
+                Resolved: <span className="font-bold">{market.winningOutcome === 0 ? market.outcomeA : market.outcomeB}</span>
+              </span>
+            </div>
+          )}
+
           {/* Outcomes */}
           <div className="space-y-2">
             <div className="flex justify-between items-center text-sm p-3 bg-muted/30 rounded-lg min-w-0">

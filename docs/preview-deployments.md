@@ -73,11 +73,12 @@ Set up environment variables for preview deployments:
 
 | Variable | Value | Notes |
 |----------|-------|-------|
-| `NEXT_PUBLIC_NETWORK` | `testnet` | Use testnet for previews |
+| `NEXT_PUBLIC_NETWORK` | `testnet` | Required. Use testnet for previews |
+| `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` | Your testnet contract ID | Required for contract reads |
 | `NEXT_PUBLIC_APP_URL` | (auto-set by Vercel) | Preview URL |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Your WalletConnect ID | Optional but recommended |
-| `NEXT_PUBLIC_STACKS_API_URL` | `https://api.testnet.hiro.so` | Testnet API |
-| `NEXT_PUBLIC_SOROBAN_CONTRACT_ID` | Your testnet contract ID | If using Stellar |
+
+See the [environment variable reference](ENVIRONMENT_VARIABLES.md) for the full list.
 
 **Security Note**: Never add production secrets or mainnet configurations to preview environments.
 
