@@ -15,3 +15,7 @@
 - [Environment Variables and Secrets](./ENVIRONMENT_VARIABLES.md) — required web/API/bot variables and GitHub Actions secrets.
 - [Failed Market Creation Monitoring](./MARKET_CREATION_MONITORING.md) — what failed `create_market` attempts record, the repeated-failure alert, and triage.
 - [Database Migrations and the Rollback Dry Run](./MIGRATIONS.md) — the migration rollback gate and how to run it locally.
+- [API Authentication](./API_AUTHENTICATION.md) — where API keys come from, how to send them, roles, expiry, and common `401` and startup errors.
+- [API Rate Limits](./RATE_LIMITS.md) — limit tiers, buckets per key or IP, response headers, `429` responses, and retry guidance.
+- [Glossary of Market Terms](./GLOSSARY.md) — definitions for market, position, outcome, collateral, oracle, resolution, settlement and related terms.
+- [Collateral Approval Flow](./COLLATERAL_APPROVAL.md) — steps before a first trade, what each wallet prompt moves, and how to revoke access.
