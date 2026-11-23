@@ -892,6 +892,63 @@ export const openApiDoc = {
         },
       },
     },
+    '/api/markets/admin/creation-failures': {
+      get: {
+        summary: 'Failed on-chain market creation attempts (admin only)',
+        description:
+          'Alert state and the most recent failed create_market submissions (#1664). Records carry ' +
+          'non-sensitive metadata only: time, correlation ID, failure category, error class, contract ' +
+          'error code, outcome count, title length and seconds to close. See docs/MARKET_CREATION_MONITORING.md.',
+        security: [{ apiKey: [] }],
+        responses: {
+          '200': {
+            description: 'Failure statistics',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    success: { type: 'boolean' },
+                    data: {
+                      type: 'object',
+                      properties: {
+                        threshold: { type: 'integer', example: 5 },
+                        windowSeconds: { type: 'integer', example: 900 },
+                        recentFailures: { type: 'integer' },
+                        totalFailures: { type: 'integer' },
+                        alerting: { type: 'boolean' },
+                        lastAlertAt: { type: 'string', format: 'date-time', nullable: true },
+                        recent: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              at: { type: 'string', format: 'date-time' },
+                              correlationId: { type: 'string', nullable: true },
+                              category: {
+                                type: 'string',
+                                enum: ['contract', 'timeout', 'network', 'rejected', 'unknown'],
+                              },
+                              errorName: { type: 'string' },
+                              contractErrorCode: { type: 'integer', nullable: true },
+                              outcomeCount: { type: 'integer' },
+                              titleBytes: { type: 'integer' },
+                              secondsToClose: { type: 'integer' },
+                            },
+                          },
+                        },
+                      },
+                    },
+                    timestamp: { type: 'string', format: 'date-time' },
+                  },
+                },
+              },
+            },
+          },
+          '403': { description: 'Admin access required' },
+        },
+      },
+    },
     '/api/markets/admin/audit': {
       get: {
         summary: 'Cancellation/restoration audit history (admin only)',

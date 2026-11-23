@@ -40,6 +40,7 @@ On-call contacts: `#predinex-oncall` (primary), `#predinex-incidents` (incident 
 | Connection pool exhaustion, slow queries, indexer lag | [Database or indexer saturation](#6-database-or-indexer-saturation) | SEV-2 |
 | Stale oracle/TWAP, settlement rejected as stale | [Stale oracle or TWAP](#8-stale-oracle-or-twap) | SEV-2 |
 | Failure immediately after a release | [Bad deployment or rollback needed](#10-bad-deployment-or-rollback-needed) | SEV-2 |
+| `market_creation_failure_alert` log, repeated failed `create_market` submissions | [Failed Market Creation Monitoring](./MARKET_CREATION_MONITORING.md#triage) | SEV-3, SEV-2 if every creation fails |
 
 ---
 

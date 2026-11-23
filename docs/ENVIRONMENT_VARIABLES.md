@@ -42,6 +42,7 @@ Copy `api/.env.example` to `api/.env`. See [`api/README.md`](../api/README.md) f
 | `PORT` | No | `3001` | HTTP listen port. |
 | `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_MAX_REQUESTS`, `RATE_LIMIT_STRICT_MAX_REQUESTS` | No | `60000`, `100`, `20` | Rate-limit window and request budgets. Invalid values fall back to defaults. |
 | `OTEL_TRACING_ENABLED`, `OTEL_SERVICE_NAME` | No | `false`, `predinex-api` | Opt-in OTLP tracing; also set the standard `OTEL_EXPORTER_OTLP_ENDPOINT` when enabled. |
+| `MARKET_CREATION_FAILURE_ALERT_THRESHOLD`, `MARKET_CREATION_FAILURE_WINDOW_SECONDS` | No | `5`, `900` | Failed on-chain market creations within the window that trigger a `market_creation_failure_alert` log. See [MARKET_CREATION_MONITORING.md](./MARKET_CREATION_MONITORING.md). Invalid values fall back to defaults. |
 
 ---
 

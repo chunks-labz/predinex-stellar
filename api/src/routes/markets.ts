@@ -55,6 +55,10 @@ import { rateLimitMiddleware, strictRateLimitMiddleware } from '../middleware/ra
 import { buildPageMeta, parsePagination } from '../services/pagination.js';
 import { logger } from '../lib/logger.js';
 import {
+  defaultMarketCreationMonitor,
+  MarketCreationMonitor,
+} from '../services/market-creation-monitor.js';
+import {
   MarketListQuery,
   MarketStatus,
   parseMarketListQuery,
@@ -521,6 +525,8 @@ export const defaultTradeHistorySource = new UnconfiguredTradeHistorySource();
 export interface MarketsRouterOptions {
   /** Store backing the optional `Idempotency-Key` header on POST /. */
   idempotencyStore?: IdempotencyStore;
+  /** Records failed on-chain creation attempts (#1664). */
+  creationMonitor?: MarketCreationMonitor;
 }
 
 function isTradeHistorySource(value: unknown): value is TradeHistorySource {
@@ -548,6 +554,7 @@ export function createMarketsRouter(
   const idempotency = createIdempotencyMiddleware({
     store: routerOptions.idempotencyStore,
   });
+  const creationMonitor = routerOptions.creationMonitor ?? defaultMarketCreationMonitor;
   router.use(rateLimitMiddleware);
 
   router.get('/:id/trades/export', async (req: Request, res: Response, next: NextFunction) => {
@@ -685,6 +692,21 @@ export function createMarketsRouter(
     } catch (err) {
       next(err);
     }
+  });
+
+  // Admin-only: failed on-chain market creation attempts and alert state
+  // (#1664). Records hold non-sensitive metadata only.
+  router.get('/admin/creation-failures', (req: Request, res: Response) => {
+    const auth = authenticate(req);
+    if (auth.role !== 'Admin') {
+      sendError(res, 403, 'FORBIDDEN', 'Admin access required');
+      return;
+    }
+    res.json({
+      success: true,
+      data: creationMonitor.stats(),
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // Admin-only metrics endpoint (#1432)
@@ -1006,6 +1028,7 @@ export function createMarketsRouter(
         timestamp: new Date().toISOString(),
       });
     } catch (err) {
+      creationMonitor.recordFailure(validation.value, err);
       next(err);
     }
   });
