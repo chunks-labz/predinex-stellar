@@ -46,6 +46,38 @@ Post-deployment HTTP readiness probe used by the deployment workflows
 ./check-deployment-health.py --url "$DEPLOYMENT_URL" --attempts 10
 ```
 
+### check-graceful-shutdown.py
+Graceful shutdown smoke check and in-flight request drain verification (#1689)
+
+**Features:**
+- Sends SIGTERM and verifies clean process exit (code 0)
+- Detects hanging workers or unclosed connections/ports
+- Simulates in-flight requests during termination to ensure safe draining
+- Records structured JSON audit logs in `deployments/shutdown-smoke.log`
+
+**Usage:**
+```bash
+./check-graceful-shutdown.py --command "node dist/server.js" --port 3001
+```
+
+See [docs/GRACEFUL_SHUTDOWN.md](../docs/GRACEFUL_SHUTDOWN.md) for full options and documentation.
+
+### drill-backup-restore.sh
+Automated backup restore drill and verification against scratch database (#1688)
+
+**Features:**
+- Static fixture validation (`--lint-only`)
+- Restores fixture SQL into clean scratch database
+- Verifies restored schema (tables, columns) and representative rows (pools, bets, claims, indexer ledger)
+
+**Usage:**
+```bash
+./drill-backup-restore.sh --lint-only
+DATABASE_URL=postgresql://... ./drill-backup-restore.sh
+```
+
+See [docs/BACKUP_RESTORE_DRILL.md](../docs/BACKUP_RESTORE_DRILL.md) for local run instructions.
+
 ### seed-demo-markets.sh
 Seed demo markets (and wagers) into a locally deployed Predinex contract.
 

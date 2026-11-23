@@ -1,0 +1,91 @@
+-- Predinex Latest Backup Fixture
+-- Generated for backup restore drills and CI verification (#1688).
+-- Contains standard schema and representative rows for indexer state, pools, bets, claims, and migration probe.
+
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SET check_function_bodies = false;
+SET client_min_messages = warning;
+
+-- Migration Probe table
+CREATE TABLE IF NOT EXISTS migration_probe (
+    id INTEGER PRIMARY KEY,
+    marker TEXT NOT NULL
+);
+
+-- Indexer Cursor & State
+CREATE TABLE IF NOT EXISTS indexer_state (
+    id SERIAL PRIMARY KEY,
+    contract_id TEXT NOT NULL,
+    indexed_ledger BIGINT NOT NULL,
+    cursor TEXT NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Prediction Market Pools
+CREATE TABLE IF NOT EXISTS pools (
+    id BIGINT PRIMARY KEY,
+    contract_id TEXT NOT NULL,
+    creator TEXT NOT NULL,
+    status TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    settled_at TIMESTAMP WITH TIME ZONE,
+    winning_outcome TEXT,
+    total_a BIGINT NOT NULL DEFAULT 0,
+    total_b BIGINT NOT NULL DEFAULT 0,
+    net_payout BIGINT NOT NULL DEFAULT 0,
+    claimed_amount BIGINT NOT NULL DEFAULT 0,
+    metadata TEXT
+);
+
+-- User Bets
+CREATE TABLE IF NOT EXISTS bets (
+    id SERIAL PRIMARY KEY,
+    pool_id BIGINT NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
+    bettor TEXT NOT NULL,
+    amount BIGINT NOT NULL,
+    outcome TEXT NOT NULL,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- User Claims
+CREATE TABLE IF NOT EXISTS claims (
+    id SERIAL PRIMARY KEY,
+    pool_id BIGINT NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
+    claimant TEXT NOT NULL,
+    amount BIGINT NOT NULL,
+    fee_amount BIGINT NOT NULL DEFAULT 0,
+    timestamp TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_pools_status ON pools (status);
+CREATE INDEX IF NOT EXISTS idx_bets_pool_id ON bets (pool_id);
+CREATE INDEX IF NOT EXISTS idx_bets_bettor ON bets (bettor);
+CREATE INDEX IF NOT EXISTS idx_claims_pool_id ON claims (pool_id);
+CREATE INDEX IF NOT EXISTS idx_claims_claimant ON claims (claimant);
+
+-- Representative Rows
+INSERT INTO migration_probe (id, marker) VALUES
+    (1, 'fixture_v1_baseline');
+
+INSERT INTO indexer_state (id, contract_id, indexed_ledger, cursor, updated_at) VALUES
+    (1, 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM', 5489201, '0005489201-0000000010', '2026-04-20 12:00:00+00');
+
+INSERT INTO pools (id, contract_id, creator, status, created_at, expires_at, settled_at, winning_outcome, total_a, total_b, net_payout, claimed_amount, metadata) VALUES
+    (101, 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM', 'GBTESTCREATOR111111111111111111111111111111111111111111111', 'Open', '2026-04-18 10:00:00+00', '2026-04-25 18:00:00+00', NULL, NULL, 500000000, 350000000, 0, 0, 'ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi'),
+    (102, 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM', 'GBTESTCREATOR222222222222222222222222222222222222222222222', 'Scheduled', '2026-04-19 09:00:00+00', '2026-04-30 20:00:00+00', NULL, NULL, 0, 0, 0, 0, 'ipfs://bafybeid982348572093847502934857209348572093485720934857209'),
+    (103, 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM', 'GBTESTCREATOR111111111111111111111111111111111111111111111', 'Settled', '2026-04-10 08:00:00+00', '2026-04-15 12:00:00+00', '2026-04-15 12:05:00+00', 'A', 1200000000, 800000000, 1960000000, 1500000000, 'ipfs://bafybeihdkgjshd728347fhdsjkhf7384hfksdjh7384hfksdjh7384hfk');
+
+INSERT INTO bets (id, pool_id, bettor, amount, outcome, timestamp) VALUES
+    (1, 101, 'GBBETTORALICE11111111111111111111111111111111111111111111', 250000000, 'A', '2026-04-18 11:30:00+00'),
+    (2, 101, 'GBBETTORBOB222222222222222222222222222222222222222222222', 250000000, 'A', '2026-04-18 12:00:00+00'),
+    (3, 101, 'GBBETTORCHARLIE333333333333333333333333333333333333333333', 350000000, 'B', '2026-04-18 14:15:00+00'),
+    (4, 103, 'GBBETTORALICE11111111111111111111111111111111111111111111', 600000000, 'A', '2026-04-11 10:00:00+00'),
+    (5, 103, 'GBBETTORBOB222222222222222222222222222222222222222222222', 600000000, 'A', '2026-04-11 11:00:00+00'),
+    (6, 103, 'GBBETTORCHARLIE333333333333333333333333333333333333333333', 800000000, 'B', '2026-04-11 12:00:00+00');
+
+INSERT INTO claims (id, pool_id, claimant, amount, fee_amount, timestamp) VALUES
+    (1, 103, 'GBBETTORALICE11111111111111111111111111111111111111111111', 980000000, 20000000, '2026-04-15 13:00:00+00'),
+    (2, 103, 'GBBETTORBOB222222222222222222222222222222222222222222222', 520000000, 10000000, '2026-04-15 14:00:00+00');
