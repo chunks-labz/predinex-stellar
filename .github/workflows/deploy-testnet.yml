@@ -213,3 +213,29 @@ jobs:
             --admin "$TREASURY")
           echo "init_tx=$INIT_TX" >> "$GITHUB_OUTPUT"
           echo "Initialized contract."
+
+      # A deployment is not complete until the contract answers a read.
+      # Read the id from the idempotency file so this also works when the
+      # deploy step reused an existing contract instead of exporting a new id.
+      - name: Health check deployed contract
+        id: health_check
+        env:
+          CONTRACT_ID_FILE: deployment/contract-id.json
+        run: |
+          set -euo pipefail
+          CONTRACT_ID=$(jq -r '.contract_id // empty' "$CONTRACT_ID_FILE")
+          if [ -z "$CONTRACT_ID" ]; then
+            echo "::error::no contract id available for the health check"
+            exit 1
+          fi
+
+          POOL_COUNT=$(stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source deployer \
+            -- get_pool_count)
+          if [ -z "$POOL_COUNT" ]; then
+            echo "::error::contract $CONTRACT_ID did not return a pool count"
+            exit 1
+          fi
+          echo "Contract health check passed: get_pool_count=$POOL_COUNT"

@@ -153,6 +153,31 @@ stellar contract invoke \
   -- get_treasury_recipient
 ```
 
+### Automated health checks
+
+Deployments are not reported as ready until a post-deploy health check passes:
+
+- **Testnet contracts:** the deploy workflow invokes `get_pool_count` on the
+  deployed contract. A missing contract id or an empty response fails the job.
+- **Vercel previews:** the preview workflow probes the generated URL with
+  `scripts/check-deployment-health.py`. Transient HTTP/connection failures are
+  retried; a preview that never answers with a success status fails the job and
+  does not post a "ready" comment.
+
+Run the HTTP probe manually with:
+
+```bash
+python3 scripts/check-deployment-health.py \
+  --url "$DEPLOYMENT_URL" \
+  --attempts 10 \
+  --delay-seconds 3 \
+  --timeout-seconds 15
+```
+
+The probe exits `0` for an HTTP 2xx/3xx response, `1` when all attempts are
+exhausted, and `2` for invalid input (for example, a missing or non-HTTP URL).
+Non-retryable 4xx responses fail immediately instead of waiting for retries.
+
 ---
 
 ## 6. Wire Contract ID into the Web App

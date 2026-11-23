@@ -128,4 +128,29 @@ describe('useMarketDiscovery polling visibility policy', () => {
     expect(result.current.allMarkets).toHaveLength(1);
     expect(result.current.allMarkets[0]?.poolId).toBe(2);
   });
+
+  it('keeps cached markets visible and exposes a retry after an RPC timeout', async () => {
+    const { result } = renderHook(() => useMarketDiscovery());
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.allMarkets).toHaveLength(1);
+
+    mockWarmMarketListCache.mockReturnValueOnce(new Promise(() => {}));
+    act(() => result.current.retry());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+
+    expect(result.current.allMarkets).toHaveLength(1);
+    expect(result.current.refreshError).toMatch(/timed out/i);
+
+    await act(async () => {
+      result.current.retry();
+      await Promise.resolve();
+    });
+    expect(result.current.refreshError).toBeNull();
+    expect(result.current.allMarkets).toHaveLength(1);
+  });
 });

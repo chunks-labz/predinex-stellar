@@ -142,6 +142,8 @@ describe('validateReferrer (#1439)', () => {
     expect(() => validateReferrer(WALLET_ADDRESS, WALLET_ADDRESS)).toThrow(
       /must differ from the wager address/
     );
+    const badChecksum = `${REFERRER.slice(0, -1)}${REFERRER.endsWith('A') ? 'B' : 'A'}`;
+    expect(() => validateReferrer(badChecksum, WALLET_ADDRESS)).toThrow(/Stellar account id/);
   });
 });
 
@@ -164,6 +166,22 @@ describe('normalizePlaceWagerParams (#1439)', () => {
         amountStroops: 1,
       });
     } catch (error) {
+      expect((error as WagerValidationError).field).toBe('wallet');
+    }
+  });
+
+  it('rejects a wallet address with an invalid StrKey checksum', () => {
+    const badChecksum = `${WALLET_ADDRESS.slice(0, -1)}${WALLET_ADDRESS.endsWith('A') ? 'B' : 'A'}`;
+    try {
+      normalizePlaceWagerParams({
+        wallet: wallet(badChecksum),
+        poolId: 1,
+        outcome: 'A',
+        amountStroops: 1,
+      });
+      throw new Error('expected validation to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WagerValidationError);
       expect((error as WagerValidationError).field).toBe('wallet');
     }
   });
