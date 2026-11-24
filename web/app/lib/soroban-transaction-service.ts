@@ -20,6 +20,7 @@ import {
   TransactionBuilder,
   xdr,
 } from "@stellar/stellar-sdk";
+import { clearPending, trackPending } from "./pending-transactions";
 import { FreighterWalletClient } from "./freighter-adapter";
 
 function assertWalletAddress(address: unknown): asserts address is string {
@@ -114,7 +115,7 @@ export class SorobanTransactionService {
    * @param rpcUrl - Soroban RPC server URL (e.g. https://soroban-testnet.stellar.org)
    * @param network - Target Stellar network
    */
-  constructor(rpcUrl: string, network: "mainnet" | "testnet") {
+  constructor(rpcUrl: string, private readonly network: "mainnet" | "testnet") {
     this.server = new rpc.Server(rpcUrl);
     this.networkPassphrase = network === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
   }
@@ -152,16 +153,24 @@ export class SorobanTransactionService {
     const signedTx = new Transaction(signedXdr, this.networkPassphrase);
 
     onStageChange?.("submitting");
+    const hash = signedTx.hash().toString("hex");
+    trackPending(this.network, hash);
     const submission = await this.server.sendTransaction(signedTx);
     if (submission.status === "ERROR") {
+      clearPending(this.network, hash);
       throw new Error(
         `Submission failed: ${JSON.stringify(submission.errorResult)}`,
       );
     }
 
+    if (submission.status === "TRY_AGAIN_LATER") {
+      clearPending(this.network, hash);
+      throw new Error("RPC is busy. Please retry submission.");
+    }
     onStageChange?.("polling");
     const result = await this.pollForSuccess(submission.hash);
-    onStageChange?.("success");
+    clearPending(this.network, hash);
+    onStageChange?.(result.status === "SUCCESS" ? "success" : "error");
     return result;
   }
 

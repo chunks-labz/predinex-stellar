@@ -13,7 +13,7 @@ import { useMarketDiscovery } from "../lib/hooks/useMarketDiscovery";
 import { useFilterPresets } from "../lib/hooks/useFilterPresets";
 import RouteErrorBoundary from "../../components/RouteErrorBoundary";
 import CompareBadge from '@/components/CompareBadge';
-import { rememberMarketsHref } from "../lib/market-nav";
+import { clearMarketsPosition, getMarketsPosition, rememberMarketsHref, rememberMarketsPosition } from "../lib/market-nav";
 
 function MarketsContent() {
   const router = useRouter();
@@ -33,11 +33,13 @@ function MarketsContent() {
     [pathname, queryKey, router],
   );
 
+  const listHref = queryKey ? `${pathname}?${queryKey}` : pathname;
+
   // #1590 — remember the filtered list so "Back to markets" on a detail page
   // returns to the same search, filters and sort.
   useEffect(() => {
-    rememberMarketsHref(queryKey ? `${pathname}?${queryKey}` : pathname);
-  }, [pathname, queryKey]);
+    rememberMarketsHref(listHref);
+  }, [listHref]);
 
   const {
     paginatedMarkets,
@@ -70,6 +72,22 @@ function MarketsContent() {
 
   const { presets, savePreset, deletePreset, canSave, maxPresets } = useFilterPresets();
 
+  useEffect(() => {
+    if (isLoading || error || pagination.totalPages === 0) return;
+    const position = getMarketsPosition(listHref);
+    if (!position) return;
+    const page = Math.min(position.page, pagination.totalPages);
+    if (pagination.currentPage !== page) {
+      setPage(page);
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      window.scrollTo(0, position.scrollY);
+      clearMarketsPosition();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [listHref, isLoading, error, pagination.currentPage, pagination.totalPages, setPage]);
+
   // Calculate filter counts for display
   const filterCounts = useMemo(() => {
     const counts = {
@@ -94,7 +112,16 @@ function MarketsContent() {
   }, [filteredMarkets]);
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
+    <main
+      className="min-h-screen bg-background text-foreground"
+      onClickCapture={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        if (event.target instanceof Element && !event.target.closest('button') &&
+            event.target.closest('a[href^="/markets/"]')) {
+          rememberMarketsPosition(listHref, pagination.currentPage, window.scrollY);
+        }
+      }}
+    >
       <Navbar />
 
       <div className="pt-32 pb-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
