@@ -188,6 +188,68 @@ describe('BettingSection', () => {
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
+  // #1682 — The insufficient-balance inline message must appear during form
+  // validation (before blur) so the user knows the trade is unaffordable
+  // before a wallet signature is requested.
+  it('shows an inline insufficient-balance warning immediately when amount exceeds balance', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '5.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    // Type an amount exceeding the 5 XLM balance — no blur yet.
+    await user.type(input, '10');
+
+    const warning = screen.getByTestId('insufficient-balance-warning');
+    expect(warning).toBeInTheDocument();
+    expect(warning).toHaveTextContent('5.00 XLM');
+    expect(warning).toHaveTextContent('10.00 XLM');
+    expect(warning).toHaveAttribute('role', 'alert');
+  });
+
+  it('disables bet buttons when amount exceeds balance and does not request wallet signature', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '5.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '10');
+
+    expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
+    expect(screen.getByText(/Bet on Outcome B/i)).toBeDisabled();
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
+  });
+
+  it('does not show the insufficient-balance warning when amount is within balance', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '100.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '1.5');
+
+    expect(screen.queryByTestId('insufficient-balance-warning')).not.toBeInTheDocument();
+    expect(screen.getByText(/Bet on Outcome A/i)).not.toBeDisabled();
+  });
+
   it('requires confirmation and shows amount and odds before placing a bet', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
