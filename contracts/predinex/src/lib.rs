@@ -1071,6 +1071,19 @@ fn event_version(env: &Env) -> Symbol {
     Symbol::new(env, EVENT_SCHEMA_VERSION)
 }
 
+fn pool_status_code(status: &PoolStatus) -> u32 {
+    match status {
+        PoolStatus::Open => 0,
+        PoolStatus::Settled(_) => 1,
+        PoolStatus::Voided => 2,
+        PoolStatus::Frozen => 3,
+        PoolStatus::Disputed => 4,
+        PoolStatus::Cancelled => 5,
+        PoolStatus::Scheduled(_) => 6,
+        PoolStatus::ResolutionPending(_) => 7,
+    }
+}
+
 /// #1621 — Emit one normalized, indexable event for every persisted market
 /// lifecycle transition. The four topics are event name, schema version,
 /// pool id, and action; the payload carries the before/after states.
@@ -1092,7 +1105,7 @@ fn emit_market_lifecycle(
         ),
         MarketLifecycleEvent {
             action: action_symbol,
-            previous_status,
+            previous_status: previous_status.as_ref().map(pool_status_code),
             current_status,
             actor,
             timestamp: env.ledger().timestamp(),
@@ -1891,8 +1904,8 @@ pub enum PoolStatus {
 pub struct MarketLifecycleEvent {
     /// Stable action identifier, e.g. created, settled, frozen, or cancelled.
     pub action: Symbol,
-    /// Prior state; None for initial creation.
-    pub previous_status: Option<PoolStatus>,
+    /// Prior state code; None for initial creation.
+    pub previous_status: Option<u32>,
     /// State persisted by the transaction.
     pub current_status: PoolStatus,
     /// Authenticated actor when attributable; None for permissionless/internal changes.
@@ -11887,17 +11900,18 @@ impl PredinexContract {
                 let on_hand =
                     token::Client::new(&env, &tok).balance(&env.current_contract_address());
                 let sweepable = dust.min(on_hand);
-                if sweepable > 0 {
+                let creditable = clamp_market_fee_credit(&env, pool_id, sweepable);
+                if creditable > 0 {
                     token::Client::new(&env, &tok).transfer(
                         &env.current_contract_address(),
                         &treasury_recipient,
-                        &sweepable,
+                        &creditable,
                     );
                     let credit_key = DataKey::PoolTreasuryCredited(pool_id);
                     let prev_credit: i128 =
                         env.storage().persistent().get(&credit_key).unwrap_or(0);
                     let next_credit = prev_credit
-                        .checked_add(sweepable)
+                        .checked_add(creditable)
                         .ok_or(ContractError::TreasuryOverflow)?;
                     env.storage().persistent().set(&credit_key, &next_credit);
                     env.storage().persistent().extend_ttl(
@@ -11909,7 +11923,7 @@ impl PredinexContract {
                     // after transferring its final-claim dust.
                     let paid_key = DataKey::PoolTokenPaidOut(pool_id, tok.clone());
                     let paid_after = paid_t
-                        .checked_add(sweepable)
+                        .checked_add(creditable)
                         .ok_or(ContractError::PoolTotalOverflow)?;
                     env.storage().persistent().set(&paid_key, &paid_after);
                     env.storage().persistent().extend_ttl(
@@ -11919,7 +11933,7 @@ impl PredinexContract {
                     );
                     let deposit_key = DataKey::PoolTokenDeposit(pool_id, tok.clone());
                     let deposit_after = deposit
-                        .checked_sub(sweepable)
+                        .checked_sub(creditable)
                         .ok_or(ContractError::PoolTotalOverflow)?;
                     env.storage().persistent().set(&deposit_key, &deposit_after);
                     env.storage().persistent().extend_ttl(

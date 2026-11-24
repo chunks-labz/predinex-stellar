@@ -65,6 +65,30 @@ describe('market filtering', () => {
     expect(result).toEqual([]);
   });
 
+  it('filters markets by resolution stage', () => {
+    const markets = [
+      market({ poolId: 1, status: 'active' }),
+      market({ poolId: 2, status: 'expired' }),
+      market({ poolId: 3, status: 'disputed' }),
+      market({ poolId: 4, status: 'settled' }),
+      market({ poolId: 5, status: 'frozen' }),
+    ];
+
+    expect(filterAndSortMarkets(markets, { ...baseFilters, resolution: 'open' }).map((m) => m.poolId)).toEqual([1]);
+    expect(filterAndSortMarkets(markets, { ...baseFilters, resolution: 'resolving' }).map((m) => m.poolId)).toEqual([
+      2, 3,
+    ]);
+    expect(filterAndSortMarkets(markets, { ...baseFilters, resolution: 'resolved' }).map((m) => m.poolId)).toEqual([4]);
+    expect(filterAndSortMarkets(markets, { ...baseFilters, resolution: 'all' })).toHaveLength(5);
+  });
+
+  it('round-trips the resolution filter through URL params', () => {
+    const params = marketFiltersToParams({ ...baseFilters, resolution: 'resolved' });
+    expect(params.toString()).toBe('resolution=resolved');
+    expect(parseMarketFiltersFromParams(params).resolution).toBe('resolved');
+    expect(hasActiveMarketFilters({ ...baseFilters, resolution: 'resolving' })).toBe(true);
+  });
+
   it('sorts by newest, ending soon, highest volume, and most participants', () => {
     const markets = [
       market({ poolId: 1, createdAt: 10, timeRemaining: 3000, totalVolume: 20_000_000, participantCount: 2 }),
@@ -99,6 +123,7 @@ describe('market filtering', () => {
     expect(parsed).toEqual({
       search: 'btc',
       status: 'open',
+      resolution: 'all',
       asset: 'XLM',
       minVolume: '10',
       maxVolume: '100',
