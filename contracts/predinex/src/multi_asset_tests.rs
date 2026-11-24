@@ -180,58 +180,73 @@ fn ma_3_place_bet_with_unsupported_token_fails() {
     assert_eq!(result, Err(Ok(ContractError::UnsupportedToken)));
 }
 
-/// ma_4: Bet with a token that has no exchange rate set returns ExchangeRateNotSet.
+/// Creation validates the whole token list before charging or allocating a pool ID.
 #[test]
-fn ma_4_place_bet_without_exchange_rate_fails() {
+fn creation_rejects_empty_and_partially_approved_collateral() {
     let t = setup_ma();
     let creator = Address::generate(&t.env);
-    let _user = Address::generate(&t.env);
-
-    // Set rate for base but NOT for alt before pool creation — pool creation
-    // should fail since all tokens need a rate at creation time.
-    t.client
-        .set_token_exchange_rate(&t.treasury, &t.base_token, &10_000i128);
-    t.client
-        .set_token_exchange_rate(&t.treasury, &t.alt_token, &5_000i128);
-
-    let pool_id = make_ma_pool(&t, &creator);
-
-    // Now remove the alt rate by overwriting storage directly is not feasible,
-    // so instead we use a freshly registered token that has never had a rate set
-    // and try to insert it via a direct storage-skipping approach. The simplest
-    // way is to register a new token, skip set_token_exchange_rate for it, then
-    // verify pool creation rejects it.
-    let no_rate_asset = t.env.register_stellar_asset_contract_v2(t.treasury.clone());
-    let no_rate_token = no_rate_asset.address();
-
-    // Attempt to create a pool that includes the no-rate token.
-    let mut allowed = Vec::new(&t.env);
-    allowed.push_back(t.base_token.clone());
-    allowed.push_back(no_rate_token.clone());
-
-    let create_result = t.client.try_create_multi_asset_pool(
-        &creator,
-        &String::from_str(&t.env, "No Rate Pool"),
-        &String::from_str(&t.env, "desc"),
-        &{
-            let mut v = Vec::new(&t.env);
-            v.push_back(String::from_str(&t.env, "Yes"));
-            v.push_back(String::from_str(&t.env, "No"));
-            v
-        },
-        &3_600u64,
-        &allowed,
-        &None::<String>,
-        &MIN_CREATOR_DEPOSIT,
-        &None::<u64>,
-    );
-    assert_eq!(create_result, Err(Ok(ContractError::ExchangeRateNotSet)));
-
-    // Additionally verify get_token_exchange_rate returns None for unregistered token.
-    assert_eq!(t.client.get_token_exchange_rate(&no_rate_token), None);
-
-    let _ = pool_id; // suppress unused warning
+    t.base_admin.mint(&creator, &MIN_CREATOR_DEPOSIT);
+    t.client.set_token_exchange_rate(&t.treasury, &t.base_token, &10_000);
+    let outcomes = soroban_sdk::vec![
+        &t.env, String::from_str(&t.env, "Yes"), String::from_str(&t.env, "No")
+    ];
+    let balance = token::Client::new(&t.env, &t.base_token);
+    let count = t.client.get_pool_count();
+    for allowed in [
+        Vec::new(&t.env),
+        soroban_sdk::vec![&t.env, t.base_token.clone(), t.alt_token.clone()],
+    ] {
+        let result = t.client.try_create_multi_asset_pool(
+            &creator, &String::from_str(&t.env, "Collateral"), &String::from_str(&t.env, "Market"),
+            &outcomes, &3_600, &allowed, &None, &MIN_CREATOR_DEPOSIT, &None,
+        );
+        assert_eq!(result, Err(Ok(ContractError::UnsupportedToken)));
+        assert_eq!(t.client.get_pool_count(), count);
+        assert_eq!(balance.balance(&creator), MIN_CREATOR_DEPOSIT);
+    }
 }
+
+#[test]
+fn payout_share_checks_zero_and_maximum_balances() {
+    let share = PredinexContract::calc_payout_share;
+    assert_eq!(share(0, i128::MAX, 1), Some(0));
+    assert_eq!(share(1, 0, 1), Some(0));
+    assert_eq!(share(0, 0, 0), None);
+    assert_eq!(share(i128::MAX, i128::MAX, i128::MAX), Some(i128::MAX));
+    assert_eq!(share(2, i128::MAX, 3), None);
+    assert_eq!(share(1, -1, 2), None);
+}
+
+#[test]
+fn overflowing_multi_asset_claim_keeps_the_position_and_escrow() {
+    let t = setup_ma();
+    let creator = Address::generate(&t.env);
+    t.client.set_token_exchange_rate(&t.treasury, &t.base_token, &10_000);
+    t.client.set_token_exchange_rate(&t.treasury, &t.alt_token, &10_000);
+    let pool = make_ma_pool(&t, &creator);
+    let winner = Address::generate(&t.env);
+    let other = Address::generate(&t.env);
+    for (user, amount) in [(&winner, 200), (&other, 100)] {
+        t.base_admin.mint(user, &amount);
+        t.client.place_multi_asset_bet(user, &pool, &0, &amount, &t.base_token, &None);
+    }
+    t.env.ledger().with_mut(|l| l.timestamp = 5_000);
+    t.client.settle_pool(&creator, &pool, &0);
+    // Isolate the numeric boundary without minting an impossible token supply.
+    t.env.as_contract(&t.client.address, || {
+        t.env.storage().persistent().set(&DataKey::PoolTokenDeposit(pool, t.alt_token.clone()), &i128::MAX);
+    });
+    let balance = token::Client::new(&t.env, &t.base_token);
+    let escrow = balance.balance(&t.client.address);
+    assert!(matches!(
+        t.client.try_claim_multi_asset_winnings(&winner, &pool),
+        Err(Ok(ContractError::PoolTotalOverflow))
+    ));
+    assert_eq!(balance.balance(&t.client.address), escrow);
+    assert_eq!(balance.balance(&winner), 0);
+    assert_eq!(t.client.get_user_bet(&pool, &winner).unwrap().total_bet, 200);
+}
+
 
 /// ma_5: Two-token pool settle — sole winner receives proportional share of both tokens.
 #[test]
