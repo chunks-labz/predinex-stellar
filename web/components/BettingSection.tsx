@@ -303,6 +303,8 @@ export default function BettingSection({
       // Issue #1603: Clear field-level errors on success
       setFieldErrors({});
       setRawError(null);
+      // #1683 — Clear the retry prompt on confirmed success.
+      setBetError(null);
       onBetSuccess?.(outcome, amountStroops);
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
@@ -325,7 +327,16 @@ export default function BettingSection({
 
       // Keep the raw error behind a details toggle
       setRawError(errorMessage);
+      // #1683 — Preserve the bet amount so the user can retry without
+      // re-entering it. Populate betError so the "Try again" UI appears
+      // next to the bet buttons, giving the user a one-click retry path.
+      setBetError({ outcome, message: mapped.message });
       setPendingOutcome(null);
+      // #1683 — Reset the transaction stage and clear any pending fee prompt
+      // so stale status messages do not persist and the fee modal does not
+      // show as "confirming" on the next attempt.
+      setStage("idle");
+      setFeePrompt(null);
     } finally {
       betSubmissionInFlightRef.current = false;
       setIsBetting(false);
