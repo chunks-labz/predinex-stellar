@@ -3,6 +3,16 @@
  * Provides consistent error messages and logging
  */
 
+import { WalletError } from './wallet-errors';
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+}
+
 export class ContractError extends Error {
   constructor(
     public code: string,
@@ -35,6 +45,7 @@ export class NetworkError extends Error {
  */
 export function parseContractError(error: unknown): string {
   if (error instanceof ContractError) return error.message;
+  if (error instanceof WalletError) return error.message;
 
   const e = error as { message?: string; shortMessage?: string; reason?: string; code?: string | number };
   const raw = [e?.message, e?.shortMessage, e?.reason]

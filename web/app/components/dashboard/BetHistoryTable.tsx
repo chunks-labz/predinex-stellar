@@ -130,6 +130,30 @@ export default function BetHistoryTable({
     }
   };
 
+  const sortableHeader = (column: DashboardFilters['sortBy'], label: string) => {
+    let ariaSort: 'ascending' | 'descending' | 'none' = 'none';
+    if (filters.sortBy === column) {
+      ariaSort = filters.sortOrder === 'asc' ? 'ascending' : 'descending';
+    }
+
+    return (
+      <th scope="col" aria-sort={ariaSort} className="text-left p-4 font-medium">
+        <button
+          type="button"
+          onClick={() => onFiltersChange({
+            sortBy: column,
+            sortOrder: filters.sortBy === column && filters.sortOrder === 'desc' ? 'asc' : 'desc',
+          })}
+          aria-label={`Sort by ${label}, ${ariaSort === 'none' ? 'not sorted' : ariaSort}`}
+          className="flex items-center gap-1 hover:text-primary transition-colors"
+        >
+          {label}
+          <ArrowUpDown className="w-3 h-3" aria-hidden="true" />
+        </button>
+      </th>
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="glass p-6 rounded-xl">
@@ -295,10 +319,10 @@ export default function BetHistoryTable({
                 <tr>
                   <th scope="col" className="text-left p-4 font-medium">Market</th>
                   <th scope="col" className="text-left p-4 font-medium">Outcome</th>
-                  <th scope="col" className="text-left p-4 font-medium">Amount</th>
+                  {sortableHeader('amount', 'Amount')}
                   <th scope="col" className="text-left p-4 font-medium">Status</th>
-                  <th scope="col" className="text-left p-4 font-medium">Profit/Loss</th>
-                  <th scope="col" className="text-left p-4 font-medium">Date</th>
+                  {sortableHeader('profit', 'Profit/Loss')}
+                  {sortableHeader('date', 'Date')}
                 </tr>
               </thead>
               <tbody>

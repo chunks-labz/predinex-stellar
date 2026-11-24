@@ -16,6 +16,12 @@ import {
   MAX_OUTCOME_COUNT,
   clampBetAmount,
 } from '../../app/lib/validators';
+import {
+  validateSlippage,
+  MIN_SLIPPAGE_PERCENT,
+  MAX_SLIPPAGE_PERCENT,
+  DEFAULT_SLIPPAGE_PERCENT,
+} from '../../lib/validators';
 
 describe('validateContractId', () => {
   it('accepts a valid contract identifier', () => {
@@ -325,4 +331,37 @@ describe('clampBetAmount', () => {
     expect(clampBetAmount(1.239, { minBet: 0.1, maxBet: 1.1, balance: 100 })).toBe(1.1);
     expect(clampBetAmount(0.129, { minBet: 0.1, balance: 100 })).toBe(0.12);
   });
+});
+
+describe('validateSlippage (issue #1660)', () => {
+  it('exports the documented range and default', () => {
+    expect(MIN_SLIPPAGE_PERCENT).toBe(0.01);
+    expect(MAX_SLIPPAGE_PERCENT).toBe(5);
+    expect(DEFAULT_SLIPPAGE_PERCENT).toBe(0.5);
+  });
+
+  it.each([
+    ['', false, /required/i],
+    ['   ', false, /required/i],
+    [-1, false, /greater than 0/i],
+    [0, false, /greater than 0/i],
+    [0.005, false, /at least 0\.01%/i],
+    [0.01, true, undefined],
+    [0.5, true, undefined],
+    [5, true, undefined],
+    [5.01, false, /5% or less/i],
+    [Number.NaN, false, /must be a number/i],
+    [Number.POSITIVE_INFINITY, false, /must be a number/i],
+  ] as Array<[string | number, boolean, RegExp | undefined]>)(
+    'validates slippage %s',
+    (value, valid, errorMatch) => {
+      const result = validateSlippage(value);
+      expect(result.valid).toBe(valid);
+      if (errorMatch) {
+        expect(result.error).toMatch(errorMatch);
+      } else {
+        expect(result.error).toBeUndefined();
+      }
+    }
+  );
 });

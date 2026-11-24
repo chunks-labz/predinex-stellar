@@ -18,6 +18,9 @@ export const MIN_OUTCOMES = 2;
 export const MAX_OUTCOMES = 10;
 export const DEFAULT_PROTOCOL_FEE_BPS = 200;
 export const MAX_PROTOCOL_FEE_BPS = 1000;
+export const MIN_SLIPPAGE_PERCENT = 0.01;
+export const MAX_SLIPPAGE_PERCENT = 5;
+export const DEFAULT_SLIPPAGE_PERCENT = 0.5;
 
 export type SettlementType = 'oracle' | 'twap' | 'manual';
 export const SETTLEMENT_TYPES: SettlementType[] = ['oracle', 'twap', 'manual'];
@@ -143,6 +146,31 @@ export function validateBetAmount(amount: number): { valid: boolean; error?: str
   }
   if (amount > 1000000) {
     return { valid: false, error: 'Maximum bet is 1,000,000 XLM' };
+  }
+  return { valid: true };
+}
+
+export type SlippageErrorCode = 'required' | 'invalid' | 'nonPositive' | 'belowMin' | 'aboveMax';
+
+export function validateSlippage(
+  value: string | number
+): { valid: boolean; error?: string; code?: SlippageErrorCode } {
+  if (typeof value === 'string' && value.trim() === '') {
+    return { valid: false, error: 'Slippage is required', code: 'required' };
+  }
+
+  const parsed = typeof value === 'number' ? value : Number(value.trim());
+  if (!Number.isFinite(parsed)) {
+    return { valid: false, error: 'Slippage must be a number', code: 'invalid' };
+  }
+  if (parsed <= 0) {
+    return { valid: false, error: 'Slippage must be greater than 0', code: 'nonPositive' };
+  }
+  if (parsed < MIN_SLIPPAGE_PERCENT) {
+    return { valid: false, error: `Slippage must be at least ${MIN_SLIPPAGE_PERCENT}%`, code: 'belowMin' };
+  }
+  if (parsed > MAX_SLIPPAGE_PERCENT) {
+    return { valid: false, error: `Slippage must be ${MAX_SLIPPAGE_PERCENT}% or less`, code: 'aboveMax' };
   }
   return { valid: true };
 }

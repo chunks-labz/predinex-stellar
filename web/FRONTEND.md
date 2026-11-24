@@ -80,6 +80,7 @@ The frontend interacts with Soroban smart contracts using the Stellar SDK.
 ### Executing Transactions
 - **Wallet Signing**: Utilizes Freighter or WalletConnect to prompt users for transaction signing.
 - **Transaction Monitoring**: Custom hooks track transaction status from `pending` to `success` or `failed` on the Stellar network.
+- **Slippage Validation**: Betting slippage is validated client-side (0.01%–5%, default 0.5%) before simulation; see [Slippage Validation](docs/SLIPPAGE_VALIDATION.md).
 
 ## Styling and Design System
 
