@@ -23,9 +23,12 @@ too many, and duplicate normalized labels. Metadata URIs are limited to
 
 Durations enforce minimum and maximum lifetimes and checked expiry arithmetic.
 Bet amounts must be positive, respect configured per-pool min/max values, and
-use checked arithmetic for pool totals and user totals. Protocol fee and
-creation fee setters enforce bounds and non-negative values. Treasury
-withdrawals reject non-positive and over-balance amounts.
+use checked arithmetic for pool totals and user totals. Liquidity deposits also
+reject zero and negative amounts. `set_pool_position_cap` enforces a
+non-negative per-market cap, and trades that would push a user's outstanding
+exposure above that cap are rejected. Protocol fee and creation fee setters
+enforce bounds and non-negative values. Treasury withdrawals reject
+non-positive and over-balance amounts.
 
 ## Scheduled Pools
 
@@ -56,4 +59,6 @@ The contract already uses the maximum exported Soroban custom-error case count,
 so new validation paths reuse existing typed errors instead of expanding the
 ABI: duration errors for schedule timestamp bounds, `PoolNotExpired` for early
 scheduled execution, `InvalidRateLimitConfig` for invalid withdrawal-limit
-configuration, and `RateLimitExceeded` for withdrawal window exhaustion.
+configuration, `RateLimitExceeded` for withdrawal window exhaustion,
+`InvalidLpAmount` for non-positive liquidity deposits, and
+`ExposureLimitExceeded` for per-market position-cap breaches.

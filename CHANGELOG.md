@@ -28,6 +28,8 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - `extend_pool_duration` now rejects any single extension larger than `MAX_EXTENSION_SECS` (30 days) with `DurationTooLong`, so a creator can no longer push a market out by months in one call; the existing total-lifetime cap from `created_at` still applies
 - `rescue_tokens` now rejects `amount <= 0` with `InvalidWithdrawalAmount` instead of forwarding a zero or negative value to the token client
 - `get_leaderboard` now returns `Result<Vec<PoolLeaderboardEntry>, ContractError>` and fails with the new `InvalidLeaderboardCursor` when the supplied cursor is not in the entry list, instead of silently answering with page 1 (closes #1176)
+- Non-positive trade and liquidity-deposit amounts are now pinned by typed regression tests to `InvalidBetAmount` and `InvalidLpAmount` across the single-asset, referral, multi-asset, and liquidity paths (#1678)
+- Added a configurable per-market position cap via `set_pool_position_cap`/`get_pool_position_cap`; trades that would push a user over the cap now revert with `ExposureLimitExceeded` (#1679)
 
 ### 🤖 Bot
 - Bounded the poller's consecutive-failure map: counts are capped at `MAX_FAILURE_COUNT` (10), after which the pool is escalated once and evicted, and every cycle prunes entries for pools that have left the active expired-unsettled scan
