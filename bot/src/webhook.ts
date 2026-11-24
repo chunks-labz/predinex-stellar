@@ -32,6 +32,7 @@ import { logger } from "./logger.js";
 import { withRetry } from "./retry.js";
 import { withUpstreamTimeout } from "./upstream.js";
 import { injectWorkerTraceHeaders, withWorkerSpan } from "./tracing.js";
+import { WebhookFailureMonitor } from "./webhook-failure-monitor.js";
 
 export interface WebhookPayload {
   event: "settlement_cycle";
@@ -73,6 +74,20 @@ interface DeadLetterEntry {
 // ---------------------------------------------------------------------------
 
 let totalFailures = 0;
+const failureMonitors = new Map<string, WebhookFailureMonitor>();
+
+function getFailureMonitor(config: BotConfig, consumerName: string): WebhookFailureMonitor {
+  const key = JSON.stringify([consumerName, config.webhookFailureThreshold, config.webhookFailureWindowMs]);
+  let monitor = failureMonitors.get(key);
+  if (!monitor) {
+    monitor = new WebhookFailureMonitor({
+      threshold: config.webhookFailureThreshold,
+      windowMs: config.webhookFailureWindowMs,
+    });
+    failureMonitors.set(key, monitor);
+  }
+  return monitor;
+}
 
 /** Returns the current webhook failure count (reset per process lifetime). */
 export function getWebhookFailureCount(): number {
@@ -148,6 +163,8 @@ export async function notify(
 ): Promise<void> {
   const webhookUrl = config.webhookUrl;
   if (!webhookUrl) return;
+  const consumerName = config.webhookConsumerName?.trim() || new URL(webhookUrl).hostname;
+  const failureMonitor = getFailureMonitor(config, consumerName);
 
   return withWorkerSpan(
     "webhook.notify",
@@ -206,6 +223,7 @@ export async function notify(
           url: webhookUrl,
           settlements: payload.summary,
         });
+        failureMonitor.recordSuccess(consumerName, payload.event);
       },
       {
         maxRetries: WEBHOOK_MAX_RETRIES,
@@ -223,11 +241,14 @@ export async function notify(
 
     logger.error("Webhook delivery failed permanently after retries", {
       url: webhookUrl,
+      consumerName,
+      eventType: payload.event,
       attempts: WEBHOOK_MAX_RETRIES + 1,
       error: lastError,
       totalFailures,
       cycleNumber: payload.cycleNumber,
     });
+    failureMonitor.recordFailure(consumerName, payload.event);
 
     persistDeadLetter(webhookUrl, payload, lastError);
   }

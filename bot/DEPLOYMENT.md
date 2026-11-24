@@ -58,6 +58,10 @@ DRY_RUN=true npm start
 | `ORACLE_REQUEST_TIMEOUT_MS` | — | `10000` | Timeout for an individual oracle request |
 | `WEBHOOK_URL` | — | — | Optional POST endpoint for settlement notifications |
 | `WEBHOOK_SECRET` | — | — | HMAC-SHA256 secret for webhook signature header |
+| `WEBHOOK_CONSUMER_NAME` | — | URL hostname | Friendly consumer label in delivery alerts |
+| `WEBHOOK_FAILURE_ALERT_THRESHOLD` | — | `5` | Failed deliveries within the alert window before emitting an alert |
+| `WEBHOOK_FAILURE_WINDOW_SECONDS` | — | `900` | Rolling failure window in seconds |
+| `WEBHOOK_TIMEOUT_MS` | — | `10000` | Timeout for one webhook delivery attempt |
 | `LOG_LEVEL` | — | `info` | `debug`, `info`, `warn`, `error` |
 
 > **Security note**: `BOT_SECRET_KEY` gives full admin control over the contract.
@@ -239,13 +243,23 @@ The bot emits structured JSON logs to stdout/stderr. Each log line contains:
 | `"Pool has failed to settle repeatedly"` | `error` | Same pool failing 3+ cycles — manual action needed |
 | `"Settlement cycle encountered unhandled error"` | `error` | Bug or network issue |
 
-Set up alerts in your log aggregator for any `"level":"error"` lines.
+Monitor error-level logs, but configure paging from named alert events rather
+than paging on every error line. Webhook failures are paged from
+`webhook_delivery_failure_alert` and resolved from
+`webhook_delivery_alert_recovered`.
 
 ### Webhook notifications
 
 Set `WEBHOOK_URL` to receive a POST after each cycle that contains settlements.
 Verify the `X-Predinex-Signature` header (HMAC-SHA256 of the request body using
 `WEBHOOK_SECRET`) to authenticate the sender:
+
+Repeated permanent delivery failures emit one structured
+`webhook_delivery_failure_alert` error per consumer and event type after the
+configured threshold. A successful delivery emits
+`webhook_delivery_alert_recovered` and clears that incident. Route the alert
+log event to the team's paging system; details and log-pipeline guidance are in
+[`docs/WEBHOOK_DELIVERY_MONITORING.md`](../docs/WEBHOOK_DELIVERY_MONITORING.md).
 
 ```typescript
 import { createHmac } from "crypto";

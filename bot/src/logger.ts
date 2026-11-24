@@ -44,6 +44,7 @@ function emit(
 
   const spanCtx = getActiveSpanContext();
   const entry: Record<string, unknown> = {
+    ...fields,
     ts: new Date().toISOString(),
     level,
     service: SERVICE_NAME,
@@ -55,7 +56,6 @@ function emit(
           spanId: spanCtx.spanId,
         }
       : {}),
-    ...fields,
   };
 
   let line: string;
@@ -67,6 +67,13 @@ function emit(
       level,
       service: SERVICE_NAME,
       msg,
+      ...(spanCtx
+        ? {
+            correlationId: spanCtx.correlationId,
+            traceId: spanCtx.traceId,
+            spanId: spanCtx.spanId,
+          }
+        : {}),
       logSerializationError: true,
     });
   }

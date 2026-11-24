@@ -26,6 +26,8 @@
  */
 
 import type { PlaceBetEvent, IndexedPosition, PositionSource } from '../types/positions.js';
+import { getCorrelationContext, resolveCorrelationContext, runWithCorrelation } from '../lib/correlation.js';
+import { logger, serializeError } from '../lib/logger.js';
 
 // ---------------------------------------------------------------------------
 // Validation helpers
@@ -114,8 +116,27 @@ export class PositionIndexer {
    * @returns The upserted (or existing, if duplicate) position row.
    */
   async process(event: PlaceBetEvent): Promise<IndexedPosition> {
-    validateEvent(event);
-    return this.store.upsert(event);
+    const context = getCorrelationContext() ?? resolveCorrelationContext({}).context;
+    return runWithCorrelation(context, async () => {
+      try {
+        validateEvent(event);
+        const position = await this.store.upsert(event);
+        logger.info('indexer_event_processed', {
+          eventId: event.eventId ?? event.txHash,
+          ledgerSeq: event.ledgerSeq,
+          market: event.market,
+        });
+        return position;
+      } catch (error) {
+        logger.error('indexer_event_processing_failed', {
+          eventId: event.eventId ?? event.txHash,
+          ledgerSeq: event.ledgerSeq,
+          market: event.market,
+          ...serializeError(error),
+        });
+        throw error;
+      }
+    });
   }
 
   /**
@@ -130,25 +151,33 @@ export class PositionIndexer {
    *          since errors are re-thrown).
    */
   async processBatch(events: PlaceBetEvent[]): Promise<IndexedPosition[]> {
-    const results: IndexedPosition[] = [];
-    const errors: Array<{ index: number; error: unknown }> = [];
+    const context = getCorrelationContext() ?? resolveCorrelationContext({}).context;
+    return runWithCorrelation(context, async () => {
+      const results: IndexedPosition[] = [];
+      const errors: Array<{ index: number; error: unknown }> = [];
 
-    for (let i = 0; i < events.length; i++) {
-      try {
-        results.push(await this.process(events[i]));
-      } catch (err) {
-        errors.push({ index: i, error: err });
+      for (let i = 0; i < events.length; i++) {
+        try {
+          results.push(await this.process(events[i]));
+        } catch (err) {
+          errors.push({ index: i, error: err });
+        }
       }
-    }
 
-    if (errors.length > 0) {
-      const summary = errors
-        .map(({ index, error }) => `[${index}] ${(error as Error)?.message ?? String(error)}`)
-        .join('; ');
-      throw new Error(`${errors.length} event(s) failed to process: ${summary}`);
-    }
+      if (errors.length > 0) {
+        const summary = errors
+          .map(({ index, error }) => `[${index}] ${(error as Error)?.message ?? String(error)}`)
+          .join('; ');
+        logger.error('indexer_batch_processing_failed', {
+          eventCount: events.length,
+          failedCount: errors.length,
+        });
+        throw new Error(`${errors.length} event(s) failed to process: ${summary}`);
+      }
 
-    return results;
+      logger.info('indexer_batch_processed', { eventCount: results.length });
+      return results;
+    });
   }
 
   /**
@@ -163,6 +192,19 @@ export class PositionIndexer {
    * @returns The number of rows removed.
    */
   async handleReorg(latestSafeSeq: number): Promise<number> {
-    return this.store.rollback(latestSafeSeq);
+    const context = getCorrelationContext() ?? resolveCorrelationContext({}).context;
+    return runWithCorrelation(context, async () => {
+      try {
+        const removed = await this.store.rollback(latestSafeSeq);
+        logger.info('indexer_reorg_processed', { latestSafeSeq, removed });
+        return removed;
+      } catch (error) {
+        logger.error('indexer_reorg_processing_failed', {
+          latestSafeSeq,
+          ...serializeError(error),
+        });
+        throw error;
+      }
+    });
   }
 }

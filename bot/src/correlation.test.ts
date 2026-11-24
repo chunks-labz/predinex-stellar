@@ -108,4 +108,28 @@ describe("worker correlation (Issue #1491)", () => {
       logger.info("cycle_started");
     });
   });
+
+  it("keeps the active correlation ID on normal and serialization-fallback logs", async () => {
+    const stdout = captureStdout();
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+
+    await withWorkerSpan(
+      "worker.job.test",
+      async () => {
+        logger.info("correlation_cannot_be_overridden", { correlationId: "untrusted-corr" });
+        logger.info("serialization_fallback", cyclic);
+      },
+      { parentContext: { "x-correlation-id": "trusted-corr" } },
+    );
+
+    expect(parseLines(stdout)).toMatchObject([
+      { msg: "correlation_cannot_be_overridden", correlationId: "trusted-corr" },
+      {
+        msg: "serialization_fallback",
+        correlationId: "trusted-corr",
+        logSerializationError: true,
+      },
+    ]);
+  });
 });

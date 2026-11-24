@@ -57,7 +57,7 @@ The full table is in [`bot/DEPLOYMENT.md`](../bot/DEPLOYMENT.md). The minimum re
 | `CONTRACT_ID` | **Yes** | — | Predinex contract ID (`C…` strkey). |
 | `BOT_SECRET_KEY` | **Yes** | — | Bot wallet secret; must be a contract admin. Treat it as a root credential. |
 
-`STELLAR_NETWORK` defaults to `testnet`. `AUTO_SETTLE_ENABLED`, oracle settings, webhook settings, and retry knobs are optional and documented in the bot deployment guide.
+`STELLAR_NETWORK` defaults to `testnet`. `AUTO_SETTLE_ENABLED`, oracle settings, webhook settings, and retry knobs are optional and documented in the bot deployment guide. Webhook delivery alerts are configured with `WEBHOOK_FAILURE_ALERT_THRESHOLD`, `WEBHOOK_FAILURE_WINDOW_SECONDS`, and optional `WEBHOOK_CONSUMER_NAME`; see [WEBHOOK_DELIVERY_MONITORING.md](./WEBHOOK_DELIVERY_MONITORING.md).
 
 ---
 

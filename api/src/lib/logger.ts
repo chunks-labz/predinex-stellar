@@ -66,6 +66,7 @@ function emit(level: LogLevel, msg: string, fields?: Record<string, unknown>): v
 
   const context = getCorrelationContext();
   const entry: Record<string, unknown> = {
+    ...fields,
     ts: new Date().toISOString(),
     level,
     service: SERVICE_NAME,
@@ -78,7 +79,6 @@ function emit(level: LogLevel, msg: string, fields?: Record<string, unknown>): v
           ...(context.spanId ? { spanId: context.spanId } : {}),
         }
       : {}),
-    ...fields,
   };
 
   let line: string;
@@ -90,6 +90,14 @@ function emit(level: LogLevel, msg: string, fields?: Record<string, unknown>): v
       level,
       service: SERVICE_NAME,
       msg,
+      ...(context
+        ? {
+            correlationId: context.correlationId,
+            requestId: context.requestId,
+            ...(context.traceId ? { traceId: context.traceId } : {}),
+            ...(context.spanId ? { spanId: context.spanId } : {}),
+          }
+        : {}),
       logSerializationError: true,
     });
   }
