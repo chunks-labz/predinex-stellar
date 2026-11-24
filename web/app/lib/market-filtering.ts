@@ -3,6 +3,7 @@ import type {
   MarketFilters,
   MarketStatusFilter,
   ProcessedMarket,
+  ResolutionFilter,
   SortOption,
   TimeRangeFilter,
 } from './market-types';
@@ -10,6 +11,7 @@ import type {
 export const DEFAULT_MARKET_FILTERS: MarketFilters = {
   search: '',
   status: 'all',
+  resolution: 'all',
   asset: 'all',
   minVolume: '',
   maxVolume: '',
@@ -25,6 +27,7 @@ const STATUS_VALUES = new Set<MarketStatusFilter>([
   'frozen',
   'expired',
 ]);
+const RESOLUTION_VALUES = new Set<ResolutionFilter>(['all', 'open', 'resolving', 'resolved']);
 const SORT_VALUES = new Set<SortOption>(['newest', 'ending-soon', 'volume', 'participants']);
 const TIME_RANGE_VALUES = new Set<TimeRangeFilter>([
   'all',
@@ -51,6 +54,12 @@ function normalizeStatus(value: string | null): MarketStatusFilter {
   return STATUS_VALUES.has(value as MarketStatusFilter) ? (value as MarketStatusFilter) : DEFAULT_MARKET_FILTERS.status;
 }
 
+function normalizeResolution(value: string | null): ResolutionFilter {
+  return RESOLUTION_VALUES.has(value as ResolutionFilter)
+    ? (value as ResolutionFilter)
+    : DEFAULT_MARKET_FILTERS.resolution;
+}
+
 function normalizeSort(value: string | null): SortOption {
   return SORT_VALUES.has(value as SortOption) ? (value as SortOption) : DEFAULT_MARKET_FILTERS.sortBy;
 }
@@ -65,6 +74,7 @@ export function normalizeMarketFilters(filters: Partial<MarketFilters>): MarketF
   return {
     search: filters.search?.trim() ?? DEFAULT_MARKET_FILTERS.search,
     status: normalizeStatus(filters.status ?? null),
+    resolution: normalizeResolution(filters.resolution ?? null),
     asset: filters.asset?.trim() || DEFAULT_MARKET_FILTERS.asset,
     minVolume: filters.minVolume?.trim() ?? DEFAULT_MARKET_FILTERS.minVolume,
     maxVolume: filters.maxVolume?.trim() ?? DEFAULT_MARKET_FILTERS.maxVolume,
@@ -77,6 +87,7 @@ export function parseMarketFiltersFromParams(params: URLSearchParams): MarketFil
   return {
     search: params.get('q') ?? '',
     status: normalizeStatus(params.get('status')),
+    resolution: normalizeResolution(params.get('resolution')),
     asset: params.get('asset') ?? DEFAULT_MARKET_FILTERS.asset,
     minVolume: params.get('minVolume') ?? '',
     maxVolume: params.get('maxVolume') ?? '',
@@ -91,6 +102,9 @@ export function marketFiltersToParams(filters: MarketFilters): URLSearchParams {
 
   if (normalized.search) params.set('q', normalized.search);
   if (normalized.status !== DEFAULT_MARKET_FILTERS.status) params.set('status', normalized.status);
+  if (normalized.resolution !== DEFAULT_MARKET_FILTERS.resolution) {
+    params.set('resolution', normalized.resolution);
+  }
   if (normalized.asset !== DEFAULT_MARKET_FILTERS.asset) params.set('asset', normalized.asset);
   if (normalized.minVolume) params.set('minVolume', normalized.minVolume);
   if (normalized.maxVolume) params.set('maxVolume', normalized.maxVolume);
@@ -108,6 +122,18 @@ export function getMarketAssetOptions(markets: ProcessedMarket[]): string[] {
   const assets = new Set<string>();
   markets.forEach((market) => assets.add(normalizeAssetType(market.assetType)));
   return [...assets].sort();
+}
+
+// #1703 — roll the five fine-grained statuses up into the three resolution
+// stages shown in the resolution filter above the market table.
+function matchesResolution(market: ProcessedMarket, resolution: ResolutionFilter): boolean {
+  if (resolution === 'all') return true;
+  if (resolution === 'open') return market.status === 'active';
+  if (resolution === 'resolved') return market.status === 'settled';
+  // 'resolving' — expired or disputed markets are past their close but have
+  // not yet reached a final settled state; 'frozen' is admin-gated and lives
+  // outside the resolution lifecycle.
+  return market.status === 'expired' || market.status === 'disputed';
 }
 
 function matchesStatus(market: ProcessedMarket, status: MarketStatusFilter): boolean {
@@ -169,6 +195,7 @@ export function filterAndSortMarkets(
     }
 
     if (!matchesStatus(market, normalized.status)) return false;
+    if (!matchesResolution(market, normalized.resolution)) return false;
 
     if (selectedAsset !== 'all' && normalizeAssetType(market.assetType).toLowerCase() !== selectedAsset) {
       return false;

@@ -34,6 +34,9 @@ mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
 mod issue_1621_1624_tests;
+mod issue_1704_tests;
+mod issue_1705_tests;
+mod issue_1706_tests;
 mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
@@ -1155,6 +1158,10 @@ pub enum DataKey {
     PoolSettlementProtocolFee(u32),
     /// #195 — running total credited to aggregate `Treasury` from this pool (fee + dust).
     PoolTreasuryCredited(u32),
+    /// #1706 — contract-wide ceiling on the cumulative protocol fee that may be
+    /// credited to the treasury from a single market. `0` (the default) disables
+    /// the cap. Set by the treasury recipient via `set_protocol_fee_per_market_cap`.
+    ProtocolFeePerMarketCap,
     /// #191 — contract state schema version stored on-chain for compatibility checks.
     ContractVersion,
     /// #1400 — Pending admin address staged by `propose_admin`, consumed by `accept_admin`.
@@ -1368,6 +1375,15 @@ pub enum DataKey {
     /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
     /// called on a `ResolutionPending` pool.
     PoolChallenges(u32),
+    /// #1705 — Configurable maximum age, in seconds, of the last oracle update
+    /// accepted at settlement. `0` disables the check.
+    StaleOracleThresholdSecs,
+    /// #1705 — Ledger timestamp of the last oracle/TWAP refresh for a pool.
+    OracleLastUpdated(u32),
+    /// Monotonic sequence for the admin audit log.
+    AuditSeq,
+    /// A single admin-action audit record.
+    AuditRecord(u64),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1403,6 +1419,44 @@ fn protocol_fee_cap_bps(env: &Env) -> u32 {
     persistent
         .get::<_, u32>(&DataKey::ProtocolFeeCap)
         .unwrap_or(PROTOCOL_FEE_MAX_BPS)
+}
+
+/// #1706 — Read the configured per-market cumulative protocol-fee cap. A
+/// value of `0` means the cap is disabled and fees accrue without a market
+/// ceiling.
+fn protocol_fee_per_market_cap(env: &Env) -> i128 {
+    env.storage()
+        .persistent()
+        .get::<_, i128>(&DataKey::ProtocolFeePerMarketCap)
+        .unwrap_or(DEFAULT_PROTOCOL_FEE_PER_MARKET_CAP)
+}
+
+/// #1706 — Clamp a proposed treasury credit so cumulative fees for a market
+/// never exceed the configured per-market cap. Returns the amount that may
+/// actually be credited (`<= requested`). When the cap is disabled (`0`) the
+/// requested amount is returned unchanged.
+fn clamp_market_fee_credit(env: &Env, pool_id: u32, requested: i128) -> i128 {
+    if requested <= 0 {
+        return requested;
+    }
+    let cap = protocol_fee_per_market_cap(env);
+    if cap == 0 {
+        return requested;
+    }
+    let credited: i128 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::PoolTreasuryCredited(pool_id))
+        .unwrap_or(0);
+    if credited >= cap {
+        return 0;
+    }
+    let remaining = cap - credited;
+    if requested > remaining {
+        remaining
+    } else {
+        requested
+    }
 }
 
 /// Maximum bet fee rate in basis points. Matches the protocol fee cap so that
@@ -1497,6 +1551,11 @@ pub const MIN_UPDATE_INTERVAL: u64 = 60;
 /// #1444 — Default oracle staleness threshold: 0 (disabled). Set via
 /// `set_stale_oracle_threshold` by the treasury recipient.
 const DEFAULT_STALE_ORACLE_THRESHOLD_SECS: u64 = 0;
+
+/// #1706 — Default per-market cumulative protocol-fee cap in stroops. `0`
+/// disables the cap, preserving the pre-feature behaviour where fees accrue
+/// without a market-level ceiling. Set via `set_protocol_fee_per_market_cap`.
+const DEFAULT_PROTOCOL_FEE_PER_MARKET_CAP: i128 = 0;
 
 pub const GRACE_PERIOD_SECS: u64 = 7 * 24 * 60 * 60; // 7 days grace period for refunds
 
@@ -1669,6 +1728,11 @@ pub enum ContractError {
     TooManyWebhookEventTypes = 100,
     /// #1622 — Webhook filter list repeats an event type.
     DuplicateWebhookEventType = 101,
+    /// #1705 — Settlement was attempted with an oracle price older than the
+    /// configured maximum age.
+    StaleOraclePrice = 102,
+    /// #1705 — Batch settlement request repeated a pool ID.
+    DuplicateSettlementRequest = 103,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -2757,7 +2821,7 @@ impl PredinexContract {
             POOL_BUMP_THRESHOLD,
             POOL_BUMP_TARGET,
         );
-        emit_admin_set(&env, None, admin);
+        emit_admin_set(&env, None, admin.clone());
         // #191 — persist the contract state schema version on initialization.
         env.storage().persistent().set(
             &DataKey::ContractVersion,
@@ -3484,6 +3548,36 @@ impl PredinexContract {
     /// Returns `false` when the feed is stale.
     pub fn is_oracle_fresh(env: Env, pool_id: u32) -> bool {
         Self::check_oracle_freshness(&env, pool_id).is_ok()
+    }
+
+    /// #1706 — Set the per-market cumulative protocol-fee cap (in stroops).
+    ///
+    /// Once the treasury has accrued `cap_stroops` worth of protocol fees from
+    /// a single market, further accrual on that market is clamped to the
+    /// remaining allowance. A value of `0` disables the cap and preserves the
+    /// pre-feature behaviour where fees accrue without a market ceiling.
+    ///
+    /// Only the treasury recipient may call this.
+    pub fn set_protocol_fee_per_market_cap(
+        env: Env,
+        caller: Address,
+        cap_stroops: i128,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+        if cap_stroops < 0 {
+            return Err(ContractError::FeeOutOfBounds);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::ProtocolFeePerMarketCap, &cap_stroops);
+        Ok(())
+    }
+
+    /// #1706 — Read the configured per-market cumulative protocol-fee cap.
+    /// Returns `0` when the cap is disabled.
+    pub fn get_protocol_fee_per_market_cap(env: Env) -> i128 {
+        protocol_fee_per_market_cap(&env)
     }
 
     /// Configure per-wallet rate limiting.
@@ -6743,6 +6837,7 @@ impl PredinexContract {
             panic_with_error!(&env, ContractError::ContractPaused);
         }
         let mut results = Vec::new(&env);
+        let mut seen_pool_ids: Vec<u32> = Vec::new(&env);
         let total = pools.len();
         let truncated = total > MAX_BATCH_OPERATIONS;
         let cap = core::cmp::min(total, MAX_BATCH_OPERATIONS);
@@ -7150,6 +7245,7 @@ impl PredinexContract {
         // can no longer be resolved and every remaining participant is refunded
         // in full rather than one side being paid from totals the contract no
         // longer holds.
+        let previous_status = pool.status.clone();
         if pool.status == PoolStatus::Open {
             pool.status = PoolStatus::Voided;
         }
@@ -7620,13 +7716,15 @@ impl PredinexContract {
         let treasury_fee_portion = fee
             .checked_sub(lp_fee_share)
             .ok_or(ContractError::TreasuryOverflow)?;
-        let treasury_delta = if is_first_claim {
+        let treasury_delta_requested = if is_first_claim {
             treasury_fee_portion
                 .checked_add(payout_dust)
                 .ok_or(ContractError::TreasuryOverflow)?
         } else {
             payout_dust
         };
+        // #1706 — clamp cumulative market-level accrual to the configured cap.
+        let treasury_delta = clamp_market_fee_credit(env, pool_id, treasury_delta_requested);
         if treasury_delta > 0 {
             let current_treasury: i128 = env
                 .storage()

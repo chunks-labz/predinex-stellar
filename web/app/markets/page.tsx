@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import { StatsCard } from '@/components/ui/StatsCard';
 import MarketFilterBar from "../components/MarketFilterBar";
+import MarketResolutionFilter from "../components/MarketResolutionFilter";
 import MarketGrid, { MARKET_GRID_CLASSES } from '@/components/MarketGrid';
 import Pagination from '@/components/Pagination';
 import { marketFiltersToParams, parseMarketFiltersFromParams } from "../lib/market-filtering";
@@ -51,6 +52,7 @@ function MarketsContent() {
     pagination,
     setSearch,
     setStatusFilter,
+    setResolutionFilter,
     setAssetFilter,
     setMinVolume,
     setMaxVolume,
@@ -166,6 +168,9 @@ function MarketsContent() {
             </button>
           </div>
         )}
+
+        {/* #1703 — Resolution-stage filter above the market list. */}
+        <MarketResolutionFilter value={filters.resolution} onChange={setResolutionFilter} />
 
         {/* Markets Grid */}
         <MarketGrid
