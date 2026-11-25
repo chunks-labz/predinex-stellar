@@ -105,7 +105,7 @@ export default function MarketGrid({
           description={
             searchQuery
               ? `No markets match "${searchQuery}". Try adjusting your search query or relaxing your filter criteria.`
-              : 'No markets match your current filter settings. Try adjusting your status, asset, or volume filters.'
+              : 'No markets match your current filter settings. Try adjusting your resolution, status, asset, or volume filters.'
           }
           icon={Search}
           secondaryActionLabel="Clear Filters"

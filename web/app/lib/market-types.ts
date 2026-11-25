@@ -55,6 +55,9 @@ export interface ProcessedMarket {
 export interface MarketFilters {
   search: string;
   status: MarketStatusFilter;
+  // #1703 — resolution-stage roll-up (open/resolving/resolved) over the finer
+  // `status` dimension, exposed as a separate filter above the market list.
+  resolution: ResolutionFilter;
   asset: string;
   minVolume: string;
   maxVolume: string;
@@ -71,6 +74,10 @@ export interface PaginationState {
 
 export type MarketStatus = 'active' | 'settled' | 'expired' | 'frozen' | 'disputed';
 export type MarketStatusFilter = 'all' | 'open' | 'settled' | 'disputed' | 'frozen' | 'expired';
+// #1703 — coarse resolution stages above the market table: open (accepting
+// bets), resolving (expired or disputed, awaiting final settlement), resolved
+// (settled).
+export type ResolutionFilter = 'all' | 'open' | 'resolving' | 'resolved';
 export type SortOption = 'newest' | 'ending-soon' | 'volume' | 'participants';
 export type TimeRangeFilter = 'all' | 'ending-24h' | 'ending-7d' | 'created-7d' | 'created-30d';
 export type StatusFilter = MarketStatusFilter;
