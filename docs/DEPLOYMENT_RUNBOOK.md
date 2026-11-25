@@ -8,6 +8,12 @@ This runbook covers deployment, monitoring, incident response, and emergency pro
 
 For full deployment instructions, including testnet and mainnet, please refer to the [Deployment Guide](deployment.md).
 
+### Graceful Service Shutdown & Smoke Check
+For verifying clean worker exit on SIGTERM, connection draining, and audit logging during deployments, see [`docs/GRACEFUL_SHUTDOWN.md`](./GRACEFUL_SHUTDOWN.md).
+```bash
+python3 scripts/check-graceful-shutdown.py --command "node dist/server.js" --port 3001
+```
+
 ## Part 2: Monitoring Runbook
 
 ### Key Metrics to Track
@@ -476,6 +482,16 @@ spec:
 ```
 
 ### Data Recovery
+
+#### Automated Backup Restore Drill (CI & Local)
+For automated verification of backup fixtures, schema integrity, and representative rows, see [`docs/BACKUP_RESTORE_DRILL.md`](./BACKUP_RESTORE_DRILL.md).
+```bash
+# Validate fixture locally without database:
+bash scripts/drill-backup-restore.sh --lint-only
+
+# Run full restore against a throwaway/scratch database:
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/predinex_drill bash scripts/drill-backup-restore.sh
+```
 
 #### Recover from Database Backup
 

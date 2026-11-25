@@ -40,6 +40,32 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_ci
         run: bash scripts/verify-migrations.sh
 
+  backup-restore-drill:
+    name: Backup Restore Drill Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: predinex_drill
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d predinex_drill"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the backup restore drill script
+        env:
+          PREDINEX_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: python3 -m unittest discover -s scripts/tests -p 'test_backup_restore_drill.py' -v
+      - name: Restore latest fixture backup and verify schema & representative rows
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/predinex_drill
+        run: bash scripts/drill-backup-restore.sh
+
   lint-and-format:
     name: Lint & Format Gate
     runs-on: ubuntu-latest
@@ -111,6 +137,14 @@ jobs:
       - name: Test post-deployment health check
         working-directory: .
         run: python3 -m unittest discover -s scripts/tests -p 'test_check_deployment_health.py' -v
+
+      - name: Test API integration examples
+        working-directory: .
+        run: python3 -m unittest discover -s scripts/tests -p 'test_api_examples.py' -v
+
+      - name: Test graceful shutdown smoke check
+        working-directory: .
+        run: python3 -m unittest discover -s scripts/tests -p 'test_check_graceful_shutdown.py' -v
 
       - name: Verify security disclosure policy
         # The policy used to advertise a mailbox on a domain that no longer
