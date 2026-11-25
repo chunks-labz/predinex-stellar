@@ -21,13 +21,15 @@ Predinex values that pre-date this registry remain unchanged. Codes 96–98 were
 appended to the existing Predinex ContractError enum. The standalone pool
 contract now uses the same numbers for equivalent failures.
 
-## Predinex-specific bounded-input errors
+## Predinex-specific errors
 
 | Code | Meaning |
 | ---: | --- |
 | 99 | TooManyAllowedTokens — multi-asset pool exceeds the allowed-token cap |
 | 100 | TooManyWebhookEventTypes — webhook filter list exceeds supported event types |
 | 101 | DuplicateWebhookEventType — webhook filter list repeats an event type |
+| 102 | InvalidTradeBatchSize — a trade batch must contain 1 to 20 items |
+| 103 | DuplicateOracleReport — the same reporter already settled this pool for this round |
 
 ## Upgrade and client compatibility
 
