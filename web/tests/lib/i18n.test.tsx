@@ -11,12 +11,16 @@
  */
 import React from 'react';
 import { renderHook, act } from '@testing-library/react';
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { I18nProvider, useI18n, useTranslation } from '@/app/lib/i18n';
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <I18nProvider>{children}</I18nProvider>
 );
+
+beforeEach(() => {
+  localStorage.clear();
+});
 
 // ─── useI18n / useTranslation alias ────────────────────────────────────────
 
@@ -112,13 +116,11 @@ describe('t() — empty state / disconnected / auth guard keys (en)', () => {
 describe('t() — fallback', () => {
   it('returns the key name when the key does not exist', () => {
     const { result } = renderHook(() => useI18n(), { wrapper });
-    // @ts-expect-error — intentionally passing an unknown key
     expect(result.current.t('non.existent.key')).toBe('non.existent.key');
   });
 
   it('returns the supplied fallback string when provided', () => {
     const { result } = renderHook(() => useI18n(), { wrapper });
-    // @ts-expect-error — intentionally passing an unknown key
     expect(result.current.t('non.existent.key', 'my fallback')).toBe('my fallback');
   });
 });
@@ -141,7 +143,7 @@ describe('setLanguage', () => {
     expect(result.current.language).toBe('fr');
     expect(result.current.t('betting.sectionTitle')).toBe('Placer un pari');
     expect(result.current.t('claim.button')).toBe('Réclamer les gains');
-    expect(result.current.t('authGuard.connectTitle')).toBe('Connectez votre wallet');
+    expect(result.current.t('authGuard.connectTitle')).toBe('Authentification requise');
   });
 
   it('falls back to English when a key is only defined in en', () => {
@@ -149,5 +151,35 @@ describe('setLanguage', () => {
     act(() => result.current.setLanguage('es'));
     // nav.markets is defined in both; just verify it returns the Spanish value
     expect(result.current.t('nav.markets')).toBe('Mercados');
+  });
+});
+
+describe('t() — slippage keys', () => {
+  const keys = [
+    'betting.slippageLabel',
+    'betting.slippageAriaLabel',
+    'betting.slippageHint',
+    'betting.slippageError',
+    'betting.slippageRequired',
+    'betting.slippageInvalid',
+    'betting.slippageNonPositive',
+    'betting.slippageBelowMin',
+    'betting.slippageAboveMax',
+  ] as const;
+
+  it.each(['en', 'es', 'fr'] as const)('resolves every slippage key in %s', (language) => {
+    const { result } = renderHook(() => useI18n(), { wrapper });
+    act(() => result.current.setLanguage(language));
+    for (const key of keys) {
+      const value = result.current.t(key);
+      expect(value).toBeTruthy();
+      expect(value).not.toBe(key);
+    }
+  });
+
+  it('uses English slippage copy by default', () => {
+    const { result } = renderHook(() => useI18n(), { wrapper });
+    expect(result.current.t('betting.slippageLabel')).toBe('Max slippage (%)');
+    expect(result.current.t('betting.slippageRequired')).toBe('Slippage is required');
   });
 });

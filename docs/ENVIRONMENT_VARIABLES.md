@@ -94,3 +94,24 @@ Forks of this repository do not have these secrets; the deploy and preview workf
 | `NEXT_PUBLIC_TOKEN_ID`, `NEXT_PUBLIC_NETWORK_PASSPHRASE` | No longer read by the web app; remove them |
 | `NEXT_PUBLIC_STACKS_API_URL` | No longer read by the web app; remove it |
 | `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL` | No workflow reads these; remove them |
+
+---
+
+## 6. Fee accumulator monitor (`scripts/`)
+
+Used by `scripts/check-fee-accumulator-growth.py`. See [FEE_ACCUMULATOR_MONITORING.md](./FEE_ACCUMULATOR_MONITORING.md).
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `RPC_URL`, `STELLAR_RPC_URL` | No | Endpoint selected by `NETWORK` | Soroban RPC URL for `simulateTransaction`. |
+| `NETWORK` | No | `testnet` | Network label used for RPC default, state keys, and alerts. |
+| `CONTRACT_ID` | **Yes** | — | Deployed contract ID read by the monitor. |
+| `FEE_GROWTH_WINDOW_SECONDS` | No | `900` | Growth window in seconds. |
+| `FEE_GROWTH_THRESHOLD_PCT` | No | `25` | Percentage growth threshold per window. |
+| `FEE_GROWTH_MIN_DELTA_STROOPS` | No | `1000000000` | Absolute stroop delta floor (100 XLM). |
+| `FEE_GROWTH_INTERVAL_SECONDS` | No | `60` | Delay between continuous checks. |
+| `FEE_GROWTH_RPC_TIMEOUT_SECONDS` | No | `10` | RPC timeout in seconds. |
+| `FEE_GROWTH_STATE_FILE` | No | `monitoring-logs/fee-accumulator-samples.ndjson` | NDJSON path for windowed samples. |
+| `FEE_GROWTH_CONTRACT_LABEL` | No | `predinex` | Safe label in alerts; addresses are rejected. |
+
+Invalid numeric values fall back to the defaults. Command-line flags override these variables.

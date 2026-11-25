@@ -12,10 +12,16 @@ export function useTransactionToast() {
   const { showToast, updateToast, removeToast } = useToast();
   const toastIdRef = useRef<string | null>(null);
 
+  const dismiss = () => {
+    if (toastIdRef.current) {
+      removeToast(toastIdRef.current);
+      toastIdRef.current = null;
+    }
+  };
+
   const onStageChange = (stage: TxStage) => {
-    if (stage === "idle") {
-      // Only remove if it's still in a loading state.
-      // If it's success or error, let it persist/auto-dismiss.
+    if (stage === "idle" || stage === "error") {
+      dismiss();
       return;
     }
 
@@ -51,10 +57,6 @@ export function useTransactionToast() {
         );
         toastIdRef.current = null; // Clear ref so next transaction starts fresh
         break;
-      case "error":
-        toastIdRef.current = null;
-        // Errors are usually handled via showError for more detail
-        break;
     }
   };
 
@@ -75,13 +77,6 @@ export function useTransactionToast() {
       toastIdRef.current = null;
     } else {
       showToast(msg, "success");
-    }
-  };
-
-  const dismiss = () => {
-    if (toastIdRef.current) {
-      removeToast(toastIdRef.current);
-      toastIdRef.current = null;
     }
   };
 
