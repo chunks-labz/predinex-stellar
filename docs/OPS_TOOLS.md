@@ -1,14 +1,15 @@
 # Operations Tools & Deployment Safety
 
-This document describes the three ops tools implemented to ensure safe, reliable deployments of Predinex Stellar contracts.
+This document describes the four ops tools implemented to ensure safe, reliable deployments of Predinex Stellar contracts.
 
 ## Overview
 
-Three scripts work together to provide comprehensive deployment safety:
+Four scripts work together to provide comprehensive deployment safety:
 
 1. **verify-wiring.sh** — Post-deploy resolver/treasury wiring smoke test
 2. **verify-wasm-checksums.sh** — WASM artifact pinning and verification
 3. **monitor-stuck-markets.sh** — Market resolution health monitoring
+4. **check-fee-accumulator-growth.py** — Treasury fee growth alerting
 
 ---
 
@@ -271,9 +272,28 @@ Suggested values:
 
 ---
 
+## 4. Fee Accumulator Growth Monitoring
+
+**Location:** `scripts/check-fee-accumulator-growth.py`
+**Issue:** #1666
+**Purpose:** Alert when cumulative protocol fee revenue grows faster than a fixed window allows.
+
+Dependency-free Python 3. It sums `get_pool_protocol_revenue(pool_id).treasury_credited`
+across `get_pool_count()` pools, falls back to `get_treasury_balance`, and emits one
+allowlisted JSON alert per incident. Samples are pruned to the configured window.
+See [Fee Accumulator Growth Monitoring](./FEE_ACCUMULATOR_MONITORING.md) for the formula,
+configuration, cron/systemd examples, and triage.
+
+```bash
+python3 scripts/check-fee-accumulator-growth.py --once \
+  --network mainnet --contract "$CONTRACT_ID" --contract-label prod-mainnet
+```
+
+---
+
 ## Deployment Checklist
 
-Use all three tools together for safe deployments:
+Use all four tools together for safe deployments:
 
 ### Pre-Deployment
 
@@ -293,6 +313,7 @@ Use all three tools together for safe deployments:
 ### Post-Deployment
 
 - [ ] Enable market monitoring: `./scripts/monitor-stuck-markets.sh --contract-id <id>`
+- [ ] Enable fee growth monitoring: `python3 scripts/check-fee-accumulator-growth.py --once --contract <id>`
 - [ ] Configure log aggregation if production
 - [ ] Test market creation and resolution flow
 - [ ] Verify monitoring catches issues

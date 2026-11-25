@@ -17,7 +17,7 @@
 - [Structured Logging and Correlation IDs](./LOGGING.md) — JSON log schema and request/job correlation.
 - [Environment Variables and Secrets](./ENVIRONMENT_VARIABLES.md) — required web/API/bot variables and GitHub Actions secrets.
 - [Failed Market Creation Monitoring](./MARKET_CREATION_MONITORING.md) — what failed `create_market` attempts record, the repeated-failure alert, and triage.
-- [Webhook Delivery Monitoring](./WEBHOOK_DELIVERY_MONITORING.md) — delivery-failure threshold alerts, deduplication, recovery, and triage.
+- [Fee Accumulator Growth Monitoring](./FEE_ACCUMULATOR_MONITORING.md) — windowed treasury fee growth alert, monotonic source, fallback caveat, and triage.
 - [Database Migrations and the Rollback Dry Run](./MIGRATIONS.md) — the migration rollback gate and how to run it locally.
 - [API Integration Examples](./API_INTEGRATION_EXAMPLES.md) — copyable request, response, and error examples for documented API endpoints.
 - [Database Backup Restore Drill](./BACKUP_RESTORE_DRILL.md) — automated backup fixture restore drill and schema/data verification.

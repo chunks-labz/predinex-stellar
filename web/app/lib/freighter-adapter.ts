@@ -46,22 +46,57 @@ export function isFreighterInstalled(): boolean {
 
 // ── Error mapping ──────────────────────────────────────────────────────────────
 
+function errorMessage(err: unknown): string {
+  return (err instanceof Error ? err.message : String(err)).toLowerCase();
+}
+
+function isRejectionError(err: unknown): boolean {
+  const msg = errorMessage(err);
+  return ['user declined', 'user rejected', 'rejected', 'cancelled', 'canceled', 'denied'].some(
+    (phrase) => msg.includes(phrase)
+  );
+}
+
+function isDisconnectError(err: unknown): boolean {
+  const msg = errorMessage(err);
+  return [
+    'disconnected',
+    'disconnect',
+    'wallet not connected',
+    'not connected',
+    'no account',
+    'account not found',
+  ].some((phrase) => msg.includes(phrase));
+}
+
 function mapFreighterError(err: unknown): WalletError {
+  if (isRejectionError(err)) {
+    return createWalletError(WalletErrorType.CONNECTION_REJECTED, 'Freighter', err instanceof Error ? err : undefined);
+  }
+
+  if (isDisconnectError(err)) {
+    return createWalletError(WalletErrorType.WALLET_DISCONNECTED, 'Freighter', err instanceof Error ? err : undefined);
+  }
+
   if (!isFreighterInstalled()) {
     return createWalletError(WalletErrorType.EXTENSION_NOT_FOUND, 'Freighter');
   }
 
-  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
-
-  if (msg.includes('user declined') || msg.includes('rejected') || msg.includes('cancelled')) {
-    return createWalletError(WalletErrorType.CONNECTION_REJECTED, 'Freighter', err instanceof Error ? err : undefined);
-  }
-
-  if (msg.includes('network') || msg.includes('timeout') || msg.includes('fetch')) {
+  if (errorMessage(err).includes('network') || errorMessage(err).includes('timeout') || errorMessage(err).includes('fetch')) {
     return createWalletError(WalletErrorType.NETWORK_ERROR, 'Freighter', err instanceof Error ? err : undefined);
   }
 
   return createWalletError(WalletErrorType.UNKNOWN_ERROR, 'Freighter', err instanceof Error ? err : undefined);
+}
+
+async function isFreighterStillConnected(api: FreighterApi | null): Promise<boolean> {
+  if (!api) return false;
+  try {
+    const { isConnected } = await api.isConnected();
+    return isConnected;
+  } catch {
+    return false;
+  }
 }
 
 // ── FreighterAdapter ───────────────────────────────────────────────────────────
@@ -101,9 +136,58 @@ export function createFreighterAdapter(
   let _address: string | null = null;
   let _isConnected = false;
   let _isLoading = false;
+  let _connectionGeneration = 0;
 
   function setState(patch: Partial<FreighterWalletClient>) {
     onStateChange(patch);
+  }
+
+  function clearConnectionState() {
+    _address = null;
+    _isConnected = false;
+    _connectionGeneration += 1;
+    setState({ address: null, isConnected: false, isLoading: false } as Partial<FreighterWalletClient>);
+  }
+
+  async function withSigning<T>(sign: (api: FreighterApi) => Promise<T>): Promise<T> {
+    const api = getFreighterApi();
+    if (!api || !_isConnected) {
+      throw createWalletError(WalletErrorType.EXTENSION_NOT_FOUND, 'Freighter');
+    }
+
+    const generation = _connectionGeneration;
+    _isLoading = true;
+    setState({ isLoading: true } as Partial<FreighterWalletClient>);
+
+    try {
+      const result = await sign(api);
+      if (generation !== _connectionGeneration || !_isConnected) {
+        throw createWalletError(WalletErrorType.WALLET_DISCONNECTED, 'Freighter');
+      }
+      if (!(await isFreighterStillConnected(api))) {
+        throw createWalletError(WalletErrorType.WALLET_DISCONNECTED, 'Freighter');
+      }
+      return result;
+    } catch (err) {
+      if (err instanceof WalletError && err.type === WalletErrorType.WALLET_DISCONNECTED) {
+        clearConnectionState();
+        throw err;
+      }
+      if (
+        !isRejectionError(err) &&
+        (isDisconnectError(err) ||
+          generation !== _connectionGeneration ||
+          !_isConnected ||
+          !(await isFreighterStillConnected(api)))
+      ) {
+        clearConnectionState();
+        throw createWalletError(WalletErrorType.WALLET_DISCONNECTED, 'Freighter', err instanceof Error ? err : undefined);
+      }
+      throw mapFreighterError(err);
+    } finally {
+      _isLoading = false;
+      setState({ isLoading: false } as Partial<FreighterWalletClient>);
+    }
   }
 
   const adapter: FreighterWalletClient = {
@@ -150,40 +234,24 @@ export function createFreighterAdapter(
     },
 
     disconnect() {
-      _address = null;
-      _isConnected = false;
-      setState({ address: null, isConnected: false } as Partial<FreighterWalletClient>);
+      clearConnectionState();
     },
 
-    async signTransaction(xdr, opts) {
-      const api = getFreighterApi();
-      if (!api || !_isConnected) {
-        throw createWalletError(WalletErrorType.EXTENSION_NOT_FOUND, 'Freighter');
-      }
-      try {
-        const result = await api.signTransaction(xdr, {
+    signTransaction(xdr, opts) {
+      return withSigning((api) =>
+        api.signTransaction(xdr, {
           networkPassphrase: opts?.networkPassphrase,
           address: opts?.address ?? _address ?? undefined,
-        });
-        return result.signedTxXdr;
-      } catch (err) {
-        throw mapFreighterError(err);
-      }
+        }).then((result) => result.signedTxXdr)
+      );
     },
 
-    async signAuthEntry(entryPreimageXdr, opts) {
-      const api = getFreighterApi();
-      if (!api || !_isConnected) {
-        throw createWalletError(WalletErrorType.EXTENSION_NOT_FOUND, 'Freighter');
-      }
-      try {
-        const result = await api.signAuthEntry(entryPreimageXdr, {
+    signAuthEntry(entryPreimageXdr, opts) {
+      return withSigning((api) =>
+        api.signAuthEntry(entryPreimageXdr, {
           address: opts?.address ?? _address ?? undefined,
-        });
-        return result.signedAuthEntry;
-      } catch (err) {
-        throw mapFreighterError(err);
-      }
+        }).then((result) => result.signedAuthEntry)
+      );
     },
 
     async getNetwork(): Promise<FreighterNetwork> {

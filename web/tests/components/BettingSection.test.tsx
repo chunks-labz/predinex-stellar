@@ -2,13 +2,14 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { axe } from '@axe-core/react';
+import axe from 'axe-core';
 import BettingSection from '@/components/BettingSection';
 import * as WalletAdapterProvider from '@/components/WalletAdapterProvider';
 import * as NetworkMismatch from '../../lib/hooks/useNetworkMismatch';
 import * as WalletAccountHook from '../../lib/hooks/useWalletAccount';
 import { useToast } from '../../providers/ToastProvider';
 import { predinexContract } from '../../app/lib/adapters/predinex-contract';
+import { createWalletError, WalletErrorType } from '@/app/lib/wallet-errors';
 import { renderWithProviders } from '../helpers/renderWithProviders';
 
 // Mock WalletAdapterProvider hook
@@ -71,18 +72,26 @@ const connectedWallet = {
   chain: 'stacks' as const,
   isConnected: true,
   isLoading: false,
+  isInstalled: true,
   address: 'ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM',
   connect: vi.fn(),
   disconnect: vi.fn(),
+  signTransaction: vi.fn(),
+  signAuthEntry: vi.fn(),
+  getNetwork: vi.fn(),
 };
 
 const disconnectedWallet = {
   chain: 'stacks' as const,
   isConnected: false,
   isLoading: false,
+  isInstalled: true,
   address: null,
   connect: vi.fn(),
   disconnect: vi.fn(),
+  signTransaction: vi.fn(),
+  signAuthEntry: vi.fn(),
+  getNetwork: vi.fn(),
 };
 
 describe('BettingSection', () => {
@@ -92,6 +101,8 @@ describe('BettingSection', () => {
     vi.clearAllMocks();
     vi.mocked(useToast).mockReturnValue({
       showToast,
+      updateToast: vi.fn(),
+      removeToast: vi.fn(),
     });
     vi.mocked(NetworkMismatch.useNetworkMismatch).mockReturnValue({
       isMismatch: false,
@@ -181,10 +192,12 @@ describe('BettingSection', () => {
     const input = screen.getByLabelText(/Enter bet amount/i);
     await user.type(input, '2');
 
-    const betButton = screen.getByText(/Bet on Outcome A/i);
-    await user.click(betButton);
+    const betButton = screen.getByRole('button', { name: /Bet on Outcome A/i });
+    expect(betButton).toBeDisabled();
 
-    expect(showToast).toHaveBeenCalledWith('Insufficient balance. Available: 1.00 XLM', 'error');
+    await user.tab();
+    expect(screen.getByText('Amount exceeds your balance of 1.00 XLM')).toBeInTheDocument();
+    expect(showToast).not.toHaveBeenCalled();
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
@@ -388,19 +401,20 @@ describe('BettingSection', () => {
       expect(document.activeElement).toBe(button);
     }
 
+    const slippageInput = screen.getByLabelText(/Maximum slippage percentage/i);
+    await user.tab();
+    expect(document.activeElement).toBe(slippageInput);
+
     await user.type(input, '1');
-    for (let index = 0; index < quickBetButtons.length; index += 1) {
+    for (let index = 0; index < quickBetButtons.length + 1; index += 1) {
       await user.tab();
     }
     const outcomeA = screen.getByRole('button', { name: /Bet on Outcome A/i });
     await user.tab();
     expect(document.activeElement).toBe(outcomeA);
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('dialog', { name: /Confirm Your Bet/i })).toBeInTheDocument();
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    await user.keyboard('{Enter}');
+    const dialogA = screen.getByRole('dialog', { name: /Confirm Your Bet/i });
+    await user.click(within(dialogA).getByRole('button', { name: /Confirm Bet/i }));
     await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
 
     vi.mocked(predinexContract.placeBetSoroban).mockClear();
@@ -409,13 +423,11 @@ describe('BettingSection', () => {
       await user.tab();
     }
     const outcomeB = screen.getByRole('button', { name: /Bet on Outcome B/i });
+    await user.tab();
     expect(document.activeElement).toBe(outcomeB);
     await user.keyboard('{Space}');
-    expect(screen.getByRole('dialog', { name: /Confirm Your Bet/i })).toBeInTheDocument();
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    await user.keyboard('{Enter}');
+    const dialogB = screen.getByRole('dialog', { name: /Confirm Your Bet/i });
+    await user.click(within(dialogB).getByRole('button', { name: /Confirm Bet/i }));
     await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
   });
 
@@ -425,7 +437,8 @@ describe('BettingSection', () => {
       <BettingSection pool={mockPool} poolId={0} />,
     );
 
-    expect(await axe(container).run()).toHaveLength(0);
+    const results = await axe.run(container);
+    expect(results.violations).toHaveLength(0);
   });
 
   // #1534 — the quick-select buttons used to fill in a raw percentage of the
@@ -570,5 +583,85 @@ describe('BettingSection', () => {
 
     // Should not throw a "useToast must be used within a ToastProvider" error
     expect(() => renderWithProviders(<BettingSection pool={mockPool} poolId={0} />)).not.toThrow();
+  });
+
+  describe('slippage validation', () => {
+    const submitBet = async (slippage: string) => {
+      const user = userEvent.setup();
+      renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+      await user.type(screen.getByLabelText(/Enter bet amount/i), '1');
+      fireEvent.change(screen.getByLabelText(/Maximum slippage percentage/i), {
+        target: { value: slippage },
+      });
+      fireEvent.blur(screen.getByLabelText(/Maximum slippage percentage/i));
+      return user;
+    };
+
+    it.each([
+      ['', /Slippage is required/i],
+      ['-1', /greater than 0/i],
+      ['5.01', /5% or less/i],
+    ])('shows an inline error and blocks submit for slippage %s', async (slippage, message) => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      await submitBet(slippage);
+
+      expect(screen.getByRole('alert')).toHaveTextContent(message);
+      expect(screen.getByLabelText(/Maximum slippage percentage/i)).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
+      expect(predinexContract.placeBetSoroban).not.toHaveBeenCalled();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('allows submission at the maximum boundary', async () => {
+      vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+      vi.mocked(predinexContract.placeBetSoroban).mockResolvedValue({ txHash: '0xboundary' });
+
+      const user = await submitBet('5');
+      await user.click(screen.getByText(/Bet on Outcome A/i));
+      await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+      await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+      expect(screen.queryByText(/Slippage must be/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('surfaces a reconnect retry after the wallet disconnects while signing', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockRejectedValueOnce(
+      createWalletError(WalletErrorType.WALLET_DISCONNECTED)
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    await user.type(screen.getByLabelText(/Enter bet amount/i), '1');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/Reconnect your wallet and try again/i)
+    );
+    expect(screen.getByRole('button', { name: /Reconnect wallet and try again/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Bet on Outcome A/i })).toHaveAttribute('aria-busy', 'false');
+  });
+
+  it('keeps the normal retry copy after a rejected signature', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockRejectedValueOnce(
+      createWalletError(WalletErrorType.CONNECTION_REJECTED)
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    await user.type(screen.getByLabelText(/Enter bet amount/i), '1');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(/Connection request was rejected/i)
+    );
+    expect(screen.getByRole('button', { name: /^Try again$/i })).toBeEnabled();
   });
 });
