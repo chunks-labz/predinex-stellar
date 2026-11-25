@@ -51,6 +51,17 @@ export function getMockUserBets(): UserBet[] {
   ];
 }
 
+/**
+ * Realized profit/loss of a settled bet (#1701): payout minus stake for a win,
+ * the lost stake for a loss. Returns `null` when the bet is not settled or the
+ * payout is unknown, so the UI can show an empty state instead of a fake zero.
+ */
+export function realizedPnl(bet: UserBet): number | null {
+  if (bet.status === 'lost') return -bet.amount;
+  if (bet.status === 'won' && Number.isFinite(bet.winnings)) return (bet.winnings as number) - bet.amount;
+  return null;
+}
+
 export function formatStxAmount(amount: number): string {
   return amount.toFixed(2);
 }

@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback } from 'react';
 import type { DashboardStats, UserBet } from './types';
 import { calculateDashboardStats } from './model';
 import { sorobanReadApi } from '../soroban-read-api';
-import { stroopsToUnits } from './formatting';
+import { stroopsToUnits } from '../formatting';
 
 async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]> {
   const poolCount = await sorobanReadApi.getPoolCount();
@@ -28,6 +28,7 @@ async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]
 
       const isSettled = pool.settled;
       const winningOutcome = pool.winningOutcome;
+      const cancellable = pool.status === 'active' && Date.now() / 1000 < pool.expiry;
 
       if (bet.amountA > 0) {
         const won = isSettled && winningOutcome === 0;
@@ -40,6 +41,9 @@ async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]
           status: !isSettled ? 'active' : won ? 'won' : lost ? 'lost' : 'pending',
           createdAt: Date.now(),
           winnings: won ? stroopsToUnits((bet.amountA / pool.totalA) * (pool.totalA + pool.totalB)) : undefined,
+          outcomeIndex: 0,
+          stakeStroops: bet.amountA,
+          cancellable,
         });
       }
 
@@ -54,6 +58,9 @@ async function fetchUserBetsFromContract(userAddress: string): Promise<UserBet[]
           status: !isSettled ? 'active' : won ? 'won' : lost ? 'lost' : 'pending',
           createdAt: Date.now(),
           winnings: won ? stroopsToUnits((bet.amountB / pool.totalB) * (pool.totalA + pool.totalB)) : undefined,
+          outcomeIndex: 1,
+          stakeStroops: bet.amountB,
+          cancellable,
         });
       }
     } catch (err) {

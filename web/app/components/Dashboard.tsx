@@ -52,7 +52,7 @@ export default function Dashboard() {
       <DashboardTabBar activeTab={activeTab} onTabChange={setActiveTab} />
 
       {activeTab === 'overview' && <DashboardOverviewPanel bets={bets} isLoading={isLoading} />}
-      {activeTab === 'bets' && <DashboardActiveBetsPanel bets={bets} isLoading={isLoading} />}
+      {activeTab === 'bets' && <DashboardActiveBetsPanel bets={bets} isLoading={isLoading} onBetCancelled={() => void fetchUserData()} />}
       {activeTab === 'history' && <DashboardHistoryPanel bets={bets} isLoading={isLoading} />}
       {activeTab === 'incentives' && <IncentivesDisplay betterId={address || session?.address} />}
 
