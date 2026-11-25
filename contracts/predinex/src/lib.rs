@@ -1671,6 +1671,10 @@ pub enum ContractError {
     TooManyWebhookEventTypes = 100,
     /// #1622 — Webhook filter list repeats an event type.
     DuplicateWebhookEventType = 101,
+    /// #1680 — `settle_pool` was called before the market's close time
+    /// (`pool.expiry`). Resolution must not be accepted while the market is
+    /// still open for trading.
+    MarketStillOpen = 102,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -6584,8 +6588,11 @@ impl PredinexContract {
             return Err(ContractError::PoolAlreadySettled);
         }
 
+        // #1680 — Reject resolution while the market is still open for trading.
+        // The ledger timestamp must be at or after the pool's close time (expiry)
+        // before an oracle result can be accepted.
         if env.ledger().timestamp() < pool.expiry {
-            return Err(ContractError::PoolNotExpired);
+            return Err(ContractError::MarketStillOpen);
         }
 
         // Block settlement of pools that have not reached the configured minimum
@@ -6777,7 +6784,7 @@ impl PredinexContract {
     /// * `PoolNotFound` – pool does not exist.
     /// * `Unauthorized` – caller is neither creator nor delegated settler.
     /// * `PoolAlreadySettled` – pool is not in `Open` status.
-    /// * `PoolNotExpired` – the pool's expiry timestamp has not been reached.
+    /// * `MarketStillOpen` – the pool's close time (`expiry`) has not been reached.
     /// * `InvalidOutcome` – `winning_outcome` is out of range.
     /// * `PoolTotalOverflow` – overflow while summing pool totals.
     ///

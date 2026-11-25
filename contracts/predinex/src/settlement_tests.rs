@@ -462,7 +462,7 @@ fn settle_edge_inputs_return_errors_instead_of_panicking() {
 
     assert_eq!(
         ctx.client.try_settle_pool(&creator, &pool_id, &0),
-        Err(Ok(ContractError::PoolNotExpired))
+        Err(Ok(ContractError::MarketStillOpen))
     );
     ctx.expire();
     assert_eq!(
@@ -482,4 +482,66 @@ fn settle_edge_inputs_return_errors_instead_of_panicking() {
         ctx.client.try_settle_pool(&outsider, &pool_id, &0),
         Err(Ok(ContractError::Unauthorized))
     );
+}
+
+// ── #1680 — Close-time guard ──────────────────────────────────────────────────
+
+/// One second before close time: resolution must be rejected.
+#[test]
+fn settle_before_close_time_returns_market_still_open() {
+    let ctx = setup();
+    let (pool_id, creator) = ctx.create_pool();
+    ctx.bettor(pool_id, 0, 100);
+    ctx.bettor(pool_id, 1, 100);
+
+    // Advance to exactly one second before expiry.
+    ctx.env
+        .ledger()
+        .with_mut(|li| li.timestamp = li.timestamp + DURATION - 1);
+
+    assert_eq!(
+        ctx.client.try_settle_pool(&creator, &pool_id, &0),
+        Err(Ok(ContractError::MarketStillOpen))
+    );
+
+    // Pool remains Open; nothing was written.
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert_eq!(pool.status, PoolStatus::Open);
+}
+
+/// Exactly at close time (timestamp == expiry): resolution must succeed.
+#[test]
+fn settle_at_close_time_succeeds() {
+    let ctx = setup();
+    let (pool_id, creator) = ctx.create_pool();
+    ctx.bettor(pool_id, 0, 100);
+    ctx.bettor(pool_id, 1, 100);
+
+    // Advance to exactly the expiry timestamp.
+    ctx.env
+        .ledger()
+        .with_mut(|li| li.timestamp = li.timestamp + DURATION);
+
+    ctx.client.settle_pool(&creator, &pool_id, &0);
+
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert_ne!(pool.status, PoolStatus::Open);
+    assert!(pool.settled);
+}
+
+/// One second after close time: resolution must succeed.
+#[test]
+fn settle_after_close_time_succeeds() {
+    let ctx = setup();
+    let (pool_id, creator) = ctx.create_pool();
+    ctx.bettor(pool_id, 0, 100);
+    ctx.bettor(pool_id, 1, 100);
+
+    // Advance to one second past expiry (what ctx.expire() normally does).
+    ctx.expire();
+
+    ctx.client.settle_pool(&creator, &pool_id, &0);
+
+    let pool = ctx.client.get_pool(&pool_id).unwrap();
+    assert!(pool.settled);
 }
