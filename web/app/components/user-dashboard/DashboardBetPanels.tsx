@@ -1,10 +1,13 @@
 import { TOKEN_SYMBOL } from '@/app/lib/formatting';
 import type { UserBet } from '@/app/lib/user-dashboard/types';
-import { formatStxAmount, getBetStatusClasses } from '@/app/lib/user-dashboard/model';
+import { formatStxAmount, getBetStatusClasses, realizedPnl } from '@/app/lib/user-dashboard/model';
+import CancelBetButton from './CancelBetButton';
 
 interface DashboardBetPanelsProps {
   bets: UserBet[];
   isLoading: boolean;
+  /** Called after an on-chain bet cancellation succeeds, to refresh the list. */
+  onBetCancelled?: () => void;
 }
 
 /** Skeleton rows that mirror the bet list layout shown once data arrives. */
@@ -29,6 +32,30 @@ function BetRowsSkeleton({ rows = 3 }: { rows?: number }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/**
+ * #1701 — Realized PnL with an explicit sign and the token symbol. Unsettled
+ * bets or bets without a known payout show a dash, never a misleading zero.
+ */
+function RealizedPnl({ bet }: { bet: UserBet }) {
+  const pnl = realizedPnl(bet);
+  if (pnl === null) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        <span aria-hidden="true">PnL —</span>
+        <span className="sr-only">Realized PnL not available</span>
+      </p>
+    );
+  }
+  const sign = pnl > 0 ? '+' : pnl < 0 ? '-' : '';
+  const tone = pnl > 0 ? 'text-green-400' : pnl < 0 ? 'text-red-400' : 'text-muted-foreground';
+  return (
+    <p className={`text-sm font-bold ${tone}`}>
+      PnL {sign}
+      {formatStxAmount(Math.abs(pnl))} {TOKEN_SYMBOL}
+    </p>
   );
 }
 
@@ -64,7 +91,7 @@ export function DashboardOverviewPanel({ bets, isLoading }: DashboardBetPanelsPr
   );
 }
 
-export function DashboardActiveBetsPanel({ bets, isLoading }: DashboardBetPanelsProps) {
+export function DashboardActiveBetsPanel({ bets, isLoading, onBetCancelled }: DashboardBetPanelsProps) {
   const active = bets.filter((bet) => bet.status === 'active');
 
   return (
@@ -86,6 +113,7 @@ export function DashboardActiveBetsPanel({ bets, isLoading }: DashboardBetPanels
               <div className="text-right shrink-0">
                 <p className="font-bold">{formatStxAmount(bet.amount)} {TOKEN_SYMBOL}</p>
                 <p className="text-xs text-muted-foreground">Active</p>
+                <CancelBetButton bet={bet} onCancelled={onBetCancelled} />
               </div>
             </div>
           ))}
@@ -117,12 +145,7 @@ export function DashboardHistoryPanel({ bets, isLoading }: DashboardBetPanelsPro
               </div>
               <div className="text-right shrink-0">
                 <p className="font-bold">{formatStxAmount(bet.amount)} {TOKEN_SYMBOL}</p>
-                {bet.winnings !== undefined && (
-                  <p className="text-sm font-bold">
-                    {bet.status === 'won' ? '+' : '-'}
-                    {formatStxAmount(bet.winnings)} {TOKEN_SYMBOL}
-                  </p>
-                )}
+                <RealizedPnl bet={bet} />
               </div>
             </div>
           ))}

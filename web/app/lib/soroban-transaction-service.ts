@@ -459,6 +459,41 @@ export class SorobanTransactionService {
   }
 
   /**
+   * Cancels (refunds) `amountStroops` of the caller's stake on `outcome`
+   * while the pool is still open (#1702).
+   */
+  async cancelBet(
+    wallet: FreighterWalletClient,
+    contractId: string,
+    params: { poolId: number; outcome: number; amountStroops: number | bigint },
+    onStageChange?: (stage: TxStage) => void,
+    onFeeEstimated?: (feeStroops: string) => Promise<boolean>,
+  ): Promise<SorobanTxResult> {
+    assertWalletAddress(wallet.address);
+
+    const contract = new Contract(contractId);
+    const sourceAccount = await this.server.getAccount(wallet.address);
+
+    const tx = new TransactionBuilder(sourceAccount, {
+      fee: "1000",
+      networkPassphrase: this.networkPassphrase,
+    })
+      .addOperation(
+        contract.call(
+          "cancel_bet",
+          new Address(wallet.address).toScVal(),
+          nativeToScVal(params.poolId, { type: "u32" }),
+          nativeToScVal(params.outcome, { type: "u32" }),
+          nativeToScVal(params.amountStroops, { type: "i128" }),
+        ),
+      )
+      .setTimeout(30)
+      .build();
+
+    return this.executeWithFeePrompt(tx, wallet, onStageChange, onFeeEstimated);
+  }
+
+  /**
    * Sets minimum and maximum bet limits for a pool (admin/creator operation).
    *
    * @param wallet - Connected Freighter wallet client

@@ -261,6 +261,30 @@ export const predinexContract = {
   },
 
   /**
+   * Submit a `cancel_bet` Soroban contract call (wallet prompt) refunding
+   * `amountStroops` of the caller's stake on `outcome` (#1702).
+   */
+  async cancelBetSoroban(params: {
+    wallet: FreighterWalletClient;
+    poolId: number;
+    outcome: number;
+    amountStroops: number | bigint;
+  }): Promise<{ txHash: string }> {
+    const { soroban } = getRuntimeConfig();
+    const result = await getSorobanService().cancelBet(params.wallet, soroban.contractId, {
+      poolId: params.poolId,
+      outcome: params.outcome,
+      amountStroops: params.amountStroops,
+    });
+
+    if (result.status === 'FAILED') {
+      throw new Error(result.error || 'Transaction failed');
+    }
+
+    return { txHash: result.txHash };
+  },
+
+  /**
    * Submit a `place_bet` Soroban contract call (wallet prompt).
    */
   async placeBetSoroban(params: {
