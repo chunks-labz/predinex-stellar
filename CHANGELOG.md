@@ -45,12 +45,17 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ### 📖 Docs
 <!-- README, RELEASE, architectural docs, inline documentation -->
+- Added graceful shutdown runbook and smoke check guide (`docs/GRACEFUL_SHUTDOWN.md`) (#1689)
+- Added backup restore drill documentation covering local execution via Docker or PostgreSQL and CI automation (`docs/BACKUP_RESTORE_DRILL.md`) (#1688)
 - Added comprehensive preview deployment documentation (`docs/preview-deployments.md`)
 - Added quick start guide for preview deployment setup in `docs/preview-deployments.md`
 - Updated README with preview deployment information
 
 ### ⚙️ Ops & CI
 <!-- GitHub Actions workflows, scripts/, tooling, dependency updates -->
+- Added graceful shutdown smoke check script (`scripts/check-graceful-shutdown.py`) that sends SIGTERM, verifies clean exit with code 0, checks for hanging workers and unclosed socket connections, and records structured audit records in deployment logs (`deployments/shutdown-smoke.log`) (#1689)
+- Server HTTP bootstrap in `api/src/server.ts` closes idle keep-alive connections on SIGTERM to allow in-flight requests to complete without blocking shutdown (#1689)
+- Added database backup restore drill (`scripts/drill-backup-restore.sh` and `db/fixtures/latest_backup.sql`) and CI gate job `backup-restore-drill` in `.github/workflows/ci.yml`, verifying schema and representative rows for indexer state, pools, bets, and claims (#1688)
 - Failed on-chain market creation from `POST /api/markets` is now recorded with non-sensitive metadata (category, contract error code, correlation ID, request shape), logged as `market_creation_failed`, and raises one `market_creation_failure_alert` when failures repeat; admins can read the state at `GET /api/markets/admin/creation-failures`. Triage steps are in `docs/MARKET_CREATION_MONITORING.md` (#1664)
 - The migration rollback gate (`scripts/verify-migrations.sh`) now applies, rolls back and re-applies each migration on its own and names the one that fails. It fails on a missing, empty or orphaned `.down.sql` and on files marked `-- irreversible`, ignores the random `\restrict` key newer `pg_dump` releases add, and has its own tests in the CI job. `docs/MIGRATIONS.md` covers running it locally (#1663)
 - Added automated preview deployment workflow for pull requests (`.github/workflows/preview-deploy.yml`)

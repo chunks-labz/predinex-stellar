@@ -47,6 +47,9 @@ const server = app.listen(PORT, () => {
 
 function shutdown(signal: string) {
   logger.info('server_stopping', { signal });
+  if (typeof server.closeIdleConnections === 'function') {
+    server.closeIdleConnections();
+  }
   server.close(() => {
     shutdownTracing()
       .catch((error) => logger.error('tracing_shutdown_failed', serializeError(error)))
@@ -55,10 +58,14 @@ function shutdown(signal: string) {
         process.exit(0);
       });
   });
-  setTimeout(() => process.exit(1), 10_000).unref();
+  setTimeout(() => {
+    logger.error('server_shutdown_timeout_exceeded', { signal });
+    process.exit(1);
+  }, 10_000).unref();
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
+export { shutdown };
 export default server;
