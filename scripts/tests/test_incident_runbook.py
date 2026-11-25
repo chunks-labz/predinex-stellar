@@ -31,6 +31,8 @@ REQUIRED_COMMANDS = (
     '$BOT_HEALTH_URL/health/metrics',
     'pg_stat_activity',
     'scripts/monitor-stuck-markets.sh',
+    '$API_URL/api/observability/indexer-lag',
+    '$API_URL/api/observability/oracle-feeds',
     'curl -fsS "$API_URL/healthz"',
 )
 

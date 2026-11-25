@@ -145,6 +145,8 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'claim.processing': 'Processing...',
     // Empty state
     'emptyState.defaultMessage': 'No items to display.',
+    // Route announcements
+    'a11y.routeAnnouncement': 'Navigated to:',
     // Disconnected state
     'disconnected.walletNotConnected': 'Wallet not connected',
     'disconnected.connectButton': 'Connect Wallet',
@@ -294,6 +296,8 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'claim.processing': 'Procesando...',
     // Empty state
     'emptyState.defaultMessage': 'No hay elementos para mostrar.',
+    // Route announcements
+    'a11y.routeAnnouncement': 'Página cargada:',
     // Disconnected state
     'disconnected.walletNotConnected': 'Cartera no conectada',
     'disconnected.connectButton': 'Conectar cartera',
@@ -443,6 +447,8 @@ const translations: Record<AppLanguage, TranslationMap> = {
     'claim.processing': 'Traitement en cours...',
     // Empty state
     'emptyState.defaultMessage': 'Aucun élément à afficher.',
+    // Route announcements
+    'a11y.routeAnnouncement': 'Page chargée :',
     // Disconnected state
     'disconnected.walletNotConnected': 'Wallet non connecté',
     'disconnected.connectButton': 'Connecter le wallet',

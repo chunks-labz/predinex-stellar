@@ -31,10 +31,14 @@ describe('ActivityFeed Component', () => {
         expect(screen.getByText('Pool #10')).toBeInTheDocument();
     });
 
-    it('renders empty state when no activities', () => {
-        render(<ActivityFeed activities={[]} isLoading={false} error={null} />);
+    it('renders empty state with a CTA and no skeleton rows for an empty response', () => {
+        const { rerender } = render(<ActivityFeed activities={[]} isLoading={true} error={null} />);
+        expect(document.querySelector('.animate-pulse')).toBeInTheDocument();
+
+        rerender(<ActivityFeed activities={[]} isLoading={false} error={null} />);
         expect(screen.getByText('No Activity Yet')).toBeInTheDocument();
-        expect(screen.getByText('Explore Markets')).toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Explore Markets' })).toHaveAttribute('href', '/markets');
+        expect(document.querySelector('.animate-pulse')).not.toBeInTheDocument();
     });
 
     it('renders error message when error is provided', () => {

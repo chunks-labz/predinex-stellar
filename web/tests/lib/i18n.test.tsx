@@ -93,6 +93,16 @@ describe('t() — empty state / disconnected / auth guard keys (en)', () => {
     expect(result.current.t('emptyState.defaultMessage')).toBe('No items to display.');
   });
 
+  it('returns route announcement strings', () => {
+    const { result } = renderHook(() => useI18n(), { wrapper });
+    expect(result.current.t('a11y.routeAnnouncement')).toBe('Navigated to:');
+    act(() => result.current.setLanguage('es'));
+    expect(result.current.t('a11y.routeAnnouncement')).toBe('Página cargada:');
+    act(() => result.current.setLanguage('fr'));
+    expect(result.current.t('a11y.routeAnnouncement')).toBe('Page chargée :');
+    act(() => result.current.setLanguage('en'));
+  });
+
   it('returns disconnected state strings', () => {
     const { result } = renderHook(() => useI18n(), { wrapper });
     expect(result.current.t('disconnected.walletNotConnected')).toBe('Wallet not connected');
@@ -141,7 +151,7 @@ describe('setLanguage', () => {
     expect(result.current.language).toBe('fr');
     expect(result.current.t('betting.sectionTitle')).toBe('Placer un pari');
     expect(result.current.t('claim.button')).toBe('Réclamer les gains');
-    expect(result.current.t('authGuard.connectTitle')).toBe('Connectez votre wallet');
+    expect(result.current.t('authGuard.connectTitle')).toBe('Authentification requise');
   });
 
   it('falls back to English when a key is only defined in en', () => {

@@ -41,6 +41,8 @@ On-call contacts: `#predinex-oncall` (primary), `#predinex-incidents` (incident 
 | Stale oracle/TWAP, settlement rejected as stale | [Stale oracle or TWAP](#8-stale-oracle-or-twap) | SEV-2 |
 | Failure immediately after a release | [Bad deployment or rollback needed](#10-bad-deployment-or-rollback-needed) | SEV-2 |
 | `market_creation_failure_alert` log, repeated failed `create_market` submissions | [Failed Market Creation Monitoring](./MARKET_CREATION_MONITORING.md#triage) | SEV-3, SEV-2 if every creation fails |
+| `indexer_lag_alert` log, `predinex_indexer_lag_ledgers` above threshold | [Database or indexer saturation](#6-database-or-indexer-saturation) | SEV-2 |
+| `stale_oracle_feed_alert` log, `predinex_oracle_feed_stale == 1` | [Stale oracle or TWAP](#8-stale-oracle-or-twap) | SEV-2 |
 
 ---
 
@@ -174,11 +176,12 @@ If `/healthz` fails, restart or replace the process. If only `/readyz` or `/heal
 
 ## 6. Database or indexer saturation
 
-1. Check connection pool usage, CPU, memory, disk, locks, and slow queries.
-2. Stop non-essential backfills and reduce indexer concurrency; never delete production data during triage.
-3. Identify and cancel only confirmed runaway queries with the database owner present.
-4. Restore headroom, validate indexer lag and error rates, then re-enable work gradually.
-5. Capture the worst queries and saturation window for follow-up capacity work.
+1. For `indexer_lag_alert`, record the chain head, indexed height, and lag from the alert or the observability endpoint; see [Indexer Lag Monitoring](./INDEXER_LAG_MONITORING.md#alert-response).
+2. Check connection pool usage, CPU, memory, disk, locks, and slow queries.
+3. Stop non-essential backfills and reduce indexer concurrency; never delete production data during triage.
+4. Identify and cancel only confirmed runaway queries with the database owner present.
+5. Restore headroom, validate indexer lag and error rates, then re-enable work gradually.
+6. Capture the worst queries and saturation window for follow-up capacity work.
 
 ```bash
 # Connections by state; long-running queries first
@@ -190,6 +193,8 @@ psql "$DATABASE_URL" -c "SELECT pid, wait_event_type, wait_event, left(query, 10
 
 # Indexer health, then API dependency view
 curl -fsS "$API_URL/health"
+curl -fsS -H "x-api-key: $ADMIN_API_KEY" "$API_URL/api/observability/indexer-lag"
+curl -fsS -H "x-api-key: $ADMIN_API_KEY" "$API_URL/api/observability/metrics"
 ```
 
 Only the database owner cancels a confirmed runaway query (`SELECT pg_cancel_backend(pid);`), and only after recording the PID and query. Never run `DELETE` against production event tables during an incident. Capture the saturation window and query text for the postmortem.
@@ -217,14 +222,16 @@ A single frozen pool is **not** a contract pause: it returns `PoolIsFrozen` (16)
 
 ## 8. Stale oracle or TWAP
 
-1. Compare `get_stale_oracle_threshold()` with the age of the affected pools' price updates.
-2. Check bot oracle logs and `upstreamTimeouts`; an unavailable oracle provider is a SEV-2 until outcomes are affected.
-3. Confirm whether `update_twap` is running: a stopped updater can make otherwise valid settlements fail as stale.
-4. For a credential change, follow the [oracle rotation procedure](./ORACLE_ROTATION.md) exactly, including the two-step `propose_admin` / `accept_admin` flow.
-5. Resume settlement only after a fresh price update and a successful read-only contract call.
+1. Record the `feed` field from `stale_oracle_feed_alert`; see [Oracle Feed Freshness Monitoring](./ORACLE_FRESHNESS_MONITORING.md#alert-response).
+2. Compare `get_stale_oracle_threshold()` with the age of the affected feed's last successful update.
+3. Check bot oracle logs and `upstreamTimeouts`; an unavailable oracle provider is a SEV-2 until outcomes are affected.
+4. Confirm whether `update_twap` is running: a stopped updater can make otherwise valid settlements fail as stale.
+5. For a credential change, follow the [oracle rotation procedure](./ORACLE_ROTATION.md) exactly, including the two-step `propose_admin` / `accept_admin` flow.
+6. Resume settlement only after a fresh price update and a successful read-only contract call.
 
 ```bash
 stellar contract invoke --id "$CONTRACT_ID" --network "$NETWORK" -- get_stale_oracle_threshold
+curl -fsS -H "x-api-key: $ADMIN_API_KEY" "$API_URL/api/observability/oracle-feeds"
 curl -fsS "$BOT_HEALTH_URL/health/metrics"
 soroban-rpc-client get_events --contract-id "$CONTRACT_ID" --limit 100
 ```

@@ -16,6 +16,7 @@ import {
   History,
 } from 'lucide-react';
 import Navbar from '@/components/Navbar';
+import EmptyState from '@/components/EmptyState';
 import RouteErrorBoundary from '../../components/RouteErrorBoundary';
 import Card from '../../components/ui/Card';
 import { DEFAULT_NETWORK, ICON_CLASS, NETWORK_CONFIG } from '../lib/constants';
@@ -309,15 +310,26 @@ function TransactionsContent() {
         {/* Transactions List */}
         <div className="space-y-3">
           {paginated.length === 0 ? (
-            <Card className="p-12 text-center bg-card/40 backdrop-blur-md border-border/50">
-              <History className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Transactions Found</h3>
-              <p className="text-muted-foreground">
-                {transactions.length === 0
-                  ? 'Your transaction history will appear here once you interact with the protocol.'
-                  : 'No transactions match your current filters.'}
-              </p>
-            </Card>
+            <EmptyState
+              icon={History}
+              title="No Transactions Found"
+              description={
+                transactions.length === 0
+                  ? 'Your transaction history will appear here once you interact with the protocol. Start by exploring the available markets.'
+                  : 'No transactions match your current filters.'
+              }
+              actionLabel={transactions.length === 0 ? 'Explore Markets' : 'Clear filters'}
+              actionHref={transactions.length === 0 ? '/markets' : undefined}
+              onAction={
+                transactions.length === 0
+                  ? undefined
+                  : () => {
+                      setFilter('all');
+                      setStatusFilter('all');
+                      setDateRange('all');
+                    }
+              }
+            />
           ) : (
             paginated.map((tx) => (
               <Card key={tx.id} className="p-5 bg-card/40 backdrop-blur-md border-border/50 hover:border-primary/30 transition-all">

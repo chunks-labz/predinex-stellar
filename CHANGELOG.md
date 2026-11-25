@@ -42,12 +42,14 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Updated `getMarkets` and `fetchAllPools` to use the corrected pool count from `get_pool_count`
 - `/api/export/transactions` now requires the caller's wallet identity (`x-predinex-wallet-address`) and rejects exports for any other address, and it rate limits on the client IP (30/hour) in addition to the per-wallet bucket (10/hour) so walking a list of target addresses can no longer reset the counter (closes #1177)
 - Added `clientIpFromHeaders()` to the shared rate-limit helper for routes that need a caller identity they cannot vary per request
+- Transaction history now shows an empty state with an "Explore Markets" CTA (or "Clear filters") and never renders skeleton rows for an empty response; client-side navigation announces the page title and focuses the main heading (#1684, #1685)
 
 ### 📖 Docs
 <!-- README, RELEASE, architectural docs, inline documentation -->
 - Added comprehensive preview deployment documentation (`docs/preview-deployments.md`)
 - Added quick start guide for preview deployment setup in `docs/preview-deployments.md`
 - Updated README with preview deployment information
+- Added indexer lag and oracle feed freshness monitoring docs with alert metadata, thresholds, and incident response steps (#1686, #1687)
 
 ### ⚙️ Ops & CI
 <!-- GitHub Actions workflows, scripts/, tooling, dependency updates -->
@@ -65,6 +67,7 @@ Versions follow [Semantic Versioning](https://semver.org/).
 - Stale bot no longer marks Stellar Wave issues (`wave` / `drips-wave`) as stale or auto-closes them after 37 days (closes #1175)
 - Oracle TWAP aggregation now rejects an empty or fully-aged-out sample window, a zero/non-finite total liquidity, and a non-finite TWAP or spot price via a typed `PriceValidationError` with a machine-readable `code`, instead of returning `Infinity`/`NaN` or crashing on an undefined sample (closes #1307)
 - Oracle `addSample` now also rejects `NaN`/`Infinity` prices and liquidity weights, which previously passed the `<= 0` check and poisoned every downstream average
+- Added admin observability endpoints with Prometheus gauges for chain/indexed ledger heights and per-feed oracle freshness, plus one-shot `indexer_lag_alert` and `stale_oracle_feed_alert` structured alerts (#1686, #1687)
 - `oracle/` is now type-checked by the API build and its tests are collected by the API vitest run, so oracle regressions fail CI instead of sitting unexecuted (closes #1307)
 
 ---

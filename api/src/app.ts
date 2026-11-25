@@ -36,6 +36,7 @@ import { eventsRouter } from './routes/events.js';
 import { gasEstimateRouter } from './routes/gasEstimate.js';
 import { insuranceRouter } from './routes/insurance.js';
 import { createMarketsRouter, type TradeHistorySource } from './routes/markets.js';
+import { observabilityRouter } from './routes/observability.js';
 import { positionsRouter } from './routes/positions.js';
 import { createReferralRouter, defaultReferralService } from './routes/referral.js';
 import { reputationRouter } from './routes/reputation.js';
@@ -187,6 +188,7 @@ export function createApp(tradeHistorySource?: TradeHistorySource): Express {
   app.use('/api/gas-estimate', gasEstimateRouter);
   app.use('/api/insurance', insuranceRouter);
   app.use('/api/markets', createMarketsRouter(undefined, undefined, tradeHistorySource));
+  app.use('/api/observability', observabilityRouter);
   app.use('/api/positions', positionsRouter);
   app.use('/api/referral', createReferralRouter(defaultReferralService));
   app.use('/api/reputation', reputationRouter);

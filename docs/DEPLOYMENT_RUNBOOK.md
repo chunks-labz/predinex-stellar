@@ -47,7 +47,8 @@ For full deployment instructions, including testnet and mainnet, please refer to
 | Metric | Description | Alert When |
 |--------|-------------|-----------|
 | RPC latency | Time to get_pool response | >2s |
-| Event indexing lag | Time behind latest ledger | >5 minutes |
+| Event indexing lag | `predinex_indexer_lag_ledgers` behind the chain head | >60 ledgers (~5 minutes) |
+| Oracle feed age | `predinex_oracle_feed_age_seconds` per feed | >900 seconds |
 | Storage size | Ledger entry count | >100,000 entries |
 | TTL extensions | Per-day maintenance transactions | >1000 txns/day |
 | Gas costs | Avg stroops per transaction | >2x historical average |
@@ -78,12 +79,15 @@ For full deployment instructions, including testnet and mainnet, please refer to
      annotations:
        summary: "Create pool failure rate >2%"
    
-   - alert: LargeVolumeSpike
-     expr: increase(place_bet_volume[1h]) > 2 * avg_over_time(place_bet_volume[7d])
-     for: 15m
-     labels:
-       severity: warning
-   ```
+    - alert: LargeVolumeSpike
+      expr: increase(place_bet_volume[1h]) > 2 * avg_over_time(place_bet_volume[7d])
+      for: 15m
+      labels:
+        severity: warning
+    ```
+
+    Scrape `GET /api/observability/metrics` with an admin `x-api-key` header for the indexer lag and oracle freshness gauges. See [Indexer Lag Monitoring](./INDEXER_LAG_MONITORING.md) and [Oracle Feed Freshness Monitoring](./ORACLE_FRESHNESS_MONITORING.md) for thresholds, alert metadata, and response steps.
+
 
 #### Event Indexing Queries
 
