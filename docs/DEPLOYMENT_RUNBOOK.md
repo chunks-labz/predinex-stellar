@@ -43,6 +43,7 @@ python3 scripts/check-graceful-shutdown.py --command "node dist/server.js" --por
 | Metric | Description | Alert When |
 |--------|-------------|-----------|
 | Protocol fee collected | Running total of treasury fees | Drops >50% month-over-month |
+| Fee accumulator growth | Growth of cumulative `treasury_credited` over 15 minutes | `delta > max(25% of baseline, 100 XLM)`; see [Fee Accumulator Growth Monitoring](./FEE_ACCUMULATOR_MONITORING.md) |
 | Participant count | Avg bettors per pool | <2 (no market) |
 | Win/loss distribution | Pool outcome probabilities | Skewed >90/10 |
 | Rate limit triggers | Wallets hitting rate limit | >5% of active users |

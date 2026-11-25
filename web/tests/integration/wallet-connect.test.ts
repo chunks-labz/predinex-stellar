@@ -183,4 +183,98 @@ describe('FreighterAdapter integration', () => {
 
     expect(network).toBe('TESTNET');
   });
+
+  it('signTransaction() reports disconnect and clears connection state', async () => {
+    installFreighterMock(
+      buildFreighterMock({
+        signTransaction: vi.fn().mockRejectedValue(new Error('Wallet disconnected while waiting for signature')),
+      })
+    );
+
+    const stateChanges: Array<{ isConnected?: boolean; address?: string | null; isLoading?: boolean }> = [];
+    const adapter = createFreighterAdapter((patch) => stateChanges.push(patch));
+    await adapter.connect();
+
+    await expect(adapter.signTransaction('test-xdr')).rejects.toMatchObject({
+      type: WalletErrorType.WALLET_DISCONNECTED,
+      message: /Reconnect your wallet and try again/,
+    });
+    expect(adapter.isConnected).toBe(false);
+    expect(adapter.address).toBeNull();
+    expect(adapter.isLoading).toBe(false);
+    expect(stateChanges).toContainEqual(expect.objectContaining({ isConnected: false, address: null }));
+    expect(stateChanges).toContainEqual(expect.objectContaining({ isLoading: false }));
+  });
+
+  it('signAuthEntry() reports disconnect and clears connection state', async () => {
+    installFreighterMock(
+      buildFreighterMock({
+        signAuthEntry: vi.fn().mockRejectedValue(new Error('Wallet disconnected')),
+      })
+    );
+
+    const adapter = createFreighterAdapter(vi.fn());
+    await adapter.connect();
+
+    await expect(adapter.signAuthEntry('test-auth-entry')).rejects.toMatchObject({
+      type: WalletErrorType.WALLET_DISCONNECTED,
+    });
+    expect(adapter.isConnected).toBe(false);
+    expect(adapter.address).toBeNull();
+    expect(adapter.isLoading).toBe(false);
+  });
+
+  it('signTransaction() reports an explicit disconnect while signing', async () => {
+    installFreighterMock(buildFreighterMock());
+
+    const adapter = createFreighterAdapter(vi.fn());
+    await adapter.connect();
+
+    let resolveSign!: (value: { signedTxXdr: string; signerAddress: string }) => void;
+    const pendingSign = new Promise<{ signedTxXdr: string; signerAddress: string }>((resolve) => {
+      resolveSign = resolve;
+    });
+    const freighter = (window as unknown as { freighter: FreighterApiMock }).freighter;
+    vi.mocked(freighter.signTransaction).mockReturnValueOnce(pendingSign);
+
+    const signPromise = adapter.signTransaction('test-xdr');
+    adapter.disconnect();
+    resolveSign({ signedTxXdr: 'signed-xdr-result', signerAddress: TEST_PUBLIC_KEY });
+
+    await expect(signPromise).rejects.toMatchObject({ type: WalletErrorType.WALLET_DISCONNECTED });
+    expect(adapter.isConnected).toBe(false);
+    expect(adapter.isLoading).toBe(false);
+  });
+
+  it('signTransaction() preserves user rejection as CONNECTION_REJECTED', async () => {
+    installFreighterMock(
+      buildFreighterMock({
+        signTransaction: vi.fn().mockRejectedValue(new Error('User rejected the request')),
+      })
+    );
+
+    const adapter = createFreighterAdapter(vi.fn());
+    await adapter.connect();
+
+    await expect(adapter.signTransaction('test-xdr')).rejects.toMatchObject({
+      type: WalletErrorType.CONNECTION_REJECTED,
+    });
+    expect(adapter.isConnected).toBe(true);
+    expect(adapter.address).toBe(TEST_PUBLIC_KEY);
+    expect(adapter.isLoading).toBe(false);
+  });
+
+  it('signTransaction() returns signed XDR and resets loading state', async () => {
+    installFreighterMock(buildFreighterMock());
+
+    const stateChanges: Array<{ isLoading?: boolean }> = [];
+    const adapter = createFreighterAdapter((patch) => stateChanges.push(patch));
+    await adapter.connect();
+
+    await expect(adapter.signTransaction('test-xdr')).resolves.toBe('signed-xdr-result');
+    expect(adapter.isConnected).toBe(true);
+    expect(adapter.isLoading).toBe(false);
+    expect(stateChanges.some((patch) => patch.isLoading === true)).toBe(true);
+    expect(stateChanges.some((patch) => patch.isLoading === false)).toBe(true);
+  });
 });

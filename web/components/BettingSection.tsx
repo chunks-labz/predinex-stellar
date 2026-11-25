@@ -10,7 +10,14 @@ import { useToast } from '@/providers/ToastProvider';
 import { predinexContract } from '@/app/lib/adapters/predinex-contract';
 import { invalidateOnPlaceBet } from '@/app/lib/cache-invalidation';
 import { toastMessages, showToastPayload } from '@/lib/toast-messages';
-import { validateBetAmount, clampBetAmount } from '@/lib/validators';
+import {
+  validateBetAmount,
+  clampBetAmount,
+  validateSlippage,
+  DEFAULT_SLIPPAGE_PERCENT,
+  MIN_SLIPPAGE_PERCENT,
+  MAX_SLIPPAGE_PERCENT,
+} from '@/lib/validators';
 import { TransactionFeeModal } from '@/components/TransactionFeeModal';
 import { TruncatedAddress } from '@/components/TruncatedAddress';
 import { NetworkMismatchWarning } from '@/components/NetworkMismatchWarning';
@@ -20,9 +27,10 @@ import { useTransactionToast } from '@/lib/hooks/useTransactionToast';
 import type { TxStage } from '@/app/lib/soroban-transaction-service';
 import { useI18n } from '@/app/lib/i18n';
 import { BetConfirmationDialog } from '@/components/BetConfirmationDialog';
-import { formatOdds, formatPrice } from '@/app/lib/formatting';
+import { formatPrice } from '@/app/lib/formatting';
 import Tooltip from '@/components/ui/Tooltip';
-import { parseContractError } from '@/app/lib/error-handler';
+import { getErrorMessage } from '@/app/lib/error-handler';
+import { WalletError, WalletErrorType } from '@/app/lib/wallet-errors';
 
 interface BettingSectionProps {
   pool: Pool;
@@ -39,9 +47,11 @@ export default function BettingSection({
   const wallet = useWallet();
   const { isConnected, address, connect } = wallet;
   const { showToast } = useToast();
-  const { onStageChange, showError, showSuccess } = useTransactionToast();
+  const { onStageChange, showError, showSuccess, dismiss } = useTransactionToast();
   const [betAmount, setBetAmount] = useState("");
   const [amountTouched, setAmountTouched] = useState(false);
+  const [slippage, setSlippage] = useState(String(DEFAULT_SLIPPAGE_PERCENT));
+  const [slippageTouched, setSlippageTouched] = useState(false);
   const [isBetting, setIsBetting] = useState(false);
   const betSubmissionInFlightRef = useRef(false);
   const [feePrompt, setFeePrompt] = useState<{
@@ -52,7 +62,11 @@ export default function BettingSection({
   const [pendingOutcome, setPendingOutcome] = useState<number | null>(null);
   // #1589 — the failure toast disappears on its own; keep the last failure next
   // to the bet buttons so the user can read it and retry the same outcome.
-  const [betError, setBetError] = useState<{ outcome: number; message: string } | null>(null);
+  const [betError, setBetError] = useState<{
+    outcome: number;
+    message: string;
+    needsReconnect?: boolean;
+  } | null>(null);
 
   // Issue #1603: Field-level error mapping for simulation failures
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -223,6 +237,35 @@ export default function BettingSection({
     .filter(Boolean)
     .join(' ');
 
+  const slippageValidation = useMemo(() => validateSlippage(slippage), [slippage]);
+  const isSlippageInvalid = !slippageValidation.valid;
+  const showSlippageError = slippageTouched && isSlippageInvalid;
+  const slippageDescribedBy = [
+    'slippage-range-hint',
+    showSlippageError ? 'slippage-error' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const slippageErrorMessage = useMemo(() => {
+    if (slippageValidation.valid) return null;
+    const min = String(MIN_SLIPPAGE_PERCENT);
+    const max = String(MAX_SLIPPAGE_PERCENT);
+    switch (slippageValidation.code) {
+      case 'required':
+        return t('betting.slippageRequired');
+      case 'invalid':
+        return t('betting.slippageInvalid');
+      case 'nonPositive':
+        return t('betting.slippageNonPositive');
+      case 'belowMin':
+        return t('betting.slippageBelowMin').replace('{min}', min);
+      case 'aboveMax':
+        return t('betting.slippageAboveMax').replace('{max}', max);
+      default:
+        return t('betting.slippageError').replace('{min}', min).replace('{max}', max);
+    }
+  }, [slippageValidation, t]);
+
   const requestBet = (outcome: number) => {
     if (!isConnected) {
       connect();
@@ -231,6 +274,10 @@ export default function BettingSection({
 
     if (isAmountInvalid) {
       setAmountTouched(true);
+      return;
+    }
+    if (isSlippageInvalid) {
+      setSlippageTouched(true);
       return;
     }
     setPendingOutcome(outcome);
@@ -242,6 +289,10 @@ export default function BettingSection({
     if (betSubmissionInFlightRef.current) return;
     if (!isConnected) {
       connect();
+      return;
+    }
+    if (isSlippageInvalid) {
+      setSlippageTouched(true);
       return;
     }
 
@@ -277,6 +328,12 @@ export default function BettingSection({
     setBetError(null);
 
     try {
+      const finalSlippageValidation = validateSlippage(slippage);
+      if (!finalSlippageValidation.valid) {
+        setSlippageTouched(true);
+        return;
+      }
+
       await predinexContract.placeBetSoroban({
         wallet,
         poolId,
@@ -309,23 +366,31 @@ export default function BettingSection({
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
 
-      // Issue #1603: Map known contract error codes to field-level messages
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const mapped = mapContractErrorToField(errorMessage);
+      const errorMessage = getErrorMessage(error);
+      const isDisconnected =
+        error instanceof WalletError && error.type === WalletErrorType.WALLET_DISCONNECTED ||
+        (typeof error === "object" &&
+          error !== null &&
+          "type" in error &&
+          error.type === WalletErrorType.WALLET_DISCONNECTED);
+      const message = isDisconnected ? t('betting.walletDisconnected') : errorMessage;
+      dismiss();
 
-      if (mapped.field) {
-        setFieldErrors((prev) => ({ ...prev, [mapped.field]: mapped.message }));
-        // Also show as toast for visibility
-        showToastPayload(showToast, {
-          title: mapped.message,
-          description: undefined,
-          variant: "error",
-        });
+      if (isDisconnected) {
+        showToast(message, "error");
+        setBetError({ outcome, message, needsReconnect: true });
       } else {
-        showError(mapped.message);
+        const mapped = mapContractErrorToField(message);
+        const field = mapped.field;
+        if (field) {
+          setFieldErrors((prev) => ({ ...prev, [field]: mapped.message }));
+          showToastPayload(showToast, { message: mapped.message, type: "error" });
+        } else {
+          showError(mapped.message);
+        }
+        setBetError({ outcome, message });
       }
 
-      // Keep the raw error behind a details toggle
       setRawError(errorMessage);
       // #1683 — Preserve the bet amount so the user can retry without
       // re-entering it. Populate betError so the "Try again" UI appears
@@ -340,8 +405,47 @@ export default function BettingSection({
     } finally {
       betSubmissionInFlightRef.current = false;
       setIsBetting(false);
+      setStage("idle");
+      onStageChange("idle");
     }
   };
+
+  const betErrorAlert = betError && !isBetting ? (
+    <div
+      role="alert"
+      className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex flex-col gap-2"
+    >
+      <div className="flex gap-2">
+        <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
+        <p className="text-sm text-red-400">
+          Your bet on {betError.outcome === 0 ? pool.outcomeA : pool.outcomeB} did not go through: {betError.message}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 pl-7">
+        <button
+          type="button"
+          onClick={() => {
+            if (betError.needsReconnect) {
+              connect();
+              return;
+            }
+            requestBet(betError.outcome);
+          }}
+          disabled={isAmountInvalid || isSlippageInvalid || isMismatch}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
+        >
+          {betError.needsReconnect ? t('betting.reconnectAndTryAgain') : 'Try again'}
+        </button>
+        <button
+          type="button"
+          onClick={() => setBetError(null)}
+          className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  ) : null;
 
   if (pool.settled) {
     // Issue #1602: Explain why a settled market cannot be traded
@@ -412,6 +516,7 @@ export default function BettingSection({
   if (!isConnected) {
     return (
       <div className="text-center py-6 bg-muted/50 rounded-lg">
+        {betErrorAlert}
         <Wallet className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
         <p className="text-lg font-bold mb-2">{t('betting.connectTitle')}</p>
         <p className="text-muted-foreground mb-4">
@@ -690,6 +795,44 @@ export default function BettingSection({
         )}
       </div>
 
+      <div>
+        <label htmlFor="slippage" className="block text-sm font-medium mb-2">
+          {t('betting.slippageLabel')}
+        </label>
+        <div className="relative">
+          <input
+            id="slippage"
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min={MIN_SLIPPAGE_PERCENT}
+            max={MAX_SLIPPAGE_PERCENT}
+            placeholder={String(DEFAULT_SLIPPAGE_PERCENT)}
+            value={slippage}
+            onChange={(e) => setSlippage(e.target.value)}
+            onBlur={() => setSlippageTouched(true)}
+            disabled={isBetting || isMismatch}
+            aria-label={t('betting.slippageAriaLabel')}
+            aria-describedby={slippageDescribedBy}
+            aria-invalid={showSlippageError}
+            className="w-full pl-4 pr-14 py-3 rounded-lg bg-background border border-input outline-none focus:border-primary focus:ring-2 focus:ring-primary/50 text-base"
+            onWheel={(e) => e.currentTarget.blur()}
+          />
+          <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-sm text-muted-foreground">%</span>
+        </div>
+        <p id="slippage-range-hint" className="text-xs text-muted-foreground mt-2">
+          {t('betting.slippageHint')
+            .replace('{min}', String(MIN_SLIPPAGE_PERCENT))
+            .replace('{max}', String(MAX_SLIPPAGE_PERCENT))
+            .replace('{default}', String(DEFAULT_SLIPPAGE_PERCENT))}
+        </p>
+        {showSlippageError && slippageErrorMessage && (
+          <p id="slippage-error" role="alert" className="text-sm text-red-500 mt-1">
+            {slippageErrorMessage}
+          </p>
+        )}
+      </div>
+
       {/* Transaction status — announced to screen readers — issue 1632 */}
       <div
         id="bet-tx-status"
@@ -716,6 +859,7 @@ export default function BettingSection({
           disabled={
             isBetting ||
             isAmountInvalid ||
+            isSlippageInvalid ||
             (walletBalance !== null &&
               hasMinBet &&
               walletBalance < minBetXlm) ||
@@ -740,6 +884,7 @@ export default function BettingSection({
           disabled={
             isBetting ||
             isAmountInvalid ||
+            isSlippageInvalid ||
             (walletBalance !== null &&
               hasMinBet &&
               walletBalance < minBetXlm) ||
@@ -770,36 +915,7 @@ export default function BettingSection({
           </pre>
         </details>
       )}
-      {betError && !isBetting && (
-        <div
-          role="alert"
-          className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex flex-col gap-2"
-        >
-          <div className="flex gap-2">
-            <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden="true" />
-            <p className="text-sm text-red-400">
-              Your bet on {betError.outcome === 0 ? pool.outcomeA : pool.outcomeB} did not go through: {betError.message}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2 pl-7">
-            <button
-              type="button"
-              onClick={() => requestBet(betError.outcome)}
-              disabled={isAmountInvalid || isMismatch}
-              className="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-red-400"
-            >
-              Try again
-            </button>
-            <button
-              type="button"
-              onClick={() => setBetError(null)}
-              className="px-3 py-1.5 text-sm font-medium rounded-lg text-muted-foreground hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
+      {betErrorAlert}
 
       {/* First-time-user explainer. Kept after the bet controls in the DOM so
           it does not change the primary keyboard flow, but it is focusable. */}
