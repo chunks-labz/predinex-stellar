@@ -29,3 +29,26 @@ export function getLastMarketsHref(): string {
   }
   return DEFAULT_MARKETS_HREF;
 }
+
+const RETURN_POSITION_KEY = 'predinex_markets_return_position';
+
+export function rememberMarketsPosition(href: string, page: number, scrollY: number) {
+  try {
+    window.sessionStorage.setItem(RETURN_POSITION_KEY, JSON.stringify({ href, page, scrollY }));
+  } catch { /* Storage is optional. */ }
+}
+
+export function getMarketsPosition(href: string): { page: number; scrollY: number } | null {
+  try {
+    const position = JSON.parse(window.sessionStorage.getItem(RETURN_POSITION_KEY) ?? 'null');
+    if (position?.href === href && Number.isSafeInteger(position.page) && position.page > 0 &&
+        Number.isFinite(position.scrollY) && position.scrollY >= 0) return position;
+  } catch { /* Ignore an unavailable or invalid snapshot. */ }
+  return null;
+}
+
+export function clearMarketsPosition() {
+  try {
+    window.sessionStorage.removeItem(RETURN_POSITION_KEY);
+  } catch { /* Storage is optional. */ }
+}

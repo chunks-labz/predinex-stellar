@@ -60,3 +60,38 @@ test.describe('Market Flow', () => {
     expect(success).toBeTruthy();
   });
 });
+for (const back of ['browser', 'link'] as const) {
+  test(`restores the filtered page and scroll position with the ${back} back action`, async ({ page }) => {
+    await page.addInitScript(() => {
+      const markets = Array.from({ length: 36 }, (_, i) => ({
+        poolId: i + 1, title: `Forecast ${i + 1}`, description: 'Forecast market',
+        outcomeA: 'Yes', outcomeB: 'No', totalVolume: 1000 + i, oddsA: 50, oddsB: 50,
+        status: i % 3 === 0 ? 'settled' : 'active', winningOutcome: null,
+        timeRemaining: 3600, createdAt: i, settledAt: null, creator: 'creator',
+      }));
+      for (const market of markets) {
+        const pool = { ...market, totalA: 500, totalB: 500, settled: market.status === 'settled',
+          expiry: Math.floor(Date.now() / 1000) + 3600 };
+        localStorage.setItem(`predinex_pool_${market.poolId}`, JSON.stringify({ version: 1, cachedAt: Date.now(), pool }));
+      }
+      localStorage.setItem('predinex_market_list_v2', JSON.stringify({ version: 2, cachedAt: Date.now(), markets }));
+    });
+    await page.goto('/markets?status=open&sort=volume');
+    await page.getByRole('button', { name: 'Next page' }).click();
+    const cards = page.getByRole('link', { name: /^View market:/ });
+    const resultIds = () => cards.evaluateAll(links => links.map(link => link.getAttribute('href')));
+    const expectedIds = await resultIds();
+    const href = page.url();
+    const card = cards.nth(6);
+    await card.scrollIntoViewIfNeeded();
+    const offset = await page.evaluate(() => window.scrollY);
+    expect(offset).toBeGreaterThan(0);
+    await card.click();
+    await expect(page).toHaveURL(/\/markets\/\d+/);
+    if (back === 'browser') await page.goBack();
+    else await page.getByRole('link', { name: /back to markets/i }).first().click();
+    await expect(page).toHaveURL(href);
+    await expect.poll(resultIds).toEqual(expectedIds);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(offset, 0);
+  });
+}

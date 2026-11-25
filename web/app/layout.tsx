@@ -6,6 +6,7 @@ import { ToastProvider } from "../providers/ToastProvider";
 import { ThemeProvider, ThemeInitScript } from "../lib/theme";
 import { I18nProvider } from "./providers/I18nProvider";
 import Footer from '@/components/Footer';
+import PendingTransactionRecovery from "./components/PendingTransactionRecovery";
 import MarketListPreloader from "./components/MarketListPreloader";
 import ServiceWorkerRegistration from '@/components/ServiceWorkerRegistration';
 import PWAInstallPrompt from '@/components/PWAInstallPrompt';
@@ -87,6 +88,7 @@ export default function RootLayout({
                 </a>
                 <ServiceWorkerRegistration />
                 <MarketListPreloader />
+                <PendingTransactionRecovery />
                 {/* #455 mobile: has-bottom-nav adds padding so content isn't hidden behind the fixed bottom nav */}
                 <div id="main-content" className="has-bottom-nav">
                   {children}

@@ -35,6 +35,7 @@
 
 #![cfg(test)]
 
+pub mod admin_authorization;
 pub mod cross_contract;
 pub mod oracle_spec;
 pub mod upgrade_safety;

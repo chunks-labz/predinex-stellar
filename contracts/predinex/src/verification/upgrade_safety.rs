@@ -272,3 +272,31 @@ fn settlement_does_not_disturb_the_version() {
         "claiming changed the schema version"
     );
 }
+
+/// The committed v1 ledger contains a settled binary market with an unclaimed
+/// losing position and credited fees. Its stored Pool and UserBet maps can be
+/// read in place. Renamed or removed required fields would need an explicit
+/// migration before deploying a reader with the new layout.
+#[test]
+fn current_contract_reads_the_saved_v1_settlement() {
+    use crate::{PoolStatus, PredinexContract, PredinexContractClient};
+    use soroban_sdk::Address;
+
+    let env = Env::from_snapshot_file(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/test_snapshots/integration_tests/single_asset_pool_full_lifecycle.1.json"
+    ));
+    let contract = Address::from_str(&env, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM");
+    let bettor = Address::from_str(&env, "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4");
+    env.register_at(&contract, PredinexContract, ());
+    let client = PredinexContractClient::new(&env, &contract);
+
+    let pool = client.get_pool(&1).unwrap();
+    assert_eq!(pool.status, PoolStatus::Settled(0));
+    assert_eq!(pool.winning_outcome, Some(0));
+    assert_eq!((pool.total_a, pool.total_b), (1_000_000, 1_000_000));
+    let bet = client.get_user_bet(&1, &bettor).unwrap();
+    assert_eq!((bet.amount_a, bet.amount_b, bet.total_bet), (0, 1_000_000, 1_000_000));
+    assert_eq!(client.get_treasury_balance(), 40_000);
+    assert_eq!(client.get_withdrawable_treasury(), 40_000);
+}
