@@ -1388,15 +1388,8 @@ pub enum DataKey {
     /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
     /// called on a `ResolutionPending` pool.
     PoolChallenges(u32),
-    /// #1705 — Configurable maximum age, in seconds, of the last oracle update
-    /// accepted at settlement. `0` disables the check.
-    StaleOracleThresholdSecs,
-    /// #1705 — Ledger timestamp of the last oracle/TWAP refresh for a pool.
-    OracleLastUpdated(u32),
-    /// Monotonic sequence for the admin audit log.
-    AuditSeq,
-    /// A single admin-action audit record.
-    AuditRecord(u64),
+    /// Accepted (round, reporter) for the pool's oracle-driven settlement.
+    OracleReport(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -1642,7 +1635,7 @@ pub enum ContractError {
     WebhookLimitReached = 52,
     InvalidWebhookUrl = 53,
     WebhookNotFound = 54,
-    /// #481 — Bet token is not in the pool's allowed-token list.
+    /// No collateral was supplied, or the token is not approved for this market.
     UnsupportedToken = 55,
     /// #481 — No exchange rate is set for this token; admin must call
     /// `set_token_exchange_rate` before it can be used in a multi-asset pool.
@@ -1741,11 +1734,8 @@ pub enum ContractError {
     TooManyWebhookEventTypes = 100,
     /// #1622 — Webhook filter list repeats an event type.
     DuplicateWebhookEventType = 101,
-    /// #1705 — Settlement was attempted with an oracle price older than the
-    /// configured maximum age.
-    StaleOraclePrice = 102,
-    /// #1705 — Batch settlement request repeated a pool ID.
-    DuplicateSettlementRequest = 103,
+    InvalidTradeBatchSize = 102,
+    DuplicateOracleReport = 103,
 }
 
 /// #176 — Settlement source tag indicating who initiated pool settlement.
@@ -2462,6 +2452,16 @@ pub struct SettleResult {
     pub pool_id: u32,
     pub success: bool,
     pub error_code: u32,
+}
+
+/// A position to open in one atomic batch. Multi-asset pools require a bet token.
+#[derive(Clone)]
+#[contracttype]
+pub struct TradeRequest {
+    pub pool_id: u32,
+    pub bet_token: Option<Address>,
+    pub outcome: u32,
+    pub amount: i128,
 }
 
 /// #351 — Settlement request for a single pool in a batch call.
@@ -3326,8 +3326,11 @@ impl PredinexContract {
 
     /// Shared helper for proportional payout: floor(user_stake * net_pool / total_winning).
     fn calc_payout_share(user_stake: i128, net_pool: i128, total_winning: i128) -> Option<i128> {
-        if total_winning == 0 {
+        if total_winning <= 0 || user_stake < 0 || user_stake > total_winning || net_pool < 0 {
             return None;
+        }
+        if user_stake == total_winning {
+            return Some(net_pool);
         }
         user_stake.checked_mul(net_pool)?.checked_div(total_winning)
     }
@@ -5319,6 +5322,40 @@ impl PredinexContract {
         scheduled
     }
 
+    /// Apply up to 20 trades in one Soroban invocation. Propagating
+    /// an item error reverts every earlier transfer and position in the batch.
+    pub fn place_bets(
+        env: Env,
+        user: Address,
+        trades: Vec<TradeRequest>,
+    ) -> Result<(), ContractError> {
+        user.require_auth();
+        if trades.is_empty() || trades.len() > MAX_BATCH_OPERATIONS {
+            return Err(ContractError::InvalidTradeBatchSize);
+        }
+        if !Self::is_initialized(&env) {
+            return Err(ContractError::NotInitialized);
+        }
+        for trade in trades.iter() {
+            if let Some(token) = trade.bet_token {
+                Self::place_authorized_asset_bet(
+                    env.clone(), user.clone(), trade.pool_id, trade.outcome, trade.amount, token, None,
+                )?;
+            } else {
+                if env.storage().persistent()
+                    .get::<_, bool>(&DataKey::PoolIsMultiAsset(trade.pool_id))
+                    .unwrap_or(false)
+                {
+                    return Err(ContractError::UnsupportedToken);
+                }
+                Self::place_authorized_bet(
+                    env.clone(), user.clone(), trade.pool_id, trade.outcome, trade.amount, None,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Place a bet of `amount` tokens on `outcome` in an open pool.
     ///
     /// Transfers `amount` from `user` into the contract, records/updates the
@@ -5365,6 +5402,17 @@ impl PredinexContract {
         }
         user.require_auth();
 
+        Self::place_authorized_bet(env, user, pool_id, outcome, amount, referrer)
+    }
+
+    fn place_authorized_bet(
+        env: Env,
+        user: Address,
+        pool_id: u32,
+        outcome: u32,
+        amount: i128,
+        referrer: Option<Address>,
+    ) -> Result<(), ContractError> {
         Self::require_not_paused(&env)?;
 
         if amount <= 0 {
@@ -6905,6 +6953,31 @@ impl PredinexContract {
         Self::settle_single_pool(&env, &caller, pool_id, winning_outcome)
     }
 
+    /// Submit an oracle result under the existing settlement authority rules.
+    /// A pool has one settlement. Its accepted round and reporter are recorded
+    /// in the same invocation as settlement, including during a dispute window.
+    pub fn submit_oracle_report(
+        env: Env,
+        reporter: Address,
+        pool_id: u32,
+        round: u64,
+        winning_outcome: u32,
+    ) -> Result<(), ContractError> {
+        reporter.require_auth();
+        let store = env.storage().persistent();
+        let key = DataKey::OracleReport(pool_id);
+        if let Some((accepted_round, accepted_reporter)) = store.get::<_, (u64, Address)>(&key) {
+            if accepted_round == round && accepted_reporter == reporter {
+                return Err(ContractError::DuplicateOracleReport);
+            }
+            return Err(ContractError::PoolAlreadySettled);
+        }
+        Self::settle_single_pool(&env, &reporter, pool_id, winning_outcome)?;
+        store.set(&key, &(round, reporter));
+        store.extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+        Ok(())
+    }
+
     /// #351 — Batch settle multiple expired pools in a single call.
     ///
     /// Accepts up to 20 `(pool_id, winning_outcome)` pairs. Each pool is
@@ -7692,6 +7765,7 @@ impl PredinexContract {
         let payout_dust: i128 = if is_final_claim {
             net_pool_balance
                 .checked_sub(new_paid_out)
+                .filter(|remaining| *remaining >= 0)
                 .ok_or(ContractError::PoolTotalOverflow)?
         } else {
             0
@@ -8146,6 +8220,9 @@ impl PredinexContract {
                                     error_code: 0,
                                 });
                             }
+                            Err(e @ (ContractError::PoolTotalOverflow | ContractError::TreasuryOverflow)) => {
+                                return Err(e);
+                            }
                             Err(_) => {
                                 // If this individual claim temporarily fails (e.g. pool is frozen or unsettled),
                                 // skip it so subsequent scheduled claims can still execute.
@@ -8255,6 +8332,11 @@ impl PredinexContract {
                         amount,
                         error_code: 0,
                     });
+                }
+                // An arithmetic failure may follow a transfer. Abort the invocation
+                // so this batch cannot commit a partially applied claim.
+                Err(e @ (ContractError::PoolTotalOverflow | ContractError::TreasuryOverflow)) => {
+                    panic_with_error!(&env, e);
                 }
                 Err(e) => {
                     results.push_back(ClaimAllEntry {
@@ -11094,7 +11176,7 @@ impl PredinexContract {
         creator.require_auth();
 
         if allowed_tokens.is_empty() {
-            return Err(ContractError::NotInitialized);
+            return Err(ContractError::UnsupportedToken);
         }
         if allowed_tokens.len() > MAX_ALLOWED_TOKENS {
             return Err(ContractError::TooManyAllowedTokens);
@@ -11109,12 +11191,8 @@ impl PredinexContract {
                     return Err(ContractError::DuplicateToken);
                 }
             }
-            if !env
-                .storage()
-                .persistent()
-                .has(&DataKey::TokenExchangeRate(tok.clone()))
-            {
-                return Err(ContractError::ExchangeRateNotSet);
+            if Self::get_token_exchange_rate(env.clone(), tok.clone()).unwrap_or(0) <= 0 {
+                return Err(ContractError::UnsupportedToken);
             }
             seen.push_back(tok);
         }
@@ -11234,6 +11312,18 @@ impl PredinexContract {
         referrer: Option<Address>,
     ) -> Result<(), ContractError> {
         user.require_auth();
+        Self::place_authorized_asset_bet(env, user, pool_id, outcome, amount, bet_token, referrer)
+    }
+
+    fn place_authorized_asset_bet(
+        env: Env,
+        user: Address,
+        pool_id: u32,
+        outcome: u32,
+        amount: i128,
+        bet_token: Address,
+        referrer: Option<Address>,
+    ) -> Result<(), ContractError> {
         Self::require_not_paused(&env)?;
 
         if amount <= 0 {
@@ -11844,7 +11934,8 @@ impl PredinexContract {
                     .persistent()
                     .get(&DataKey::PoolTokenDeposit(pool_id, tok.clone()))
                     .unwrap_or(0);
-                let fee_t = Self::calc_protocol_fee(deposit, fee_bps).unwrap_or(0);
+                let fee_t = Self::calc_protocol_fee(deposit, fee_bps)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
                 if fee_t > 0 {
                     let rate: i128 = env
                         .storage()
@@ -11878,12 +11969,11 @@ impl PredinexContract {
                 .persistent()
                 .get(&DataKey::PoolTokenFeePending(pool_id, tok.clone()))
                 .unwrap_or(0);
-            let net_t = deposit.checked_sub(fee_t).unwrap_or(0);
-            if net_t <= 0 {
-                continue;
-            }
-            let payout_t =
-                Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning).unwrap_or(0);
+            let net_t = deposit.checked_sub(fee_t)
+                .filter(|net| *net >= 0 && fee_t >= 0)
+                .ok_or(ContractError::PoolTotalOverflow)?;
+            let payout_t = Self::calc_payout_share(user_norm_winning, net_t, total_norm_winning)
+                .ok_or(ContractError::PoolTotalOverflow)?;
             if payout_t > 0 {
                 let actual_balance =
                     token::Client::new(&env, &tok).balance(&env.current_contract_address());
@@ -11969,11 +12059,9 @@ impl PredinexContract {
                     .persistent()
                     .get(&DataKey::PoolTokenPaidOut(pool_id, tok.clone()))
                     .unwrap_or(0);
-                let dust = match net_t.checked_sub(paid_t) {
-                    Some(remainder) if remainder > 0 => remainder,
-                    // Over-paid, or nothing left: there is no dust to collect.
-                    _ => 0,
-                };
+                let dust = net_t.checked_sub(paid_t)
+                    .filter(|remaining| *remaining >= 0 && paid_t >= 0)
+                    .ok_or(ContractError::PoolTotalOverflow)?;
                 // Only sweep what this pool's token balance can cover.
                 let on_hand =
                     token::Client::new(&env, &tok).balance(&env.current_contract_address());
@@ -12699,15 +12787,16 @@ impl PredinexContract {
         let current_base = position
             .shares
             .checked_mul(fee_per_share)
-            .ok_or(ContractError::PoolTotalOverflow)?
-            / LP_PRECISION
-            - position.reward_debt;
+            .map(|scaled| scaled / LP_PRECISION)
+            .and_then(|accrued| accrued.checked_sub(position.reward_debt))
+            .ok_or(ContractError::PoolTotalOverflow)?;
         if current_base <= 0 && position.unpaid_reward_debt <= 0 {
             return Ok((0, 0, 0));
         }
 
         let unpaid = position.unpaid_reward_debt;
-        let base_pending = current_base + unpaid;
+        let base_pending = current_base.checked_add(unpaid)
+            .ok_or(ContractError::PoolTotalOverflow)?;
 
         let mut pending = base_pending;
         let now = env.ledger().timestamp();
@@ -12744,13 +12833,15 @@ impl PredinexContract {
                         / 10_000;
                     // #1245 — scale boost linearly by elapsed time over lock duration
                     // so stakers cannot immediately claim full boosted rewards.
-                    let elapsed_bps = (elapsed * 10_000 / lock_duration).min(10_000);
-                    let effective_bps = (boost_bps as i128 * elapsed_bps as i128 / 10_000) as i128;
+                    let elapsed_bps = (i128::from(elapsed) * 10_000 / i128::from(lock_duration)).min(10_000);
+                    let effective_bps = i128::from(boost_bps) * elapsed_bps / 10_000;
                     let boosted = boost_portion
                         .checked_mul(effective_bps)
                         .ok_or(ContractError::PoolTotalOverflow)?
                         / 10_000;
-                    pending = base_pending - boost_portion + boosted;
+                    pending = base_pending.checked_sub(boost_portion)
+                        .and_then(|remaining| remaining.checked_add(boosted))
+                        .ok_or(ContractError::PoolTotalOverflow)?;
                 }
             }
         }

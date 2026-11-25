@@ -170,3 +170,31 @@ fn batch_payout_partial_fill_is_idempotent() {
     assert_ne!(second.results.get(0).unwrap().error_code, 0);
     assert_eq!(ctx.balance(&winner), after_first);
 }
+
+#[test]
+fn batch_trades_commit_together_and_roll_back_a_late_failure() {
+    let ctx = BatchCtx::new();
+    let first = ctx.create_pool("First", 3_600);
+    let second = ctx.create_pool("Second", 3_600);
+    let user = Address::generate(&ctx.env);
+    ctx.fund_and_bet(&user, first, 100);
+    token::StellarAssetClient::new(&ctx.env, &ctx.token).mint(&user, &1_000);
+    let escrow = ctx.balance(&ctx.client.address);
+    let trades = |outcome| soroban_sdk::vec![
+        &ctx.env,
+        TradeRequest { pool_id: first, bet_token: None, outcome: 0, amount: 200 },
+        TradeRequest { pool_id: second, bet_token: None, outcome, amount: 300 },
+    ];
+
+    assert_eq!(ctx.client.try_place_bets(&user, &trades(2)), Err(Ok(ContractError::InvalidOutcome)));
+    assert_eq!(ctx.balance(&user), 1_000);
+    assert_eq!(ctx.balance(&ctx.client.address), escrow);
+    assert_eq!(ctx.client.get_user_bet(&first, &user).unwrap().total_bet, 100);
+    assert!(ctx.client.get_user_bet(&second, &user).is_none());
+
+    ctx.client.place_bets(&user, &trades(1));
+    assert_eq!(ctx.balance(&user), 500);
+    assert_eq!(ctx.balance(&ctx.client.address), escrow + 500);
+    assert_eq!(ctx.client.get_user_bet(&first, &user).unwrap().total_bet, 300);
+    assert_eq!(ctx.client.get_user_bet(&second, &user).unwrap().total_bet, 300);
+}
