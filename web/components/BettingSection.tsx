@@ -3,8 +3,7 @@ import { createScopedLogger } from "@/app/lib/logger";
 const log = createScopedLogger("BettingSection");
 
 import { useMemo, useRef, useState } from 'react';
-import { Loader2, Wallet, AlertCircle, Lock, Clock } from 'lucide-react';
-import { Loader2, Wallet, AlertCircle, Info } from 'lucide-react';
+import { Loader2, Wallet, AlertCircle, Lock, Clock, Info } from 'lucide-react';
 import type { Pool } from '@/app/lib/adapters/types';
 import { useWallet } from '@/components/WalletAdapterProvider';
 import { useToast } from '@/providers/ToastProvider';
@@ -197,7 +196,19 @@ export default function BettingSection({
   }, [betAmount, hasMinBet, minBetXlm, hasMaxBet, maxBetXlm, walletBalance, t]);
 
   const isAmountInvalid = amountError !== null;
-  const showAmountError = amountTouched && isAmountInvalid;
+
+  // #1682 — Does the entered amount exceed the wallet balance? Shown as a
+  // dedicated inline message immediately (before blur) so the user knows the
+  // trade is unaffordable before a wallet signature is requested.
+  const insufficientBalance = useMemo(() => {
+    if (walletBalance === null) return false;
+    const amt = parseFloat(betAmount);
+    return !isNaN(amt) && amt > 0 && amt > walletBalance;
+  }, [betAmount, walletBalance]);
+
+  // Show the generic amount error only for non-balance issues; balance errors
+  // get their own dedicated message below.
+  const showAmountError = amountTouched && isAmountInvalid && !insufficientBalance;
   // #1538 — the bet buttons are disabled while the amount is empty, but the
   // error message only appeared after blur, so an untouched field left the user
   // staring at two permanently disabled buttons with no explanation. Show a
@@ -207,6 +218,7 @@ export default function BettingSection({
     'bet-limits',
     showAmountError ? 'bet-amount-error' : null,
     showAmountHint ? 'bet-amount-hint' : null,
+    insufficientBalance ? 'insufficient-balance-warning' : null,
   ]
     .filter(Boolean)
     .join(' ');
@@ -291,6 +303,8 @@ export default function BettingSection({
       // Issue #1603: Clear field-level errors on success
       setFieldErrors({});
       setRawError(null);
+      // #1683 — Clear the retry prompt on confirmed success.
+      setBetError(null);
       onBetSuccess?.(outcome, amountStroops);
     } catch (error) {
       log.error("[BettingSection] Bet transaction failed:", error);
@@ -313,7 +327,16 @@ export default function BettingSection({
 
       // Keep the raw error behind a details toggle
       setRawError(errorMessage);
+      // #1683 — Preserve the bet amount so the user can retry without
+      // re-entering it. Populate betError so the "Try again" UI appears
+      // next to the bet buttons, giving the user a one-click retry path.
+      setBetError({ outcome, message: mapped.message });
       setPendingOutcome(null);
+      // #1683 — Reset the transaction stage and clear any pending fee prompt
+      // so stale status messages do not persist and the fee modal does not
+      // show as "confirming" on the next attempt.
+      setStage("idle");
+      setFeePrompt(null);
     } finally {
       betSubmissionInFlightRef.current = false;
       setIsBetting(false);
@@ -325,12 +348,6 @@ export default function BettingSection({
     return (
       <div className="text-center py-6 bg-muted/50 rounded-lg">
         <Lock className="w-8 h-8 mx-auto mb-3 text-muted-foreground" />
-        <p className="text-lg font-bold">Trading is Closed</p>
-        <p className="text-muted-foreground mb-2">
-          This market has been settled.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Winner: {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
         <p className="text-lg font-bold">{t('betting.poolSettled')}</p>
         <p className="text-muted-foreground">
           {t('betting.winner')} {pool.winningOutcome === 0 ? pool.outcomeA : pool.outcomeB}
@@ -651,6 +668,25 @@ export default function BettingSection({
           <p id="bet-amount-error" role="alert" className="text-sm text-red-500 mt-1">
             {amountError}
           </p>
+        )}
+        {/* #1682 — Insufficient balance inline message shown immediately
+            during form validation, before the user blurs the field. This
+            prevents a wallet signature from being requested for an unaffordable
+            trade. */}
+        {insufficientBalance && walletBalance !== null && (
+          <div
+            id="insufficient-balance-warning"
+            role="alert"
+            data-testid="insufficient-balance-warning"
+            className="flex items-start gap-2 mt-1.5 p-2.5 bg-red-500/10 border border-red-500/20 rounded-lg"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-500 mt-0.5" aria-hidden="true" />
+            <p className="text-sm text-red-500">
+              {t('betting.insufficientBalanceAmount')
+                .replace('{balance}', walletBalance.toFixed(2))
+                .replace('{amount}', parseFloat(betAmount).toFixed(2))}
+            </p>
+          </div>
         )}
       </div>
 

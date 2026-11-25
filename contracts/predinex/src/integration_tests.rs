@@ -280,3 +280,217 @@ fn claim_after_expiry_flow() {
     // The position is gone, so a repeat claim fails.
     assert!(f.client.try_claim_expired(&bettor, &pool_id).is_err());
 }
+
+// ── #1681 — Cancellation refund accounting ───────────────────────────────────
+
+/// Multiple participants on both outcomes are refunded their exact stake when
+/// the creator cancels the pool. Every bettor's balance returns to its pre-bet
+/// amount, and the pool reaches `Cancelled` status.
+#[test]
+fn multi_participant_cancellation_refunds_all_bettors() {
+    let f = setup();
+    let creator = Address::generate(&f.env);
+
+    // Four bettors: two on outcome A, two on outcome B.
+    let a1 = Address::generate(&f.env);
+    let a2 = Address::generate(&f.env);
+    let b1 = Address::generate(&f.env);
+    let b2 = Address::generate(&f.env);
+
+    let stake_a1 = 1_500_000i128;
+    let stake_a2 = 3_000_000i128;
+    let stake_b1 = 2_000_000i128;
+    let stake_b2 = 500_000i128;
+
+    let initial = 100_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    for who in [&a1, &a2, &b1, &b2] {
+        f.token_admin_client.mint(who, &initial);
+    }
+
+    let pool_id = f.client.create_pool(
+        &creator,
+        &String::from_str(&f.env, "Multi-participant cancel test"),
+        &String::from_str(&f.env, "Pool with four bettors across both outcomes."),
+        &String::from_str(&f.env, "Yes"),
+        &String::from_str(&f.env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    f.client.place_bet(&a1, &pool_id, &0, &stake_a1, &None::<Address>);
+    f.client.place_bet(&a2, &pool_id, &0, &stake_a2, &None::<Address>);
+    f.client.place_bet(&b1, &pool_id, &1, &stake_b1, &None::<Address>);
+    f.client.place_bet(&b2, &pool_id, &1, &stake_b2, &None::<Address>);
+
+    // Verify the pool recorded all four participants.
+    assert_eq!(f.client.get_participant_count(&pool_id), 4);
+
+    // Each bettor's balance decreased by their stake.
+    assert_eq!(f.token.balance(&a1), initial - stake_a1);
+    assert_eq!(f.token.balance(&a2), initial - stake_a2);
+    assert_eq!(f.token.balance(&b1), initial - stake_b1);
+    assert_eq!(f.token.balance(&b2), initial - stake_b2);
+
+    // Creator cancels — all four are refunded atomically.
+    f.client.cancel_pool(
+        &creator,
+        &pool_id,
+        &String::from_str(&f.env, "Event cancelled"),
+    );
+
+    // Every bettor received their exact stake back.
+    assert_eq!(f.token.balance(&a1), initial);
+    assert_eq!(f.token.balance(&a2), initial);
+    assert_eq!(f.token.balance(&b1), initial);
+    assert_eq!(f.token.balance(&b2), initial);
+
+    // Pool is in terminal Cancelled state.
+    assert_eq!(
+        f.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Cancelled
+    );
+
+    // No residual bet entries — claim_refund finds nothing.
+    assert!(f.client.try_claim_refund(&a1, &pool_id).is_err());
+    assert!(f.client.try_claim_refund(&b2, &pool_id).is_err());
+}
+
+/// The total amount refunded to all participants must equal the total collateral
+/// locked in the pool (sum of all stakes on both outcomes). This guards against
+/// partial refunds, double refunds, or fees being silently deducted during
+/// cancellation.
+#[test]
+fn cancellation_total_refunds_equal_total_locked_collateral() {
+    let f = setup();
+    let creator = Address::generate(&f.env);
+
+    let bettors: [Address; 5] = [
+        Address::generate(&f.env),
+        Address::generate(&f.env),
+        Address::generate(&f.env),
+        Address::generate(&f.env),
+        Address::generate(&f.env),
+    ];
+    let stakes: [i128; 5] = [
+        1_000_000, 2_500_000, 500_000, 7_500_000, 3_000_000,
+    ];
+    let outcomes: [u32; 5] = [0, 1, 0, 1, 0];
+
+    let initial = 100_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    for who in bettors.iter() {
+        f.token_admin_client.mint(who, &initial);
+    }
+
+    let pool_id = f.client.create_pool(
+        &creator,
+        &String::from_str(&f.env, "Refund accounting test"),
+        &String::from_str(&f.env, "Verify total refunds == total locked."),
+        &String::from_str(&f.env, "Yes"),
+        &String::from_str(&f.env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    // Record the contract's token balance before cancellation — this is the
+    // total collateral locked in the pool.
+    let total_locked: i128 = stakes.iter().sum();
+    for (i, who) in bettors.iter().enumerate() {
+        f.client.place_bet(who, &pool_id, &outcomes[i], &stakes[i], &None::<Address>);
+    }
+
+    // Sanity: the contract holds exactly the sum of all stakes.
+    let contract_balance_before = f.token.balance(&f.env.current_contract_address());
+    assert_eq!(contract_balance_before, total_locked + MIN_CREATOR_DEPOSIT);
+
+    // Record each bettor's balance right before cancellation.
+    let balances_before: [i128; 5] = [
+        f.token.balance(&bettors[0]),
+        f.token.balance(&bettors[1]),
+        f.token.balance(&bettors[2]),
+        f.token.balance(&bettors[3]),
+        f.token.balance(&bettors[4]),
+    ];
+
+    f.client.cancel_pool(
+        &creator,
+        &pool_id,
+        &String::from_str(&f.env, "Event cancelled"),
+    );
+
+    // Sum the actual refunds received by each bettor.
+    let mut total_refunded: i128 = 0;
+    for i in 0..5 {
+        total_refunded += f.token.balance(&bettors[i]) - balances_before[i];
+    }
+
+    assert_eq!(
+        total_refunded, total_locked,
+        "total refunds must equal total locked collateral"
+    );
+
+    // The contract's balance dropped by exactly the total locked (creator
+    // deposit remains, it is separate from bet collateral).
+    let contract_balance_after = f.token.balance(&f.env.current_contract_address());
+    assert_eq!(
+        contract_balance_before - contract_balance_after,
+        total_locked,
+        "contract balance must decrease by exactly the total locked collateral"
+    );
+}
+
+/// A pool that is already `Cancelled` must reject a second `cancel_pool` call.
+/// This is a regression guard against double-cancellation that could double-
+/// refund participants or corrupt state.
+#[test]
+fn repeated_cancellation_is_rejected() {
+    let f = setup();
+    let creator = Address::generate(&f.env);
+    let bettor = Address::generate(&f.env);
+
+    let stake = 2_000_000i128;
+    f.token_admin_client.mint(&creator, &(MIN_CREATOR_DEPOSIT * 10));
+    f.token_admin_client.mint(&bettor, &100_000_000);
+
+    let pool_id = f.client.create_pool(
+        &creator,
+        &String::from_str(&f.env, "Repeated cancel test"),
+        &String::from_str(&f.env, "Cancel twice, second must fail."),
+        &String::from_str(&f.env, "Yes"),
+        &String::from_str(&f.env, "No"),
+        &3600,
+        &MIN_CREATOR_DEPOSIT,
+        &None::<u64>,
+    );
+
+    f.client.place_bet(&bettor, &pool_id, &0, &stake, &None::<Address>);
+    assert_eq!(f.token.balance(&bettor), 100_000_000 - stake);
+
+    // First cancellation succeeds and refunds the bettor.
+    f.client.cancel_pool(
+        &creator,
+        &pool_id,
+        &String::from_str(&f.env, "First cancellation"),
+    );
+    assert_eq!(f.token.balance(&bettor), 100_000_000);
+    assert_eq!(
+        f.client.get_pool(&pool_id).unwrap().status,
+        PoolStatus::Cancelled
+    );
+
+    // Second cancellation must be rejected — the pool is already Cancelled.
+    assert_eq!(
+        f.client.try_cancel_pool(
+            &creator,
+            &pool_id,
+            &String::from_str(&f.env, "Second cancellation"),
+        ),
+        Err(Ok(ContractError::PoolIsCancelled))
+    );
+
+    // The bettor's balance is unchanged — no double refund occurred.
+    assert_eq!(f.token.balance(&bettor), 100_000_000);
+}

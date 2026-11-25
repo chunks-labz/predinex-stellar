@@ -188,6 +188,68 @@ describe('BettingSection', () => {
     expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
   });
 
+  // #1682 — The insufficient-balance inline message must appear during form
+  // validation (before blur) so the user knows the trade is unaffordable
+  // before a wallet signature is requested.
+  it('shows an inline insufficient-balance warning immediately when amount exceeds balance', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '5.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    // Type an amount exceeding the 5 XLM balance — no blur yet.
+    await user.type(input, '10');
+
+    const warning = screen.getByTestId('insufficient-balance-warning');
+    expect(warning).toBeInTheDocument();
+    expect(warning).toHaveTextContent('5.00 XLM');
+    expect(warning).toHaveTextContent('10.00 XLM');
+    expect(warning).toHaveAttribute('role', 'alert');
+  });
+
+  it('disables bet buttons when amount exceeds balance and does not request wallet signature', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '5.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '10');
+
+    expect(screen.getByText(/Bet on Outcome A/i)).toBeDisabled();
+    expect(screen.getByText(/Bet on Outcome B/i)).toBeDisabled();
+    expect(vi.mocked(predinexContract.placeBetSoroban)).not.toHaveBeenCalled();
+  });
+
+  it('does not show the insufficient-balance warning when amount is within balance', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(WalletAccountHook.useWalletAccount).mockReturnValue({
+      address: connectedWallet.address,
+      balance: '100.0000000',
+      isConnected: true,
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '1.5');
+
+    expect(screen.queryByTestId('insufficient-balance-warning')).not.toBeInTheDocument();
+    expect(screen.getByText(/Bet on Outcome A/i)).not.toBeDisabled();
+  });
+
   it('requires confirmation and shows amount and odds before placing a bet', async () => {
     vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
 
@@ -248,6 +310,64 @@ describe('BettingSection', () => {
 
     await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
     expect(onBetSuccess).not.toHaveBeenCalled();
+  });
+
+  // #1683 — Form values must be preserved after a failed transaction so the
+  // user can retry without re-entering the amount.
+  it('preserves the bet amount input after a failed transaction', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockRejectedValue(new Error('Transaction failed'));
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '1.5');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+    await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+
+    // The amount input still holds the value the user entered.
+    expect(input).toHaveValue(1.5);
+  });
+
+  it('shows a retry prompt after a failed transaction', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockRejectedValue(new Error('Transaction failed'));
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    await user.type(screen.getByLabelText(/Enter bet amount/i), '1');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+    await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+
+    // The "Try again" button appears for the outcome the user bet on.
+    const retryButton = screen.getByRole('button', { name: /Try again/i });
+    expect(retryButton).toBeInTheDocument();
+    expect(retryButton).not.toBeDisabled();
+  });
+
+  it('clears the bet amount input after a confirmed success', async () => {
+    vi.mocked(WalletAdapterProvider.useWallet).mockReturnValue(connectedWallet);
+    vi.mocked(predinexContract.placeBetSoroban).mockResolvedValue({ txHash: '0xsuccess' });
+
+    const user = userEvent.setup();
+    renderWithProviders(<BettingSection pool={mockPool} poolId={0} />);
+
+    const input = screen.getByLabelText(/Enter bet amount/i);
+    await user.type(input, '1.5');
+    await user.click(screen.getByText(/Bet on Outcome A/i));
+    await user.click(screen.getByRole('button', { name: /Confirm Bet/i }));
+
+    await waitFor(() => expect(predinexContract.placeBetSoroban).toHaveBeenCalledOnce());
+
+    // The amount input is cleared after success — re-query to get a fresh
+    // reference after the re-render triggered by setBetAmount("").
+    expect(screen.getByLabelText(/Enter bet amount/i)).toHaveValue(null);
   });
 
   it('supports tab navigation and Enter/Space activation through the order controls', async () => {
