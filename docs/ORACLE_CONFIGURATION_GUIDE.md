@@ -38,6 +38,16 @@ pub enum SettlementSource {
 Attribution is not decoration. A disputed resolution has to be traceable to a
 principal, and the source is the only on-chain record of which one acted.
 
+## Submitting a round-tagged report
+
+An admin, creator, or delegated settler can submit a reporter-authenticated result
+with `submit_oracle_report(reporter, pool_id, round, winning_outcome)`. The first
+accepted report settles the pool through the usual checks. The contract records
+the reporter and round in the same transaction. A retry from that reporter for
+the same round returns `DuplicateOracleReport`. A competing report or a different
+round after acceptance returns `PoolAlreadySettled`. A rejected first attempt
+leaves the round available for a valid report.
+
 ## Delegating settlement
 
 ```rust

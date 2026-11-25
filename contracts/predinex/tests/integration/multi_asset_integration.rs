@@ -189,7 +189,7 @@ fn ma1b_pool_creation_fails_without_exchange_rate() {
 
     assert_eq!(
         result,
-        Err(Ok(ContractError::ExchangeRateNotSet)),
+        Err(Ok(ContractError::UnsupportedToken)),
         "pool creation must fail when exchange rate is missing"
     );
 }

@@ -384,3 +384,32 @@ fn attribution_survives_the_claim_phase() {
         "claiming changed the settlement attribution"
     );
 }
+
+#[test]
+fn oracle_reports_are_applied_once_in_either_ledger_order() {
+    // Soroban serializes writes to the same pool. Exercise both possible orders
+    // for competing reports from two authorities in the same ledger.
+    for admin_first in [false, true] {
+        let h = Harness::new(4);
+        let pool = expired_pool(&h);
+        let creator = &h.actors[0];
+        let (first, other, outcome) = if admin_first {
+            (&h.admin, creator, 1)
+        } else {
+            (creator, &h.admin, 0)
+        };
+        let conflicting = 1 - outcome;
+        h.client.submit_oracle_report(first, &pool, &8, &outcome);
+        assert_eq!(
+            h.client.try_submit_oracle_report(first, &pool, &8, &conflicting),
+            Err(Ok(crate::ContractError::DuplicateOracleReport))
+        );
+        for round in [7, 8, 9] {
+            assert_eq!(
+                h.client.try_submit_oracle_report(other, &pool, &round, &conflicting),
+                Err(Ok(crate::ContractError::PoolAlreadySettled))
+            );
+        }
+        assert_eq!(h.client.get_pool(&pool).unwrap().winning_outcome, Some(outcome));
+    }
+}
