@@ -116,6 +116,14 @@ pub struct AuditSetPoolBetLimits {
     pub new_max: i128,
 }
 
+#[derive(Clone)]
+#[contracttype]
+pub struct AuditSetPoolPositionCap {
+    pub pool_id: u32,
+    pub old_cap: i128,
+    pub new_cap: i128,
+}
+
 /// Circuit-breaker config updated.
 #[derive(Clone)]
 #[contracttype]
@@ -520,6 +528,7 @@ pub enum AdminActionDetail {
     /// Forward-compatible escape hatch for actions whose details are
     /// intentionally omitted or are fully sensitive.
     Redacted,
+    SetPoolPositionCap(AuditSetPoolPositionCap),
 }
 
 // ============================================================================

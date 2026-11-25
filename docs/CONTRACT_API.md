@@ -617,6 +617,21 @@ pub fn set_pool_bet_limits(
 
 ---
 
+### `set_pool_position_cap`
+
+```rust
+pub fn set_pool_position_cap(
+    env: Env,
+    caller: Address,
+    pool_id: u32,
+    max_position: i128,
+) -> Result<(), ContractError>
+```
+
+**Auth:** treasury recipient. Sets the maximum outstanding exposure one account may hold in a pool, in raw base-token units. `0` disables the cap; negative values are rejected with `InvalidBetAmount`.
+
+---
+
 ### `set_volume_fee_tiers`
 
 ```rust
@@ -1250,6 +1265,17 @@ pub fn get_pool_bet_limits(env: Env, pool_id: u32) -> Option<PoolBetLimits>
 
 **Auth:** TBD  
 **Description:** TBD
+
+---
+
+### `get_pool_position_cap`
+
+```rust
+pub fn get_pool_position_cap(env: Env, pool_id: u32) -> i128
+```
+
+**Auth:** none
+**Description:** Returns the per-market position cap in raw base-token units, or `0` when no cap is configured.
 
 ---
 

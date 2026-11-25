@@ -34,6 +34,7 @@ mod fuzz;
 mod fuzz_tests;
 mod integration_tests;
 mod issue_1621_1624_tests;
+mod issue_1678_1679_tests;
 mod lp_settlement_tests;
 mod lp_tests;
 mod multi_asset_tests;
@@ -1368,6 +1369,7 @@ pub enum DataKey {
     /// when. Each entry is appended when [`dispute_pool`](Self::dispute_pool) is
     /// called on a `ResolutionPending` pool.
     PoolChallenges(u32),
+    PoolPositionCap(u32),
 }
 
 // #189 — TTL bump policy for persistent storage entries.
@@ -3346,6 +3348,52 @@ impl PredinexContract {
         Ok(())
     }
 
+    pub fn set_pool_position_cap(
+        env: Env,
+        caller: Address,
+        pool_id: u32,
+        max_position: i128,
+    ) -> Result<(), ContractError> {
+        caller.require_auth();
+        Self::require_treasury_recipient(&env, &caller)?;
+
+        let _pool_exists: Pool = env
+            .storage()
+            .persistent()
+            .get::<_, Pool>(&DataKey::Pool(pool_id))
+            .ok_or(ContractError::PoolNotFound)?;
+
+        if max_position < 0 {
+            return Err(ContractError::InvalidBetAmount);
+        }
+
+        let key = DataKey::PoolPositionCap(pool_id);
+        let old_cap: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &max_position);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, POOL_BUMP_THRESHOLD, POOL_BUMP_TARGET);
+
+        audit_log::append(
+            &env,
+            caller,
+            Symbol::new(&env, "set_pool_position_cap"),
+            audit_log::AdminActionDetail::SetPoolPositionCap(audit_log::AuditSetPoolPositionCap {
+                pool_id,
+                old_cap,
+                new_cap: max_position,
+            }),
+        );
+        Ok(())
+    }
+
+    pub fn get_pool_position_cap(env: Env, pool_id: u32) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PoolPositionCap(pool_id))
+            .unwrap_or(0)
+    }
+
     /// Configure pool circuit breaker for large pools.
     ///
     /// Only treasury recipient can modify this config.
@@ -3801,6 +3849,31 @@ impl PredinexContract {
             now,
             config.weekly_loss_window_secs,
         )
+    }
+
+    fn check_pool_position_cap(
+        env: &Env,
+        user: &Address,
+        pool_id: u32,
+        amount: i128,
+    ) -> Result<(), ContractError> {
+        let cap: i128 = Self::get_pool_position_cap(env.clone(), pool_id);
+        if cap <= 0 {
+            return Ok(());
+        }
+
+        let current_exposure: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserExposurePerPool(user.clone(), pool_id))
+            .unwrap_or(0);
+        let new_exposure = current_exposure
+            .checked_add(amount)
+            .ok_or(ContractError::PoolTotalOverflow)?;
+        if new_exposure > cap {
+            return Err(ContractError::ExposureLimitExceeded);
+        }
+        Ok(())
     }
 
     /// Internal: check all user exposure limits before placing a bet.
@@ -5376,6 +5449,8 @@ impl PredinexContract {
         let net_amount = amount
             .checked_sub(fee_amount)
             .ok_or(ContractError::InvalidBetAmount)?;
+
+        Self::check_pool_position_cap(&env, &user, pool_id, net_amount)?;
 
         // #1229 — All state writes happen before external token transfers
         // (checks-effects-interactions). The transfer block is at the bottom
@@ -11170,6 +11245,8 @@ impl PredinexContract {
 
         // #705 — Enforce per-user betting limits and exposure caps.
         Self::check_user_exposure_limits(&env, &user, pool_id, normalized)?;
+
+        Self::check_pool_position_cap(&env, &user, pool_id, normalized)?;
 
         // Load and validate pool.
         let mut pool = env
