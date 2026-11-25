@@ -6,7 +6,7 @@ This document provides a comprehensive reference for the lifecycle state machine
 
 ## 1. Overview of Market States
 
-Every prediction pool in Predinex maintains an explicit status represented by the `PoolStatus` enum in `contracts/predinex/src/lib.rs`.
+Every prediction pool in Predinex maintains an explicit status represented by the [`PoolStatus` enum](../contracts/predinex/src/lib.rs#L1798).
 
 There are **8 states** in the market lifecycle. For the difference between *resolved*, *finalized*, and *claimed*, see [`CLAIM_LIFECYCLE.md`](./CLAIM_LIFECYCLE.md).
 
@@ -16,10 +16,10 @@ There are **8 states** in the market lifecycle. For the difference between *reso
 | **`Open`** | Non-terminal | Market is actively accepting bets. Expiry has not yet passed. | `place_bet`, `cancel_bet`, `cancel_pool` (if 0 bets), `freeze_pool`, `void_pool`, `settle_pool` (after expiry). |
 | **`Frozen`** | Non-terminal | Market is temporarily halted (due to manual admin action or automatic circuit-breaker cooling). Betting and claim payouts are blocked. Read-only queries remain available. | `unfreeze_pool` (admin), `override_pool_cooling` (treasury admin), auto-thaw on bet after cooling window. |
 | **`ResolutionPending(winning_outcome)`** | Non-terminal | Winning outcome declared while a dispute window is configured (`get_dispute_window() > 0`). Not final: claims revert with `ResolutionNotFinal` until `get_resolution_deadline(pool_id)` passes. | `finalize_resolution` (anyone, after deadline), auto-finalize on claim, `dispute_pool` (within window). |
-| **`Settled(winning_outcome)`** | Terminal / Provisional | Betting is closed, market outcome is resolved, and winning outcome is declared. Winners can claim payouts unless disputed. | `claim_winnings`, `dispute_pool` (during dispute window). |
+| **`Settled(winning_outcome)`** | Provisional / final after dispute window | Betting is closed and a winning outcome is declared. The status remains `Settled` after claims; a dispute can move it to `Disputed` while the dispute window is open. | `claim_winnings`, `dispute_pool` (during dispute window). |
 | **`Disputed`** | Non-terminal | A settlement outcome is challenged during the dispute window. Payout claims are suspended pending review. | `unfreeze_pool` (restores pre-dispute status or re-settles). Claims are blocked. |
-| **`Voided`** | Terminal | Market was declared void (by creator or due to expiry without settlement). Full refunds are enabled for all participants. | `claim_refund`. No new bets or settlements. |
-| **`Cancelled`** | Terminal | Market was cancelled before activation or before any bets were placed. Deposits are returned to the creator. | None. Terminal state. |
+| **`Voided`** | Terminal | The creator declared an open market void. Full refunds are enabled for all participants. | `claim_refund`. No new bets or settlements. |
+| **`Cancelled`** | Terminal | A scheduled market or empty open market was cancelled, or an expired single-asset market entered its refund sweep. Creator cancellations return the creation deposit; expired-market refunds are paid to bettors. | `claim_refund` for any remaining bettor; `refund_expired_pool` continues an in-progress expired-market sweep. The state cannot reactivate. |
 
 ---
 
@@ -36,7 +36,8 @@ stateDiagram-v2
     Scheduled --> Cancelled: cancel_scheduled_pool\n[Role: Creator]
 
     Open --> Cancelled: cancel_pool (total_bets == 0)\n[Role: Creator]
-    Open --> Voided: void_pool\n[Role: Creator]\nOR refund_expired_pool [Permissionless]
+    Open --> Voided: void_pool\n[Role: Creator]
+    Open --> Cancelled: refund_expired_pool (expiry + grace period)\n[Permissionless]
     
     Open --> Frozen: freeze_pool / pause_market\n[Role: Freeze Admin]
     Open --> Frozen: Large Bet Threshold Crossed\n[Automatic: Circuit Breaker]
@@ -57,36 +58,40 @@ stateDiagram-v2
 
     Cancelled --> [*]
     Voided --> [*]
-    Settled --> [*]: Claim Winnings / Expiry
 ```
+
+`claim_winnings` and expiry do not change the stored `Settled` status; they are
+not state transitions.
 
 ---
 
 ## 3. Transition Matrix
 
-The table below details every valid state transition, what triggers it, whether it is permissioned or automatic, the required caller role, and the on-chain events emitted:
+The table lists every state transition, its preconditions, responsible actor,
+mode, emitted event, and a direct link to the Soroban entrypoint:
 
-| Source State | Target State | Trigger Function / Event | Execution Mode | Required Role | Emitted Events |
+| Source | Target | Contract entrypoint | Preconditions | Responsible actor | Mode / emitted event |
 |---|---|---|---|---|---|
-| `[*] (None)` | `Scheduled(open_at)` | `create_pool` with `open_at > timestamp` | Permissioned | Pool Creator | `create_pool`, `pool_scheduled` |
-| `[*] (None)` | `Open` | `create_pool` with `open_at == None` or `<= now` | Permissioned | Pool Creator | `create_pool` |
-| `Scheduled(open_at)` | `Open` | `activate_scheduled_pool(pool_id)` when `now >= open_at` | Automatic / Permissionless | Any Caller | `scheduled_pool_activated` |
-| `Scheduled(open_at)` | `Cancelled` | `cancel_scheduled_pool(pool_id)` | Permissioned | Pool Creator | `scheduled_pool_cancelled` |
-| `Open` | `Cancelled` | `cancel_pool(pool_id)` when `total_pool == 0` | Permissioned | Pool Creator | `cancel_pool` |
-| `Open` | `Frozen` | `freeze_pool(pool_id)` or `pause_market(pool_id)` | Permissioned | Freeze Admin | `pool_frozen`, `MarketPaused` |
-| `Open` | `Frozen` | `place_bet` crossing `large_pool_threshold` | Automatic | None (Circuit Breaker) | `pool_cooling_started` |
-| `Frozen` | `Open` | `unfreeze_pool(pool_id)` or `unpause_market(pool_id)` | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
-| `Frozen` | `Open` | `place_bet` after `now >= cooling_until` | Automatic | Any Bettor (Auto-Thaw) | `pool_unfrozen` (AutoThaw) |
-| `Frozen` | `Open` | `override_pool_cooling(pool_id)` | Permissioned | Treasury Admin | `pool_cooling_overridden` |
-| `Open` | `Settled(outcome)` | `settle_pool(pool_id, winning_outcome)` when `now >= expiry` and dispute window is `0` | Permissioned | Creator / Assigned Settler / Admin | `settle_pool` |
-| `Open` | `ResolutionPending(outcome)` | `settle_pool(pool_id, winning_outcome)` when `now >= expiry` and dispute window `> 0` | Permissioned | Creator / Assigned Settler / Admin | `settle_pool` |
-| `ResolutionPending(outcome)` | `Settled(outcome)` | `finalize_resolution(pool_id)` or first claim, once `now >= resolution deadline` | Permissionless | Any Caller | `resolution_finalized` |
-| `ResolutionPending(outcome)` | `Disputed` | `dispute_pool(pool_id)` within `dispute_window` | Permissioned | Freeze Admin | `resolution_challenged`, `pool_disputed` |
-| `Settled(outcome)` | `Disputed` | `dispute_pool(pool_id)` within `dispute_window` | Permissioned | Freeze Admin | `pool_disputed` |
-| `Disputed` | `Settled(outcome)` | `unfreeze_pool(pool_id)` resolving dispute in favor of settlement | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
-| `Disputed` | `Open` | `unfreeze_pool(pool_id)` restoring pre-dispute `Open` status | Permissioned | Freeze Admin | `pool_unfrozen` (Admin), `MarketUnpaused` |
-| `Open` | `Voided` | `void_pool(pool_id)` | Permissioned | Pool Creator | `void_pool` |
-| `Open` | `Voided` | `refund_expired_pool(pool_id)` when unsettled past grace period | Automatic / Permissionless | Any Participant | `void_pool`, `refund_expired_pool` |
+| `[*]` | `Scheduled(open_at)` | [`create_pool`](../contracts/predinex/src/lib.rs#L4731) | Creation arguments are valid and `open_at` is in the future. | Pool creator | Permissioned; `create_pool`, `pool_scheduled` |
+| `[*]` | `Open` | [`create_pool`](../contracts/predinex/src/lib.rs#L4731) | Creation arguments are valid and no future `open_at` was supplied. | Pool creator | Permissioned; `create_pool` |
+| `Scheduled(open_at)` | `Open` | [`activate_scheduled_pool`](../contracts/predinex/src/lib.rs#L5000) | Current ledger timestamp is at or after `open_at`. | Any caller | Permissionless; `scheduled_pool_activated` |
+| `Scheduled(open_at)` | `Cancelled` | [`cancel_scheduled_pool`](../contracts/predinex/src/lib.rs#L5066) | Pool is still scheduled and caller is its creator. | Pool creator | Permissioned; `scheduled_pool_cancelled` |
+| `Open` | `Cancelled` | [`cancel_pool`](../contracts/predinex/src/lib.rs#L6114) | `total_pool == 0` and caller is the creator. | Pool creator | Permissioned; `cancel_pool` |
+| `Open` | `Frozen` | [`freeze_pool`](../contracts/predinex/src/lib.rs#L8700) / [`pause_market`](../contracts/predinex/src/lib.rs#L9025) | Pool is open and caller is the freeze admin. | Freeze admin | Permissioned; `pool_frozen` / `MarketPaused` |
+| `Open` | `Frozen` | [`place_bet`](../contracts/predinex/src/lib.rs#L5177) | A bet crosses the configured large-pool threshold. | Circuit breaker | Automatic; `pool_cooling_started` |
+| `Frozen` | `Open` | [`unfreeze_pool`](../contracts/predinex/src/lib.rs#L8945) / [`unpause_market`](../contracts/predinex/src/lib.rs#L9032) | Pool is frozen and caller is the freeze admin. | Freeze admin | Permissioned; `pool_unfrozen` / `MarketUnpaused` |
+| `Frozen` | `Open` | [`place_bet`](../contracts/predinex/src/lib.rs#L5177) | The pool has a cooling deadline and the current timestamp is at or after it. | Any bettor | Automatic auto-thaw; `pool_unfrozen` |
+| `Frozen` | `Open` | [`override_pool_cooling`](../contracts/predinex/src/lib.rs#L9043) | Freeze was caused by circuit-breaker cooling and caller is treasury admin. | Treasury admin | Permissioned; `pool_cooling_overridden` |
+| `Open` | `Settled(outcome)` | [`settle_pool`](../contracts/predinex/src/lib.rs#L6712) | Expiry has passed, dispute window is zero, and caller is an authorized settler. | Creator / assigned settler / admin | Permissioned; `settle_pool` |
+| `Open` | `ResolutionPending(outcome)` | [`settle_pool`](../contracts/predinex/src/lib.rs#L6712) | Expiry has passed, dispute window is positive, and caller is an authorized settler. | Creator / assigned settler / admin | Permissioned; `settle_pool` |
+| `ResolutionPending(outcome)` | `Settled(outcome)` | [`finalize_resolution`](../contracts/predinex/src/lib.rs#L6797) or [`claim_winnings`](../contracts/predinex/src/lib.rs#L7406) | Resolution deadline has passed without an accepted dispute. | Any caller / claimant | Permissionless or automatic on claim; `resolution_finalized` |
+| `ResolutionPending(outcome)` | `Disputed` | [`dispute_pool`](../contracts/predinex/src/lib.rs#L8828) | Dispute window is still open and caller is freeze admin. | Freeze admin | Permissioned; `resolution_challenged`, `pool_disputed` |
+| `Settled(outcome)` | `Disputed` | [`dispute_pool`](../contracts/predinex/src/lib.rs#L8828) | Current time is within the configured dispute window and caller is freeze admin. | Freeze admin | Permissioned; `pool_disputed` |
+| `Disputed` | `ResolutionPending(outcome)` | [`unfreeze_pool`](../contracts/predinex/src/lib.rs#L8945) | The disputed pool was pending resolution and review restores that pending state. | Freeze admin | Permissioned; `pool_unfrozen` |
+| `Disputed` | `Settled(outcome)` | [`unfreeze_pool`](../contracts/predinex/src/lib.rs#L8945) | Review confirms the settled outcome and caller is freeze admin. | Freeze admin | Permissioned; `pool_unfrozen`, `MarketUnpaused` |
+| `Disputed` | `Open` | [`unfreeze_pool`](../contracts/predinex/src/lib.rs#L8945) | Review restores the pool's prior open state and caller is freeze admin. | Freeze admin | Permissioned; `pool_unfrozen`, `MarketUnpaused` |
+| `Open` | `Voided` | [`void_pool`](../contracts/predinex/src/lib.rs#L6891) | Pool status is `Open` and caller is its creator. | Pool creator | Permissioned; `void_pool` |
+| `Open` | `Cancelled` | [`refund_expired_pool`](../contracts/predinex/src/lib.rs#L7233) | Pool is single-asset and remains unsettled until expiry plus the refund grace period. | Any caller | Permissionless; `expired_refund_sweep_started`, `refund_expired_pool` |
 
 ---
 
@@ -104,7 +109,7 @@ The table below details every valid state transition, what triggers it, whether 
 
 ## 5. Invariants and Safety Guarantees
 
-1. **Cancellation Guarantee**: A market can only transition from `Open` to `Cancelled` if **zero bets** have been accepted (`total_pool == 0`). Once a user places a bet, cancellation is permanently blocked to protect participant funds.
+1. **Cancellation Guarantee**: Creator-initiated `cancel_pool` can only transition an `Open` market to `Cancelled` if **zero bets** have been accepted (`total_pool == 0`). A separate permissionless `refund_expired_pool` path moves an unsettled single-asset market to `Cancelled` after expiry plus the grace period so bettor refunds can be swept in batches.
 2. **Circuit Breaker vs. Manual Freeze**:
    - An automatic cooling freeze writes a `PoolCoolingUntil` entry and auto-thaws when the cooling duration elapses.
    - A manual administrative freeze via `freeze_pool` writes no cooling deadline and **must** be lifted by the Freeze Admin via `unfreeze_pool`. Treasury overrides cannot bypass manual administrative freezes.

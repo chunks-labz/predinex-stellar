@@ -43,6 +43,11 @@ through API handlers, queued/background work, and each settlement step.
    log emitted during that cycle inherits the correlation ID.
 4. **Downstream calls**: Use `injectTraceHeaders()` / `injectWorkerTraceHeaders()`
    when calling other services so correlation propagates end-to-end.
+5. **Indexer jobs**: `api/src/services/position-indexer.ts` reuses an active
+   request/job context or generates one when invoked independently. A batch
+   shares its ID across event processing and the batch summary; reorg work is
+   correlated the same way. Events log success or failure as JSON with their
+   stable event ID and ledger sequence.
 
 ## Error responses
 

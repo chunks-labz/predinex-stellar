@@ -88,6 +88,10 @@ export interface BotConfig {
   // Notifications
   webhookUrl: string | null;
   webhookSecret: string | null;
+  /** Optional friendly label for webhook delivery alerts. */
+  webhookConsumerName?: string;
+  webhookFailureThreshold?: number;
+  webhookFailureWindowMs?: number;
   /** Timeout in milliseconds for a single webhook delivery attempt. */
   webhookTimeoutMs: number;
 
@@ -289,6 +293,18 @@ export function loadConfig(): BotConfig {
   if (webhookSecret !== null && webhookSecret.length < 16) {
     errors.push(`WEBHOOK_SECRET must be at least 16 characters long`);
   }
+  const webhookConsumerName = optionalEnv("WEBHOOK_CONSUMER_NAME", "");
+  const webhookFailureThreshold = parsePositiveInt(
+    optionalEnv("WEBHOOK_FAILURE_ALERT_THRESHOLD", "5"),
+    "WEBHOOK_FAILURE_ALERT_THRESHOLD",
+    errors,
+  );
+  const webhookFailureWindowSeconds = parsePositiveInt(
+    optionalEnv("WEBHOOK_FAILURE_WINDOW_SECONDS", "900"),
+    "WEBHOOK_FAILURE_WINDOW_SECONDS",
+    errors,
+  );
+  const webhookFailureWindowMs = webhookFailureWindowSeconds * 1000;
   const webhookTimeoutMs = parsePositiveInt(optionalEnv("WEBHOOK_TIMEOUT_MS", "10000"), "WEBHOOK_TIMEOUT_MS", errors);
   const logLevel = parseLogLevel(optionalEnv("LOG_LEVEL", "info"));
 
@@ -348,10 +364,12 @@ export function loadConfig(): BotConfig {
     retryBaseDelayMs,
     webhookUrl,
     webhookSecret,
+    ...(webhookConsumerName ? { webhookConsumerName } : {}),
+    webhookFailureThreshold,
+    webhookFailureWindowMs,
     webhookTimeoutMs,
     logLevel,
     healthCheckEnabled,
     healthCheckPort,
   };
 }
-
