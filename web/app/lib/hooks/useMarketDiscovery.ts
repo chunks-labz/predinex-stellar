@@ -34,6 +34,7 @@ interface UseMarketDiscoveryState {
   pagination: PaginationState;
   setSearch: (search: string) => void;
   setStatusFilter: (status: MarketFilters['status']) => void;
+  setResolutionFilter: (resolution: MarketFilters['resolution']) => void;
   setAssetFilter: (asset: string) => void;
   setMinVolume: (minVolume: string) => void;
   setMaxVolume: (maxVolume: string) => void;
@@ -191,6 +192,10 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     updateFilters({ status: value });
   }, [updateFilters]);
 
+  const setResolutionFilter = useCallback((value: MarketFilters['resolution']) => {
+    updateFilters({ resolution: value });
+  }, [updateFilters]);
+
   const setAssetFilter = useCallback((value: string) => {
     updateFilters({ asset: value });
   }, [updateFilters]);
@@ -246,6 +251,7 @@ export function useMarketDiscovery(options: UseMarketDiscoveryOptions = {}): Use
     pagination,
     setSearch,
     setStatusFilter,
+    setResolutionFilter,
     setAssetFilter,
     setMinVolume,
     setMaxVolume,

@@ -106,7 +106,7 @@ fn market_creation_and_settlement_emit_structured_lifecycle_events() {
     assert_eq!(settlement_name, Symbol::new(&env, "market_lifecycle"));
     assert_eq!(settlement_action, Symbol::new(&env, "settled"));
     let settlement_payload = lifecycle_payload(&env, settlement);
-    assert_eq!(settlement_payload.previous_status, Some(PoolStatus::Open));
+    assert_eq!(settlement_payload.previous_status, Some(0));
     assert_eq!(settlement_payload.current_status, PoolStatus::Settled(0));
     assert_eq!(settlement_payload.actor, Some(creator));
 }
